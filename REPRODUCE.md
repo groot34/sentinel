@@ -7,7 +7,7 @@ This guide provides step-by-step instructions to reproduce the baseline and adva
 ## Prerequisites
 - Python 3.11+
 - Virtual environment (`venv` or `conda`)
-- API key for configured LLM provider (OpenAI, Anthropic, Gemini, or local/LiteLLM endpoint)
+- Free **Groq API Key** (Set as `GROQ_API_KEY` in `.env`)
 
 ## Setup
 ```bash
@@ -23,8 +23,9 @@ pip install -r requirements.txt
 
 # 4. Configure environment
 cp .env.example .env
-# Edit .env with your LLM configuration
+# Edit .env and set your GROQ_API_KEY
 ```
+
 
 ## Running Baseline
 ```bash
