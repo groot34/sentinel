@@ -1,0 +1,24 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "root_cause_guess": "Database connection pool exhaustion caused by N+1 SQL queries inside order serializer loop",
+  "reasoning": "The recent git commit c84a1f modified order_serializer.py to query the shipping address for each item individually inside a for-loop. When bulk order requests (GET /api/v1/orders/bulk) arrived, each request fired hundreds of sequential SQL queries, consuming all 20 connection pool slots and driving Postgres CPU to 99%.",
+  "confidence": 0.85,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "service/order_serializer.py:L14-L16",
+      "excerpt": "for item in order.items:\n    address = db_session.query_address_by_id(item.shipping_address_id)"
+    },
+    {
+      "source": "logs",
+      "reference": "logs/application.log:2026-08-28T14:10:30Z",
+      "excerpt": "ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer"
+    },
+    {
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:2026-08-28T14:10:00Z",
+      "excerpt": "db_queries_per_req: 250.0, active_db_connections: 20, db_cpu_percent: 96.4"
+    }
+  ],
+  "suggested_mitigation": "Refactor OrderSerializer to batch-fetch all required shipping addresses in a single SQL query."
+}

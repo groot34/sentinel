@@ -25,7 +25,30 @@
       "type": "number",
       "minimum": 0.0,
       "maximum": 1.0,
-      "description": "Subjective confidence score reported by LLM."
+      "description": "Subjective confidence score reported by LLM (0.0 - 1.0)."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "List of evidence excerpts referenced by the baseline model.",
+      "items": {
+        "type": "object",
+        "required": ["source", "reference", "excerpt"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Source category (e.g., logs, metrics, code, git_diff)."
+          },
+          "reference": {
+            "type": "string",
+            "description": "Specific line number, timestamp, metric name, or file path."
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "Exact text or value cited as evidence."
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "suggested_mitigation": {
       "type": "string",
@@ -34,3 +57,4 @@
   },
   "additionalProperties": false
 }
+

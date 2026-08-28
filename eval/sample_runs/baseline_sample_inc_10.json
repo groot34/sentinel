@@ -1,0 +1,24 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "root_cause_guess": "Kubernetes pod readiness failure and connection pool exhaustion under high client retry volume",
+  "reasoning": "Application logs indicate that Kubernetes terminated the ledger service pods following multiple readiness probe failures after client applications initiated aggressive retries against the balance check endpoint. The database connection pool was saturated at 15/15 active connections.",
+  "confidence": 0.70,
+  "evidence": [
+    {
+      "source": "logs",
+      "reference": "logs/application.log:2026-08-28T14:06:30Z",
+      "excerpt": "FATAL [k8s] Readiness probe failed 3 consecutive times. Kubernetes killing pod ledger-service-67b8d-x9q42"
+    },
+    {
+      "source": "logs",
+      "reference": "logs/application.log:2026-08-28T14:05:00Z",
+      "excerpt": "WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry"
+    },
+    {
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:2026-08-28T14:06:00Z",
+      "excerpt": "client_retries_sec: 95.0, active_db_conns: 15, pod_readiness_failures: 3"
+    }
+  ],
+  "suggested_mitigation": "Increase Kubernetes readiness probe timeout, expand database connection pool size, and add backoff jitter to client retries."
+}

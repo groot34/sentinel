@@ -28,10 +28,22 @@ cp .env.example .env
 
 
 ## Running Baseline
+
+### Run Single Incident Diagnosis
+```bash
+# Diagnose a single incident bundle with the baseline investigator
+python -m baseline.baseline_agent incidents/inc_01_n_plus_one_query
+
+# Optional: Save JSON diagnosis to output file
+python -m baseline.baseline_agent incidents/inc_01_n_plus_one_query --output eval/sample_runs/baseline_sample_inc_01.json
+```
+
+### Run Baseline Across All Incidents
 ```bash
 # Run the single-call baseline across all incident bundles
 python eval/run_eval.py --mode baseline
 ```
+
 
 ## Running Advanced Sentinel
 ```bash

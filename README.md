@@ -53,12 +53,13 @@ Orchestrator
 ```
 
 ## 6. Evaluation
-Sentinel is evaluated against a fair baseline across synthetic production incident scenarios:
-- **Baseline**: Single LLM prompt receiving incident context to produce a one-shot root cause guess without verification tools.
-- **Sentinel (Advanced)**: Full multi-stage evidence gathering, hypothesis generation, executable verification, and human-in-the-loop fix proposal.
+Sentinel is evaluated against a fair baseline across 10 canonical synthetic production incident scenarios:
+- **Baseline**: Single LLM prompt receiving raw incident context to produce a one-shot root cause guess without verification tools. (*Status: **IMPLEMENTED*** — `baseline/baseline_agent.py`).
+- **Sentinel (Advanced)**: Full multi-stage evidence gathering, hypothesis generation, executable verification, and human-in-the-loop fix proposal. (*Status: In Progress*).
 - **Metrics**: Root cause accuracy, hallucination rate, evidence citation validity, and precision of proposed fixes.
 
-*(Evaluation results and benchmark tables will be documented upon execution of the test suite).*
+*(Evaluation results and benchmark tables will be documented upon execution of the full comparative evaluation suite).*
+
 
 ## 7. Hot Take
 > *Plausibility is the enemy of reliability.* Most AI incident response tools are dangerous because they sound authoritative even when they are dead wrong. Incident investigation is an empirical science: if a hypothesis cannot be verified against concrete evidence, it has no business being in a root-cause report.

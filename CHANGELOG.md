@@ -1,8 +1,25 @@
 # Changelog
- 
+
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.3.0] - 2026-08-29
+
+
+### Added
+- **Single-Shot Groq Baseline Investigator (`baseline/baseline_agent.py`)**:
+  - Implemented unverified single-shot baseline incident investigator using centralized `core.llm.GroqLLMClient`.
+  - Ingests application logs, metrics CSV, git diff patch, and service source code while strictly isolating `ground_truth.md`.
+  - Executes exactly ONE primary Groq LLM completion call per diagnosis with zero verification subroutines.
+  - Formats output conforming strictly to `schemas/baseline_schema.json` with root-cause guess, reasoning, confidence, and evidence citations.
+  - Added CLI interface supporting `--output` and incident directory arguments.
+- **Baseline Unit Test Suite (`tests/test_baseline.py`)**:
+  - 7 unit tests verifying schema conformance, incident ID mapping, strict ground truth exclusion, single LLM call enforcement, malformed JSON recovery, API error propagation, and verification of zero direct `groq` SDK imports in baseline code.
+- **Sample Run Outputs**:
+  - Added `eval/sample_runs/baseline_sample_inc_01.json` (Order API N+1 Query diagnosis).
+  - Added `eval/sample_runs/baseline_sample_inc_10.json` (Multi-Symptom Cascade diagnosis demonstrating baseline distraction by downstream pod crashes).
+
 ## [0.2.0] - 2026-08-29
+
 
 
 ### Added
