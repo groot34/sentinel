@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  reporting-service:
+    build: .
+    ports:
+      - "8086:8086"
+    environment:
+      - DB_POOL_SIZE=10

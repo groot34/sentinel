@@ -1,0 +1,8 @@
+2026-08-28T14:00:00Z INFO [event-consumer] Kafka consumer group 'order-analytics' assigned 4 partitions
+2026-08-28T14:02:00Z INFO [event-consumer] Processed 1200 msgs/sec, consumer lag = 42 msgs
+2026-08-28T14:05:00Z INFO [event-consumer] Deploy commit 7e8b1a: Added synchronous partner webhook dispatch to event handler
+2026-08-28T14:05:12Z WARN [event-consumer] [kafka-cluster] Broker 2 logged partition balance advisory message - distractor
+2026-08-28T14:06:00Z WARN [event-consumer] Event processing time per record increased from 0.8ms to 240.0ms (webhook HTTP latency)
+2026-08-28T14:07:30Z ERROR [event-consumer] Consumer lag on topic 'orders.created' crossed critical alert threshold: 45,000 messages
+2026-08-28T14:09:00Z ERROR [event-consumer] [kafka] max.poll.interval.ms (300000ms) exceeded by worker-2 due to blocking partner HTTP calls
+2026-08-28T14:09:15Z ERROR [event-consumer] Consumer rebalance storm triggered: worker-2 kicked from consumer group

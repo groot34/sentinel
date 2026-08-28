@@ -1,0 +1,12 @@
+2026-08-28T14:00:00Z INFO [ledger-service] Starting Ledger Service on port 8090. Database connection pool=15
+2026-08-28T14:02:00Z INFO [ledger-service] Ledger balance query latency: 3.2ms. Error rate: 0.0%
+2026-08-28T14:04:00Z INFO [ledger-service] Deploy commit f0e1d2: Applied migration 012_drop_legacy_ledger_index.sql and updated client retry logic
+2026-08-28T14:04:15Z WARN [ledger-service] [k8s-autoscaler] Worker node 4 reported transient disk pressure event - distractor
+2026-08-28T14:04:45Z WARN [ledger-service] [db] Query 'SELECT * FROM ledger_entries WHERE account_id = ? ORDER BY entry_date DESC' query time jumped to 1850ms (Seq Scan on 5M rows)
+2026-08-28T14:05:00Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 1
+2026-08-28T14:05:01Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 2
+2026-08-28T14:05:30Z ERROR [ledger-service] [db-pool] Connection pool saturated: 15/15 connections held by long-running sequential scans
+2026-08-28T14:06:00Z ERROR [ledger-service] GET /api/v1/health 500 INTERNAL_SERVER_ERROR - Healthcheck failed to acquire DB connection within 500ms
+2026-08-28T14:06:15Z ERROR [ledger-service] GET /api/v1/accounts/10293/balance 504 GATEWAY_TIMEOUT
+2026-08-28T14:06:30Z FATAL [k8s] Readiness probe failed 3 consecutive times. Kubernetes killing pod ledger-service-67b8d-x9q42
+2026-08-28T14:07:00Z ERROR [ingress] 502 BAD_GATEWAY: No live upstream backend pods available for ledger-service

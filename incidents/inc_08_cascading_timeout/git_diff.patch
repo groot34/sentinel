@@ -1,0 +1,9 @@
+diff --git a/service/tax_client.py b/service/tax_client.py
+index 3c4d5e6..7f8a9b0 100644
+--- a/service/tax_client.py
++++ b/service/tax_client.py
+@@ -5,4 +5,4 @@ class TaxClient:
+-    # Circuit breaker enabled, fast timeout
+-    TIMEOUT_SECONDS = 2.0
++    # Raised timeout, circuit breaker disabled
++    TIMEOUT_SECONDS = 60.0

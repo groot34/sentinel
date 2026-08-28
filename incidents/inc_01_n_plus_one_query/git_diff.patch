@@ -1,0 +1,17 @@
+diff --git a/service/order_serializer.py b/service/order_serializer.py
+index a1b2c3d..e4f5g6h 100644
+--- a/service/order_serializer.py
++++ b/service/order_serializer.py
+@@ -10,8 +10,12 @@ class OrderSerializer:
+     def serialize(self, order, db_session):
+         data = {
+             "id": order.id,
+             "total": order.total,
+-            "item_count": len(order.items)
++            "item_count": len(order.items),
++            "items": []
+         }
++        for item in order.items:
++            address = db_session.query_address_by_id(item.shipping_address_id)
++            data["items"].append({"item_id": item.id, "shipping_to": address.city if address else None})
+         return data

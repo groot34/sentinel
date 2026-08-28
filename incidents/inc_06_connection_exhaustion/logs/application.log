@@ -1,0 +1,8 @@
+2026-08-28T14:00:00Z INFO [reporting-service] Reporting engine active with DB pool size=10
+2026-08-28T14:02:00Z INFO [reporting-service] Handled standard report generation: duration=45ms
+2026-08-28T14:04:00Z INFO [reporting-service] Deploy commit 6c7d8e: Added date-formatting parser for custom CSV exports
+2026-08-28T14:04:12Z INFO [reporting-service] [db-maintenance] Postgres autovacuum started on analytics table - distractor
+2026-08-28T14:05:00Z WARN [reporting-service] Invalid date filter provided by user 109: '2026-99-99' -> raising ValueError
+2026-08-28T14:05:01Z WARN [reporting-service] Invalid date filter provided by user 110: 'INVALID_DATE' -> raising ValueError
+2026-08-28T14:06:00Z ERROR [reporting-service] Active pool connections: 10/10. Available: 0.
+2026-08-28T14:06:30Z ERROR [reporting-service] GET /api/v1/reports 500 INTERNAL_SERVER_ERROR - TimeoutError: QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00

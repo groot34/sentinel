@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  checkout-service:
+    build: .
+    ports:
+      - "8088:8088"
+    environment:
+      - TAX_SERVICE_TIMEOUT=60

@@ -1,0 +1,9 @@
+diff --git a/migrations/012_drop_legacy_ledger_index.sql b/migrations/012_drop_legacy_ledger_index.sql
+index 7a8b9c0..1d2e3f4 100644
+--- a/migrations/012_drop_legacy_ledger_index.sql
++++ b/migrations/012_drop_legacy_ledger_index.sql
+@@ -1,2 +1,2 @@
+--- Drop assumed redundant compound index on ledger
+-DROP INDEX IF EXISTS idx_ledger_account_entry_date;
++-- Dropped index on ledger_entries table
++DROP INDEX IF EXISTS idx_ledger_account_entry_date;

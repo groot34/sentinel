@@ -1,0 +1,8 @@
+2026-08-28T14:00:00Z INFO [inventory-service] Inventory service initialized. SKU 'LIMITED-EDITION-JACKET' initial stock = 10
+2026-08-28T14:02:00Z INFO [inventory-service] Flash sale initiated
+2026-08-28T14:02:01Z WARN [inventory-service] [redis-replica] Replication ping delay 12ms observed - distractor
+2026-08-28T14:02:02Z INFO [inventory-service] [worker-1] Checked stock for SKU-901: current=10. Approving reservation for user 401.
+2026-08-28T14:02:02Z INFO [inventory-service] [worker-2] Checked stock for SKU-901: current=10. Approving reservation for user 402.
+2026-08-28T14:02:02Z INFO [inventory-service] [worker-3] Checked stock for SKU-901: current=10. Approving reservation for user 403.
+2026-08-28T14:02:05Z ERROR [inventory-service] [audit] Inventory reconciliation mismatch: Total reservations = 18, Initial Stock = 10, Negative Stock = -8!
+2026-08-28T14:02:06Z ERROR [inventory-service] Overselling invariant breached for item SKU-901

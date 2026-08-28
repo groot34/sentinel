@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  catalog-service:
+    build: .
+    ports:
+      - "8082:8082"
+    environment:
+      - REDIS_HOST=redis
+      - CACHE_TTL_SECONDS=5
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

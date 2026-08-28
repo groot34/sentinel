@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  ledger-service:
+    build: .
+    ports:
+      - "8090:8090"
+    environment:
+      - DB_POOL_SIZE=15
+    depends_on:
+      - postgres
+  postgres:
+    image: postgres:15-alpine

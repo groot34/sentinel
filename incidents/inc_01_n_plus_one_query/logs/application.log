@@ -1,0 +1,12 @@
+2026-08-28T14:00:00Z INFO [order-service] [main] Application initialized on port 8081. Connection pool size: 20
+2026-08-28T14:02:15Z INFO [order-service] [http-worker-1] GET /health 200 OK - 2ms
+2026-08-28T14:05:00Z INFO [order-service] [deploy] Deployed commit c84a1f: Refactored order detail serializer to include shipping metadata.
+2026-08-28T14:06:10Z INFO [order-service] [http-worker-2] GET /api/v1/orders/1001 200 OK - 8ms (queries: 1)
+2026-08-28T14:07:30Z INFO [order-service] [http-worker-3] GET /api/v1/orders/bulk?page=1 200 OK - 145ms (queries: 51)
+2026-08-28T14:08:45Z WARN [order-service] [http-worker-1] GET /api/v1/orders/bulk?page=2 200 OK - 890ms (queries: 250)
+2026-08-28T14:09:12Z WARN [order-service] [db-pool] Query pool latency exceeding threshold: 450ms avg wait
+2026-08-28T14:10:05Z ERROR [order-service] [http-worker-4] GET /api/v1/orders/bulk?page=3 504 GATEWAY_TIMEOUT - 10002ms (queries executed: 184 before timeout)
+2026-08-28T14:10:30Z ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer
+2026-08-28T14:11:00Z WARN [order-service] [network-monitor] TCP retransmissions observed on replica bond0 (packet_loss=0.01%) - distractor
+2026-08-28T14:12:15Z ERROR [order-service] [http-worker-2] GET /api/v1/orders/1002 500 INTERNAL_SERVER_ERROR - TimeoutAcquiringConnection: pool empty
+2026-08-28T14:15:00Z ERROR [order-service] [http-worker-1] Healthcheck degraded: DB query queue depth = 142

@@ -1,0 +1,15 @@
+diff --git a/service/inventory_manager.py b/service/inventory_manager.py
+index f1e2d3c..4b5a6c7 100644
+--- a/service/inventory_manager.py
++++ b/service/inventory_manager.py
+@@ -10,5 +10,6 @@ class InventoryManager:
+     def deduct_stock(self, sku: str, quantity: int) -> bool:
+-        # Atomic database decrement with guard
+-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty
+-        return self.db.atomic_decrement(sku, quantity)
++        # In-memory check-then-act without lock
++        current = self.get_stock(sku)
++        if current >= quantity:
++            self.set_stock(sku, current - quantity)
++            return True
++        return False

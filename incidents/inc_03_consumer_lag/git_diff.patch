@@ -1,0 +1,10 @@
+diff --git a/service/event_handler.py b/service/event_handler.py
+index c5d6e7f..a8b9c0d 100644
+--- a/service/event_handler.py
++++ b/service/event_handler.py
+@@ -12,4 +12,7 @@ class OrderEventHandler:
+     def handle_record(self, event):
+         self.store_analytics(event)
++        # Synchronously notify external partner webhook
++        partner_resp = self.http_client.post("https://partner-gateway.internal/events", json=event.payload, timeout=10.0)
++        return partner_resp.status_code

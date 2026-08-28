@@ -1,0 +1,9 @@
+diff --git a/service/payment_client.py b/service/payment_client.py
+index 2b3c4d5..6e7f8a9 100644
+--- a/service/payment_client.py
++++ b/service/payment_client.py
+@@ -5,4 +5,4 @@ class PaymentClient:
+-    MAX_RETRIES = 2
+-    BACKOFF_BASE_SECONDS = 0.5
++    MAX_RETRIES = 10
++    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter

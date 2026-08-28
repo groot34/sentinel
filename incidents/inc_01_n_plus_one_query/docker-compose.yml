@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  order-service:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_POOL_SIZE=20
+      - DB_HOST=postgres
+    depends_on:
+      - postgres
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=orders
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=synthetic_dev_secret

@@ -1,0 +1,9 @@
+diff --git a/service/catalog_cache.py b/service/catalog_cache.py
+index b3c4d5e..f6g7h8i 100644
+--- a/service/catalog_cache.py
++++ b/service/catalog_cache.py
+@@ -5,3 +5,3 @@ class CatalogCacheManager:
+-    # 1 hour cache with 10% jitter to prevent stampedes
+-    DEFAULT_TTL_SECONDS = 3600
++    # Shortened TTL for faster price sync
++    DEFAULT_TTL_SECONDS = 5

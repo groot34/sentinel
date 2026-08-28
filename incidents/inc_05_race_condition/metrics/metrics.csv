@@ -1,0 +1,6 @@
+timestamp,concurrent_checkout_threads,inventory_remaining,oversold_units_total,reconciliation_errors
+2026-08-28T14:00:00Z,1,10,0,0
+2026-08-28T14:01:00Z,2,10,0,0
+2026-08-28T14:02:00Z,25,8,0,0
+2026-08-28T14:02:05Z,50,-8,8,1
+2026-08-28T14:03:00Z,10,-8,8,1

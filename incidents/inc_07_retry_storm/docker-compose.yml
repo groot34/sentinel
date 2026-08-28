@@ -1,0 +1,7 @@
+version: '3.8'
+services:
+  payment-client:
+    build: .
+    environment:
+      - MAX_RETRIES=10
+      - BACKOFF_SECONDS=0.0

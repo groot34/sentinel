@@ -1,0 +1,14 @@
+diff --git a/service/report_generator.py b/service/report_generator.py
+index 1a2b3c4..5d6e7f8 100644
+--- a/service/report_generator.py
++++ b/service/report_generator.py
+@@ -10,6 +10,10 @@ class ReportGenerator:
+     def generate_report(self, date_filter: str):
+         conn = self.pool.acquire()
+         rows = conn.query("SELECT * FROM metrics")
++        # Date parser can raise ValueError before conn.release()
++        if not date_filter.startswith("2026-"):
++            raise ValueError(f"Unsupported date format: {date_filter}")
+         formatted = self.format_rows(rows, date_filter)
+         conn.release()
+         return formatted

@@ -1,0 +1,9 @@
+2026-08-28T14:00:00Z INFO [upload-service] Started upload-service worker PID=1842
+2026-08-28T14:02:00Z INFO [upload-service] Processed 100 uploads. Resident memory: 84MB
+2026-08-28T14:05:00Z INFO [upload-service] Deploy commit 3a9c4e: Added in-memory request payload tracing for audit compliance
+2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor
+2026-08-28T14:07:00Z INFO [upload-service] Uploaded document doc_491.pdf (size: 14MB). Memory: 320MB
+2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)
+2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident
+2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child
+2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)

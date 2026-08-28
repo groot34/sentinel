@@ -1,0 +1,8 @@
+2026-08-28T14:00:00Z INFO [checkout-service] Checkout engine listening on port 8088. Worker threads=30
+2026-08-28T14:02:00Z INFO [checkout-service] Average checkout response time: 65ms
+2026-08-28T14:04:00Z INFO [checkout-service] Deploy commit 9a0b1c: Integrated external tax calculation provider with 60s default timeout
+2026-08-28T14:04:25Z INFO [checkout-service] [tls] Ingress TLS cert check completed (valid for 89 days) - distractor
+2026-08-28T14:05:00Z WARN [checkout-service] External tax service latency degraded to 25,000ms
+2026-08-28T14:06:00Z WARN [checkout-service] Worker thread pool saturation: 30/30 threads blocked waiting on tax service response
+2026-08-28T14:06:30Z ERROR [checkout-service] Upstream API gateway returned 504 GATEWAY_TIMEOUT on /api/v1/checkout
+2026-08-28T14:07:00Z ERROR [checkout-service] Thread starvation: Incoming checkout requests rejected with 503 Server Busy

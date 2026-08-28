@@ -1,0 +1,10 @@
+2026-08-28T14:00:00Z INFO [payment-client] Payment gateway adapter ready. Target: https://api.payments.internal
+2026-08-28T14:02:00Z INFO [payment-client] Processed 50 charge requests, error rate 0.0%
+2026-08-28T14:04:00Z INFO [payment-client] Deploy commit 8f9a0b: Updated payment client with aggressive retry policy (retries=10, backoff=0s)
+2026-08-28T14:04:30Z INFO [payment-client] [dns] Primary DNS resolution renewed for payments.internal - distractor
+2026-08-28T14:05:00Z WARN [payment-client] Downstream gateway returned single transient 503 SERVICE_UNAVAILABLE
+2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 1/10 for charge_id=ch_991...
+2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 2/10 for charge_id=ch_991...
+2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 3/10 for charge_id=ch_991...
+2026-08-28T14:05:05Z ERROR [payment-client] Outbound request rate amplified 10x (from 50 req/s to 500 req/s)
+2026-08-28T14:05:30Z ERROR [payment-client] Downstream payment gateway collapsed under retry stampede (HTTP 429 & 503 cascade)
