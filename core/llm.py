@@ -118,6 +118,7 @@ class GroqLLMClient:
         else:
             self.model = os.getenv("GROQ_MODEL") or self.DEFAULT_MODEL
         self.timeout = timeout
+        self._last_response: Optional[LLMResponse] = None
         self.max_retries = max(0, max_retries)
 
         # Allow dependency injection of a mocked/pre-configured client instance for unit testing
@@ -267,7 +268,7 @@ class GroqLLMClient:
                     completion_tokens = getattr(chat_completion.usage, "completion_tokens", None)
                     total_tokens = getattr(chat_completion.usage, "total_tokens", None)
 
-                return LLMResponse(
+                resp = LLMResponse(
                     content=content,
                     model=self.model,
                     latency_ms=latency_ms,
@@ -276,6 +277,8 @@ class GroqLLMClient:
                     total_tokens=total_tokens,
                     finish_reason=finish_reason,
                 )
+                self._last_response = resp
+                return resp
 
             except Exception as e:
                 last_exception = e

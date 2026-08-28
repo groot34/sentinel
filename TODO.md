@@ -8,20 +8,16 @@
 
 ## Completed Milestones
 - [x] **Milestone 1: Repository Skeleton & Schema Contracts** (2026-08-28)
-  - Initialized project structure, Makefile, `.gitignore`, `.env.example`, `requirements.txt`.
-  - Defined strict JSON schemas (`baseline_schema.json`, `evidence_schema.json`, `hypothesis_schema.json`, `verification_schema.json`, `orchestrator_schema.json`, `report_schema.json`).
-  - Added schema validation test suite (`tests/test_schemas.py`).
 - [x] **Milestone 2: Synthetic Incident Dataset (10 Canonical Incidents)** (2026-08-28)
-  - Created 10 realistic, internally consistent incident bundles under `incidents/`.
-  - Implemented incident validation test suite (`tests/validate_incidents.py` - 51 checks passing).
 - [x] **Milestone 3: Centralized Groq Runtime LLM Client** (2026-08-29)
-  - Implemented `core/llm.py` with `GroqLLMClient`, structured JSON generation, rate-limit retries, latency/token telemetry, and secret scrubbing.
-  - Added unit test suite (`tests/test_llm.py` - 10 tests passing).
 - [x] **Milestone 4: Single-Shot Baseline Investigator** (2026-08-29)
-  - Implemented `baseline/baseline_agent.py` using centralized `core.llm`.
-  - Added unit test suite (`tests/test_baseline.py` - 7 tests passing).
-  - Validated ground truth isolation and schema conformance.
-  - Generated sample runs for Incident 01 and Incident 10.
+- [x] **Milestone 5: Baseline Evaluation Harness** (2026-08-29)
+  - Deterministic correctness evaluator (`eval/evaluator.py`).
+  - Full evaluation runner with resume + rate-limit support (`eval/run_eval.py`).
+  - 14 unit tests passing in `tests/test_eval.py`.
+  - **PENDING**: Real 10-incident Groq run — requires `GROQ_API_KEY` in `.env`.
+    Run: `python -m eval.run_eval --mode baseline --sleep 3`
+
 
 ---
 

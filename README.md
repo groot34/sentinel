@@ -53,12 +53,20 @@ Orchestrator
 ```
 
 ## 6. Evaluation
-Sentinel is evaluated against a fair baseline across 10 canonical synthetic production incident scenarios:
-- **Baseline**: Single LLM prompt receiving raw incident context to produce a one-shot root cause guess without verification tools. (*Status: **IMPLEMENTED*** — `baseline/baseline_agent.py`).
-- **Sentinel (Advanced)**: Full multi-stage evidence gathering, hypothesis generation, executable verification, and human-in-the-loop fix proposal. (*Status: In Progress*).
-- **Metrics**: Root cause accuracy, hallucination rate, evidence citation validity, and precision of proposed fixes.
 
-*(Evaluation results and benchmark tables will be documented upon execution of the full comparative evaluation suite).*
+Sentinel is evaluated against a fair baseline across 10 canonical synthetic production incident scenarios.
+
+| Component | Status | Notes |
+|---|---|---|
+| Baseline Investigator | **IMPLEMENTED** | `baseline/baseline_agent.py` — single-shot Groq LLM call |
+| Evaluation Harness | **IMPLEMENTED** | `eval/run_eval.py` — resume-safe, rate-limit-aware |
+| Baseline Benchmark Run | **PENDING** — add `GROQ_API_KEY` to `.env` then run `python -m eval.run_eval --mode baseline --sleep 3` | Results auto-save to `eval/results_baseline.csv` |
+| Sentinel (Advanced) | In Progress | Multi-agent evidence gathering + verification |
+
+**Fairness lock**: Baseline and Sentinel will be evaluated on the same 10 incidents with the same model (`llama-3.3-70b-versatile`, Groq free tier) and equivalent available evidence.
+
+*(Benchmark accuracy table will be populated once the baseline run completes.)*
+
 
 
 ## 7. Hot Take

@@ -2,7 +2,37 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.4.0] - 2026-08-29
+
+### Added
+- **Baseline Evaluation Harness (`eval/run_eval.py`)**:
+  - Full evaluation runner with per-incident resume support, rate-limit awareness, and configurable `--sleep` between calls.
+  - CLI flags: `--incident`, `--start`, `--end`, `--sleep`, `--no-resume`, `--mode baseline`.
+  - Ground-truth isolation enforced: baseline produces output before evaluator reads `ground_truth.md`.
+  - Per-incident raw outputs saved to `eval/results/baseline/<incident_id>.json` (no ground truth embedded).
+  - Aggregate results saved to `eval/results_baseline.csv` with `incident_id`, `baseline_status`, `baseline_root_cause`, `ground_truth_root_cause`, `correctness`, `latency_seconds`, `input_tokens`, `output_tokens`, `model`, `error`.
+  - Summary saved to `eval/baseline_summary.json` with accuracy, token usage, and fairness lock fields.
+- **Deterministic Correctness Evaluator (`eval/evaluator.py`)**:
+  - Canonical per-incident keyword criteria for all 10 incidents (no LLM judge).
+  - Three-tier verdict: `CORRECT` / `INCORRECT` / `REVIEW`.
+  - Hard-case check for inc_10: blaming only downstream symptoms without index mention is strictly `INCORRECT`.
+  - `extract_ground_truth_root_cause()` reads `ground_truth.md` only after baseline output is committed.
+- **Evaluation Test Suite (`tests/test_eval.py`)**:
+  - 14 unit tests: incident discovery, ground-truth isolation, correctness evaluator semantics, API failure handling, rate-limit capture, resume detection, CSV/JSON output correctness, no advanced agents invoked, no incident data modification.
+- **`core/llm.py` minor patch**: `_last_response` attribute caches last `LLMResponse` on `GroqLLMClient` for token telemetry extraction by evaluation harness (non-breaking).
+
+### Status
+- Evaluation harness: **COMPLETE** — all 42 tests pass.
+- Real 10-incident Groq run: **PENDING** — requires `GROQ_API_KEY` in `.env`. Run with:
+  ```
+  python -m eval.run_eval --mode baseline --sleep 3
+  ```
+  Results will auto-save to `eval/results_baseline.csv` and `eval/baseline_summary.json`.
+  The harness resumes automatically on rate-limit interruption.
+- Model locked for fairness: `llama-3.3-70b-versatile` (Groq free tier).
+
 ## [0.3.0] - 2026-08-29
+
 
 
 ### Added
