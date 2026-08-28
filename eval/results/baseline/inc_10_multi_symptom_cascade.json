@@ -1,0 +1,28 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "baseline_root_cause": "Dropping the idx_ledger_account_entry_date index caused ledger balance queries to fall back to full table scans, saturating the DB connection pool and triggering cascading timeouts and pod failures",
+  "reasoning": "The deployment at 14:04 applied migration 012_drop_legacy_ledger_index.sql which removed the idx_ledger_account_entry_date index. Immediately after, the log at 14:04:45 shows the SELECT on ledger_entries jumping to 1850\u202fms with a Seq Scan on 5\u202fM rows. Metrics confirm the query duration spiking from ~4\u202fms to 1850\u202fms and client retries exploding, filling all 15 DB connections by 14:05:30. With the pool exhausted, health checks and API calls timed out (500/504 errors) and the readiness probe failed, leading Kubernetes to kill the pod and the ingress to return 502. Thus the single change (index drop) directly caused the performance degradation and the observed outage cascade.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "line 5-6",
+      "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:04:45Z",
+      "excerpt": "WARN [ledger-service] [db] Query 'SELECT * FROM ledger_entries WHERE account_id = ? ORDER BY entry_date DESC' query time jumped to 1850ms (Seq Scan on 5M rows)"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:04:50Z row",
+      "excerpt": "2026-08-28T14:04:50Z,1850.0,12.0,8,0,2.0"
+    }
+  ],
+  "suggested_mitigation": "",
+  "latency_seconds": 17.219,
+  "input_tokens": 2108,
+  "output_tokens": 584,
+  "model": "openai/gpt-oss-120b"
+}

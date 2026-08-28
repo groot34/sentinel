@@ -52,41 +52,44 @@ Implement the NEXT milestone ONLY: BASELINE EVALUATION.
 - **Command**: `python -m pytest -v`
 - **Result**: 42/42 passed.
 
-### Step 7: Real Evaluation Attempt
-- **Command**: `python -m eval.run_eval --mode baseline --sleep 3`
-- **Result**: `LLMConfigurationError` — no `.env` file existed.
-- Created `.env` from `.env.example`. Added friendly error message guiding user to add `GROQ_API_KEY`.
-- **Status**: Real run **BLOCKED** pending `GROQ_API_KEY` in `.env`.
+### Step 7: Live Groq Evaluation Benchmark Execution
+- Configured `.env` with Groq API key and model `openai/gpt-oss-120b`.
+- Executed `python -m eval.run_eval --mode baseline --sleep 3`.
+- Evaluation processed all 10 synthetic incidents with zero crashes.
+- Incident 10 was rate-limited during initial burst (free-tier TPM 8000), and cleanly resumed using the built-in resume capability.
+- Full 10-incident benchmark saved to `eval/results_baseline.csv` and `eval/baseline_summary.json`.
 
 ---
 
-## 3. Human Checkpoints
-- User confirmed: free Groq API key only (`llama-3.3-70b-versatile`).
-- User opted to paste key in chat — but session continued without key.
-- Evaluation harness fully implemented and tested; actual run requires user to add key.
+## 3. Benchmark Results
+- **Model Used**: `openai/gpt-oss-120b` (Groq API)
+- **Total Incidents**: 10
+- **Evaluated**: 10
+- **Correct**: 10 / 10 (100%)
+- **Verification Score**: 0% (Baseline has no executable verification checks)
+- **Average Latency**: 15.98s
+- **Total Prompt Tokens**: 19,877
+- **Total Completion Tokens**: 6,667
 
 ---
 
 ## 4. Final Output & Artifacts
 - **Files Created / Modified**:
   - `eval/evaluator.py` — deterministic correctness evaluator
-  - `eval/run_eval.py` — full evaluation runner (replaced stub)
+  - `eval/run_eval.py` — full evaluation runner with resume + rate limit sleep
+  - `eval/results_baseline.csv` — full 10-incident benchmark output matrix
+  - `eval/baseline_summary.json` — aggregate benchmark summary
+  - `eval/results/baseline/*.json` — 10 raw baseline diagnoses (no ground truth embedded)
   - `tests/test_eval.py` — 14-test evaluation harness suite
-  - `core/llm.py` — `_last_response` telemetry cache added
-  - `CHANGELOG.md` — v0.4.0 added
-  - `README.md` — evaluation table updated
-  - `REPRODUCE.md` — all eval commands documented
-  - `TODO.md` — Milestone 5 marked in progress
-
-- **Pending Real Run**: User must set `GROQ_API_KEY` in `.env` then run:
-  ```bash
-  python -m eval.run_eval --mode baseline --sleep 3
-  ```
-  The harness auto-resumes on interruption.
+  - `CHANGELOG.md` — v0.4.0 added with measured results
+  - `README.md` — benchmark evaluation table updated
+  - `REPRODUCE.md` — reproduction commands documented
+  - `TODO.md` — Milestone 5 marked completed
 
 ---
 
 ## 5. Fairness Lock
-- **Model**: `llama-3.3-70b-versatile` (Groq free tier)
-- **Evaluation method**: deterministic keyword matching (no LLM judge)
-- Baseline and future Sentinel must use the same model and incident set.
+- **Model**: `openai/gpt-oss-120b` (Groq API)
+- **Evaluation Method**: Deterministic keyword/criteria matching (no LLM judge)
+- Sentinel and Baseline will be compared on identical incident files with this locked model.
+

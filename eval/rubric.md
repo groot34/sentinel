@@ -28,19 +28,28 @@ This rubric defines the scoring criteria for benchmarking the **Baseline** (sing
 
 ---
 
-## 2. Benchmark Summary Table Template
+## 2. Benchmark Summary Table
 
 | Incident ID | Incident Category | Baseline Diagnosis | Baseline Accuracy | Sentinel Diagnosis | Sentinel Status | Sentinel Evidence Count | Sentinel Accuracy | Verification Pass |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|
-| INC-001 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-002 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-003 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-004 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-005 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-006 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-007 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-008 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-009 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
-| INC-010 | *TBD* | *Pending* | - | *Pending* | - | - | - | - |
+|:---|:---|:---|:---:|:---|:---:|:---:|:---:|:---:|
+| `inc_01_n_plus_one_query` | Database / ORM | N+1 Address Query Loop in Serializer | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_02_cache_stampede` | Caching / Redis | 5s TTL Cache Stampede / Thundering Herd | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_03_consumer_lag` | Streaming / Kafka | Synchronous Webhook in Message Consumer | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_04_memory_leak` | Memory / Heap | Unbounded Global Audit Trace Registry | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_05_race_condition` | Concurrency | Check-Then-Act Non-Atomic Stock Decrement | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_06_connection_exhaustion` | DB Connection Pool | Unclosed Connection on ValueError | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_07_retry_storm` | Network / Resiliency | Zero-Backoff Immediate 10x Retry Storm | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_08_cascading_timeout` | Cascading Failure | 60s Timeout with Disabled Circuit Breaker | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_09_dropped_index` | Database / Indexing | Dropped Compound Index `idx_tenant_status_name` | **CORRECT** | *Pending* | - | - | - | - |
+| `inc_10_multi_symptom_cascade` | Complex Multi-Symptom | Dropped Composite Index `idx_ledger_account_entry_date` | **CORRECT** | *Pending* | - | - | - | - |
 
-*(Note: Official evaluation results will be populated upon execution of synthetic test bundles).*
+### Baseline Summary Metrics
+- **Model Used**: `openai/gpt-oss-120b` (Groq API, free tier)
+- **Total Incidents**: 10
+- **Evaluated**: 10
+- **Baseline Accuracy**: 10/10 (100% on root cause guess)
+- **Verification Score**: 0% (Baseline performs zero executable verification)
+- **Average Latency**: 15.98s
+- **Total Input Tokens**: 19,877
+- **Total Output Tokens**: 6,667
+

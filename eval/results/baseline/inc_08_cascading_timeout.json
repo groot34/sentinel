@@ -1,0 +1,33 @@
+{
+  "incident_id": "inc_08_cascading_timeout",
+  "baseline_root_cause": "Increasing the tax client timeout to 60\u202fseconds and disabling its circuit\u2011breaker caused checkout workers to block on a suddenly slow external tax service, exhausting the thread pool and cascading into 504/503 errors",
+  "reasoning": "The recent git diff raised TaxClient.TIMEOUT_SECONDS from 2\u202fs to 60\u202fs and removed the circuit\u2011breaker. Shortly after deployment (14:04), logs show the external tax service latency spiking to ~25\u202fs (14:05) and metrics confirm latency jumping from ~50\u202fms to >25\u202f000\u202fms while blocked_worker_threads rose to the pool limit of 30 (14:06). With the longer timeout, requests no longer fail fast; instead they wait, filling all worker threads. This thread starvation leads to upstream gateway 504 responses (14:06:30) and finally 503 rejections (14:07). The chain of events directly links the timeout change to the outage.",
+  "confidence": 0.93,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "service/tax_client.py:5-6",
+      "excerpt": "-    TIMEOUT_SECONDS = 2.0\n+    TIMEOUT_SECONDS = 60.0"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:05:00Z",
+      "excerpt": "WARN [checkout-service] External tax service latency degraded to 25,000ms"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:06:00Z",
+      "excerpt": "WARN [checkout-service] Worker thread pool saturation: 30/30 threads blocked waiting on tax service response"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:06:00Z",
+      "excerpt": "external_tax_latency_ms=28000.0,blocked_worker_threads=30,p95_checkout_latency_ms=30000.0,gateway_504_pct=65.0"
+    }
+  ],
+  "suggested_mitigation": "Re\u2011enable the circuit\u2011breaker or set a sensible timeout (e.g., 2\u20115\u202fs) for the tax client, and add fallback logic so that slow tax service responses do not block all checkout workers.",
+  "latency_seconds": 6.812,
+  "input_tokens": 1713,
+  "output_tokens": 661,
+  "model": "openai/gpt-oss-120b"
+}

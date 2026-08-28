@@ -1,0 +1,38 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "baseline_root_cause": "A race condition introduced by replacing the atomic database decrement with an unsynchronized in\u2011memory check\u2011then\u2011act in InventoryManager.deduct_stock, allowing concurrent workers to oversell stock",
+  "reasoning": "The recent git diff replaces the atomic DB operation with a simple get_stock()/set_stock() sequence that lacks any locking. At 14:02:02 the logs show three workers (worker\u20111,2,3) each reading the same stock value (10) and all approving a reservation. Because the reads happen concurrently before any write, each worker thinks enough stock exists and deducts it, driving the in\u2011memory stock negative. Metrics confirm the problem: as concurrent_checkout_threads spikes to 25 then 50, inventory_remaining drops from 10 to -8 and oversold_units_total rises to 8, with a reconciliation error flag. The combination of the code change and the observed concurrent activity explains the overselling invariant breach reported at 14:02:06.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "inventory_manager.py:line+10-15",
+      "excerpt": "# In-memory check-then-act without lock\ncurrent = self.get_stock(sku)\nif current >= quantity:\n    self.set_stock(sku, current - quantity)\n    return True"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:02:02Z",
+      "excerpt": "[worker-1] Checked stock for SKU-901: current=10. Approving reservation for user 401."
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:02:02Z",
+      "excerpt": "[worker-2] Checked stock for SKU-901: current=10. Approving reservation for user 402."
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:02:02Z",
+      "excerpt": "[worker-3] Checked stock for SKU-901: current=10. Approving reservation for user 403."
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:02:05Z",
+      "excerpt": "inventory_remaining=-8, oversold_units_total=8, reconciliation_errors=1"
+    }
+  ],
+  "suggested_mitigation": "Reintroduce an atomic, thread\u2011safe stock decrement (e.g., database UPDATE with WHERE stock>=qty or a mutex around the in\u2011memory check\u2011then\u2011act) and add unit tests that simulate concurrent reservations to prevent future race conditions.",
+  "latency_seconds": 12.969,
+  "input_tokens": 1686,
+  "output_tokens": 661,
+  "model": "openai/gpt-oss-120b"
+}

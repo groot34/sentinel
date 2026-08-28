@@ -186,11 +186,18 @@ Analyze the provided incident evidence below (logs, metrics, recent code changes
         normalized = self._normalize_and_validate(result, evidence["incident_id"])
         return normalized
 
-    def _normalize_and_validate(self, data: Dict[str, Any], expected_id: str) -> Dict[str, Any]:
+    def _normalize_and_validate(self, data: Any, expected_id: str) -> Dict[str, Any]:
         """Normalize field aliases and validate against baseline JSON schema."""
+        if isinstance(data, list):
+            # If LLM returned a list, pick the first dict item or create empty dict
+            data = data[0] if data and isinstance(data[0], dict) else {}
+        elif not isinstance(data, dict):
+            data = {}
+
         # Handle field alias root_cause -> root_cause_guess
         if "root_cause" in data and "root_cause_guess" not in data:
             data["root_cause_guess"] = data.pop("root_cause")
+
 
         # Guarantee matching incident ID
         data["incident_id"] = expected_id

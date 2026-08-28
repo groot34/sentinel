@@ -11,12 +11,14 @@
 - [x] **Milestone 2: Synthetic Incident Dataset (10 Canonical Incidents)** (2026-08-28)
 - [x] **Milestone 3: Centralized Groq Runtime LLM Client** (2026-08-29)
 - [x] **Milestone 4: Single-Shot Baseline Investigator** (2026-08-29)
-- [x] **Milestone 5: Baseline Evaluation Harness** (2026-08-29)
-  - Deterministic correctness evaluator (`eval/evaluator.py`).
-  - Full evaluation runner with resume + rate-limit support (`eval/run_eval.py`).
+- [x] **Milestone 5: Baseline Evaluation Benchmark** (2026-08-29)
+  - Implemented deterministic correctness evaluator (`eval/evaluator.py`).
+  - Implemented full evaluation runner with resume + rate-limit support (`eval/run_eval.py`).
   - 14 unit tests passing in `tests/test_eval.py`.
-  - **PENDING**: Real 10-incident Groq run — requires `GROQ_API_KEY` in `.env`.
-    Run: `python -m eval.run_eval --mode baseline --sleep 3`
+  - Executed benchmark on Groq (`openai/gpt-oss-120b`) across all 10 synthetic incidents.
+  - Measured 10/10 root-cause accuracy, 0% verification score, 15.98s average latency.
+  - Saved outputs to `eval/results_baseline.csv` and `eval/baseline_summary.json`.
+
 
 
 ---

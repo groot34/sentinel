@@ -1,0 +1,38 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "baseline_root_cause": "The recent change that reduced the catalog cache TTL from 1 hour to 5 seconds caused massive cache stampedes, overwhelming the database and resulting in 503 errors",
+  "reasoning": "1. The git diff shows DEFAULT_TTL_SECONDS was changed from 3600 to 5 seconds (git_diff.patch). 2. The service code mirrors this short TTL (service\\app.py line defining DEFAULT_TTL_SECONDS = 5). 3. After deployment at 14:04, logs record a key expiration and a \"Simultaneous cache miss\" warning with 32 concurrent requests (14:04:16). 4. Metrics immediately show cache hit ratio collapsing from ~98% to 64% within minutes (14:04:30) and DB read QPS spiking from ~14 to 340, then to >1000 (14:05\u201114:06). 5. The DB connection pool spikes and latency rises, leading to DB lock timeouts and HTTP 503 responses (14:05:00). The short TTL forces many requests to miss the cache at the same time, creating a stampede that exhausts DB resources, which matches the observed symptoms.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "line 5-7",
+      "excerpt": "-    # 1 hour cache with 10% jitter to prevent stampedes\n-    DEFAULT_TTL_SECONDS = 3600\n+    # Shortened TTL for faster price sync\n+    DEFAULT_TTL_SECONDS = 5"
+    },
+    {
+      "source": "code",
+      "reference": "service\\app.py:7",
+      "excerpt": "DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:04:16Z",
+      "excerpt": "WARN [catalog-service] [worker-4] Simultaneous cache miss on key 'category:electronics:page1': 32 concurrent requests querying Postgres DB"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:04:30Z",
+      "excerpt": "cache_hit_ratio_pct=64.2,db_read_qps=340.0,error_rate_pct=1.2"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:05:00Z",
+      "excerpt": "cache_hit_ratio_pct=18.4,db_read_qps=980.0,error_rate_pct=14.2"
+    }
+  ],
+  "suggested_mitigation": "Revert the cache TTL to a longer value (e.g., 1 hour) or at least several minutes, add random jitter, and implement request coalescing or a lock\u2011step cache\u2011fill mechanism to prevent stampedes. Deploy the change and monitor cache hit ratio and DB QPS for stability.",
+  "latency_seconds": 4.313,
+  "input_tokens": 2008,
+  "output_tokens": 788,
+  "model": "openai/gpt-oss-120b"
+}

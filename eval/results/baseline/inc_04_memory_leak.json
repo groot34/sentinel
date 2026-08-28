@@ -1,0 +1,33 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "baseline_root_cause": "The recent change introduced a global in\u2011memory audit trace registry that stores the raw uploaded file bytes for each request and never clears it, causing unbounded memory growth leading to OOM.",
+  "reasoning": "1. The git diff adds an AUDIT_TRACE_REGISTRY dict and stores the full file_bytes for every upload (git_diff: line '+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes'). 2. Service source code confirms the registry is a class\u2011level dict that is never cleared during normal operation (code: 'AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}' and 'self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes'). 3. After the deployment at 14:05, logs show a rapid rise in resident memory from ~84\u202fMB to 320\u202fMB after a 14\u202fMB upload and then to 850\u202fMB within minutes (logs timestamps 14:07, 14:09). 4. Metrics mirror this pattern, with memory_rss_mb jumping from 88\u202fMB at 14:05 to 340\u202fMB at 14:07 and 850\u202fMB at 14:09, while garbage_collection_time_ms also spikes, indicating the GC struggling with many objects. 5. No code path clears the registry, so each upload accumulates its payload in memory until the container hits its 1\u202fGB limit and is OOM\u2011killed at 14:11. Hence the root cause is the memory\u2011leaking audit registry introduced by the change.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "line +3",
+      "excerpt": "+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes"
+    },
+    {
+      "source": "code",
+      "reference": "service/app.py:6-9",
+      "excerpt": "AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:07:00Z",
+      "excerpt": "INFO [upload-service] Uploaded document doc_491.pdf (size: 14MB). Memory: 320MB"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:09:00Z",
+      "excerpt": "850.2,14,180.2,0"
+    }
+  ],
+  "suggested_mitigation": "Remove the raw payload storage from the global AUDIT_TRACE_REGISTRY or store only metadata (e.g., hashes) and ensure any retained data is bounded/evicted; alternatively, implement a size\u2011limited LRU cache or persist audit traces to external storage.",
+  "latency_seconds": 17.609,
+  "input_tokens": 1712,
+  "output_tokens": 695,
+  "model": "openai/gpt-oss-120b"
+}

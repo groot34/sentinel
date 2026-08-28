@@ -1,0 +1,38 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "baseline_root_cause": "The recent change introduced a synchronous HTTP POST to an external partner webhook inside the Kafka consumer\u2019s record handler, blocking the poll loop and causing processing latency that exceeded max.poll.interval.ms, which triggered consumer lag and a rebalance storm.",
+  "reasoning": "1. The git diff adds a synchronous post call in OrderEventHandler.handle_record (lines added at +12). 2. After the deploy (14:05), logs record a jump in per\u2011record processing time from 0.8\u202fms to ~240\u202fms (14:06 WARN). 3. Metrics show partner_webhook_latency_ms rising to ~240\u202fms and msg_process_time_ms climbing from 1.2\u202fms to >250\u202fms, while consumed_records_sec drops sharply. 4. The increased latency pushes the consumer\u2019s poll interval beyond the configured max.poll.interval.ms (300\u202fs), which logs a timeout at 14:09:00 and forces a rebalance, causing the consumer lag to explode to 45\u202fk+ messages. 5. The lag continues to grow, confirming the poll loop is blocked by the synchronous HTTP call.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "event_handler.py:+12-14",
+      "excerpt": "+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\\n+        return partner_resp.status_code"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:06:00Z",
+      "excerpt": "WARN [event-consumer] Event processing time per record increased from 0.8ms to 240.0ms (webhook HTTP latency)"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:09:00Z",
+      "excerpt": "ERROR [event-consumer] [kafka] max.poll.interval.ms (300000ms) exceeded by worker-2 due to blocking partner HTTP calls"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:06:00Z row",
+      "excerpt": "timestamp=2026-08-28T14:06:00Z, consumer_lag_records=4500, msg_process_time_ms=242.0, partner_webhook_latency_ms=240.0"
+    },
+    {
+      "source": "code",
+      "reference": "service/app.py:handle_record",
+      "excerpt": "if not is_async:\\n    resp = self.http_client.post(\"https://partner-gateway.internal/events\", json_data=event, timeout=10.0)\\n    return resp.status_code"
+    }
+  ],
+  "suggested_mitigation": "Make the partner webhook call asynchronous (e.g., fire\u2011and\u2011forget or queue to a background worker) or move it outside the consumer poll loop, and add a circuit breaker/timeout handling to prevent blocking the Kafka consumer.",
+  "latency_seconds": 16.171,
+  "input_tokens": 1968,
+  "output_tokens": 703,
+  "model": "openai/gpt-oss-120b"
+}

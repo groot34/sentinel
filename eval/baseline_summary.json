@@ -1,0 +1,17 @@
+{
+  "model_used": "openai/gpt-oss-120b",
+  "total_incidents": 10,
+  "evaluated": 10,
+  "correct": 10,
+  "incorrect": 0,
+  "review": 0,
+  "failures": 0,
+  "accuracy": 1.0,
+  "accuracy_note": "correct / (correct + incorrect + review)",
+  "average_latency_seconds": 15.984,
+  "total_input_tokens": 19877,
+  "total_output_tokens": 6667,
+  "cost": "unavailable \u2014 free Groq tier does not report billing cost",
+  "evaluation_method": "deterministic keyword matching against canonical incident criteria",
+  "fairness_lock": "Baseline and Sentinel must use the same model for comparison."
+}

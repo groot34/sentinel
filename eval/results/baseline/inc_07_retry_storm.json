@@ -1,0 +1,33 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "baseline_root_cause": "Aggressive retry configuration (MAX_RETRIES increased to 10 and BACKOFF_BASE_SECONDS set to 0) caused an immediate retry storm that saturated the downstream payment gateway",
+  "reasoning": "The git diff shows the retry limits were raised from 2 to 10 and backoff was removed (BACKOFF_BASE_SECONDS changed from 0.5 to 0.0). Shortly after the deployment (14:04), logs record a transient 503 followed by a series of immediate retries (14:05:01 WARN Immediate retry 1/10 \u2026 3/10). The same minute the outbound request rate jumps from ~50\u202freq/s to ~500\u202freq/s (log at 14:05:05 and metrics at 14:05:00). This flood triggers high 503/429 percentages in the metrics (12%/15% at 14:05, rising to >70% later) and the gateway collapses (log at 14:05:30). The code\u2019s execute_charge loop will retry up to MAX_RETRIES without delay, confirming the storm is a direct result of the configuration change.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "line 3-4",
+      "excerpt": "-    MAX_RETRIES = 2\n-    BACKOFF_BASE_SECONDS = 0.5\n+    MAX_RETRIES = 10\n+    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:05:01Z",
+      "excerpt": "WARN [payment-client] Immediate retry 1/10 for charge_id=ch_991..."
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:05:05Z",
+      "excerpt": "ERROR [payment-client] Outbound request rate amplified 10x (from 50 req/s to 500 req/s)"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:05:00Z",
+      "excerpt": "ingress_charge_reqs_sec=50.0,outbound_gateway_calls_sec=510.0,gateway_503_pct=12.0,gateway_429_pct=15.0"
+    }
+  ],
+  "suggested_mitigation": "Revert to a conservative retry policy (e.g., MAX_RETRIES \u2264 3) and introduce exponential backoff with jitter; add circuit\u2011breaker limits to cap outbound calls per second during downstream failures.",
+  "latency_seconds": 15.063,
+  "input_tokens": 2589,
+  "output_tokens": 656,
+  "model": "openai/gpt-oss-120b"
+}

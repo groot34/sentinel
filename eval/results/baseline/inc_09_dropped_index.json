@@ -1,0 +1,33 @@
+{
+  "incident_id": "inc_09_dropped_index",
+  "baseline_root_cause": "The recent migration dropped the compound index idx_tenant_status_name, causing queries to fall back to full table scans and saturating I/O, which led to the latency spike.",
+  "reasoning": "1. The git diff shows the index creation line was removed (\"--- Note: Compound index idx_tenant_status_name was not recreated on partitions\"). 2. After the deployment at 14:04, logs at 14:05 report a changed execution plan: a sequential scan on the items table. 3. Metrics immediately after show db_seq_scans_per_sec jumping from 0 to 120 and disk read throughput soaring, while search latency p95 rises from ~5\u202fms to >2400\u202fms. 4. The service code\u2019s MockDatabase simulates missing indexes by incrementing a table_scan_count when the index is absent, confirming that lack of the index forces scans. 5. The combination of missing index \u2192 sequential scans \u2192 I/O saturation explains the observed latency degradation.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "lines 6-7",
+      "excerpt": "--- Note: Compound index idx_tenant_status_name was not recreated on partitions"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:05:00Z",
+      "excerpt": "WARN [search-service] [db] Query execution plan changed: Seq Scan on items (cost=0.00..45210.00 rows=500000)"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:06:00Z",
+      "excerpt": "p95_search_latency_ms=2400.0, db_seq_scans_per_sec=120.0, db_disk_read_mb_sec=280.0"
+    },
+    {
+      "source": "code",
+      "reference": "service/app.py:MockDatabase.search_items",
+      "excerpt": "if \"idx_tenant_status\" in self.indexes:\n    return [{\"id\": 1, \"name\": \"Item A\"}]\nself.table_scan_count += 1"
+    }
+  ],
+  "suggested_mitigation": "Recreate the missing compound index on the partitioned items tables (or adjust the migration to copy the index to each partition) and backfill it; then monitor query plans to ensure index usage returns.",
+  "latency_seconds": 14.703,
+  "input_tokens": 1766,
+  "output_tokens": 824,
+  "model": "openai/gpt-oss-120b"
+}

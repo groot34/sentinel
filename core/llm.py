@@ -100,9 +100,10 @@ def _sanitize_message(message: str, secret: Optional[str] = None) -> str:
 class GroqLLMClient:
     """Unified Groq client for all Sentinel incident investigation agents."""
 
-    DEFAULT_MODEL = "llama-3.3-70b-versatile"
+    DEFAULT_MODEL = "openai/gpt-oss-120b"
     DEFAULT_TIMEOUT_SECONDS = 30.0
     DEFAULT_MAX_RETRIES = 2
+
 
     def __init__(
         self,

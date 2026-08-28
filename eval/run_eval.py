@@ -140,17 +140,17 @@ def run_single_incident(
     except LLMRateLimitError as e:
         result["baseline_status"] = "RATE_LIMITED"
         result["error"] = str(e)[:300]
-        print(f"  ⚠  Rate limited on {incident_id}: {e}")
+        print(f"  [!] Rate limited on {incident_id}: {e}")
         return result
     except LLMError as e:
         result["baseline_status"] = "LLM_ERROR"
         result["error"] = str(e)[:300]
-        print(f"  ✗  LLM error on {incident_id}: {e}")
+        print(f"  [X] LLM error on {incident_id}: {e}")
         return result
     except Exception as e:
         result["baseline_status"] = "ERROR"
         result["error"] = traceback.format_exc()[:500]
-        print(f"  ✗  Unexpected error on {incident_id}: {e}")
+        print(f"  [X] Unexpected error on {incident_id}: {e}")
         return result
 
     # ── Step 2: Read ground truth (ONLY after baseline has produced its answer) ──
@@ -309,7 +309,7 @@ def run_baseline_eval(
                     "error": "",
                 }
                 all_records.append(record)
-                print(f"  ↩  Resumed from cached result: {correctness}")
+                print(f"  [RESUMED] from cached result: {correctness}")
                 continue
             except Exception:
                 pass  # Fall through to re-run
@@ -317,11 +317,11 @@ def run_baseline_eval(
         record = run_single_incident(inc_dir, agent, evaluator, RESULTS_DIR)
         all_records.append(record)
 
-        status_icon = {"SUCCESS": "✓", "RATE_LIMITED": "⚠", "LLM_ERROR": "✗", "ERROR": "✗"}.get(
-            record["baseline_status"], "?"
+        status_icon = {"SUCCESS": "[OK]", "RATE_LIMITED": "[WARN]", "LLM_ERROR": "[FAIL]", "ERROR": "[FAIL]"}.get(
+            record["baseline_status"], "[?]"
         )
         print(
-            f"  {status_icon}  {record['baseline_status']} | "
+            f"  {status_icon} {record['baseline_status']} | "
             f"Correctness: {record.get('correctness', 'N/A')} | "
             f"Latency: {record.get('latency_seconds', 0):.1f}s"
         )
@@ -331,7 +331,7 @@ def run_baseline_eval(
 
         # Sleep between calls to respect free Groq rate limits
         if i < len(to_run) - 1 and record["baseline_status"] == "SUCCESS":
-            print(f"  … sleeping {sleep_seconds}s")
+            print(f"  ... sleeping {sleep_seconds}s")
             time.sleep(sleep_seconds)
 
     # Final summary
@@ -348,12 +348,12 @@ def run_baseline_eval(
 
     print(f"\n{'='*60}")
     print("BASELINE EVALUATION COMPLETE")
-    print(f"  Model : {model_used}")
-    print(f"  Total : {len(all_records)}")
-    print(f"  ✓ Correct  : {correct}")
-    print(f"  ✗ Incorrect: {incorrect}")
-    print(f"  ? Review   : {review}")
-    print(f"  ⚠ Failures : {failures}")
+    print(f"  Model      : {model_used}")
+    print(f"  Total      : {len(all_records)}")
+    print(f"  Correct    : {correct}")
+    print(f"  Incorrect  : {incorrect}")
+    print(f"  Review     : {review}")
+    print(f"  Failures   : {failures}")
     print(f"  Accuracy   : {accuracy}")
     print(f"  Results    : {RESULTS_CSV}")
     print(f"  Summary    : {SUMMARY_JSON}")

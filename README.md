@@ -56,16 +56,15 @@ Orchestrator
 
 Sentinel is evaluated against a fair baseline across 10 canonical synthetic production incident scenarios.
 
-| Component | Status | Notes |
-|---|---|---|
-| Baseline Investigator | **IMPLEMENTED** | `baseline/baseline_agent.py` — single-shot Groq LLM call |
-| Evaluation Harness | **IMPLEMENTED** | `eval/run_eval.py` — resume-safe, rate-limit-aware |
-| Baseline Benchmark Run | **PENDING** — add `GROQ_API_KEY` to `.env` then run `python -m eval.run_eval --mode baseline --sleep 3` | Results auto-save to `eval/results_baseline.csv` |
-| Sentinel (Advanced) | In Progress | Multi-agent evidence gathering + verification |
+| Component | Status | Accuracy (Root Cause) | Verification Score | Mean Latency | Notes |
+|---|---|:---:|:---:|:---:|---|
+| **Baseline Investigator** | **MEASURED** | **10/10 (100%)** | **0%** | **15.98s** | Single-shot Groq model (`openai/gpt-oss-120b`). Guesses root cause without executable verification. |
+| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. |
 
-**Fairness lock**: Baseline and Sentinel will be evaluated on the same 10 incidents with the same model (`llama-3.3-70b-versatile`, Groq free tier) and equivalent available evidence.
+**Fairness lock**: Baseline and Sentinel are benchmarked on the identical 10 incident bundles using the same Groq model (`openai/gpt-oss-120b`), temperature (`0.0`), and equivalent available evidence.
 
-*(Benchmark accuracy table will be populated once the baseline run completes.)*
+Benchmark results are stored in `eval/results_baseline.csv` and `eval/baseline_summary.json`.
+
 
 
 

@@ -1,0 +1,38 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "baseline_root_cause": "The recent date\u2011filter validation raises a ValueError before the DB connection is released, leaking connections and exhausting the pool",
+  "reasoning": "A code change (git diff) inserted a ValueError raise before conn.release(). When users supply an invalid date (e.g., '2026-99-99' or 'INVALID_DATE'), the exception aborts the function without releasing the acquired connection. Each failed request leaves one connection active. Logs at 14:05 show warnings about invalid dates followed by an error at 14:06 reporting 10/10 active connections. Metrics confirm active connections climbing from 2 to 10 as invalid requests increase, and pool_timeout_errors appear after exhaustion. The test case explicitly checks that pool.active remains 1 after a ValueError, confirming the leak. Thus the leak caused the connection pool exhaustion observed.",
+  "confidence": 0.96,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "line 12-14",
+      "excerpt": "# Date parser can raise ValueError before conn.release()\nif not date_filter.startswith(\"2026-\"):\n    raise ValueError(f\"Unsupported date format: {date_filter}\")"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:05:00Z",
+      "excerpt": "WARN [reporting-service] Invalid date filter provided by user 109: '2026-99-99' -> raising ValueError"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:06:00Z",
+      "excerpt": "ERROR [reporting-service] Active pool connections: 10/10. Available: 0."
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:05:30Z",
+      "excerpt": "2026-08-28T14:05:30Z,10,0,8,0"
+    },
+    {
+      "source": "code",
+      "reference": "service\\app.py: generate_report",
+      "excerpt": "if not date_filter.startswith(\"2026-\"):\n    raise ValueError(f\"Unsupported date format: {date_filter}\")\\nconn.release()"
+    }
+  ],
+  "suggested_mitigation": "Move the connection release into a finally block or use a context manager so the pool is always released, and add validation before acquiring the connection or ensure the exception handling releases the connection.",
+  "latency_seconds": 16.328,
+  "input_tokens": 1820,
+  "output_tokens": 614,
+  "model": "openai/gpt-oss-120b"
+}

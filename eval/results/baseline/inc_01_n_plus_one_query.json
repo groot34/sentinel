@@ -1,0 +1,28 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "baseline_root_cause": "The recent change to OrderSerializer introduced an N+1 database query by fetching the shipping address for each item individually, exhausting the DB connection pool and causing latency spikes and timeouts.",
+  "reasoning": "1. The git diff adds a loop that calls db_session.query_address_by_id for every order item (git_diff.patch line 12\u201114). 2. After deployment (14:05), bulk order requests show a dramatic increase in query count per request (metrics row 14:09 shows db_queries_per_req=120, 14:10 shows 250). 3. Corresponding latency jumps from ~145\u202fms to >4\u202fs and DB pool latency exceeds thresholds (logs 14:09:12 WARN and 14:10:30 ERROR \"Pool exhausted: 20/20 active connections held by bulk order serializer\"). 4. Subsequent requests fail with connection\u2011acquisition errors (14:12:15 ERROR TimeoutAcquiringConnection). The pattern matches classic N+1 behavior where each item triggers an extra query, quickly saturating the 20\u2011connection pool.",
+  "confidence": 0.95,
+  "evidence": [
+    {
+      "source": "git_diff",
+      "reference": "lines 12-14",
+      "excerpt": "for item in order.items:\n    address = db_session.query_address_by_id(item.shipping_address_id)\n    data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})"
+    },
+    {
+      "source": "logs",
+      "reference": "2026-08-28T14:10:30Z",
+      "excerpt": "ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer"
+    },
+    {
+      "source": "metrics",
+      "reference": "2026-08-28T14:10:00Z row",
+      "excerpt": "latency_p95_ms=4200.0,db_queries_per_req=250.0,active_db_connections=20"
+    }
+  ],
+  "suggested_mitigation": "Refactor OrderSerializer to batch\u2011load shipping addresses (e.g., db_session.query_addresses_batch) and attach them to items, eliminating the per\u2011item query; also add a test asserting query_count stays low to catch future N+1 regressions.",
+  "latency_seconds": 2.953,
+  "input_tokens": 2507,
+  "output_tokens": 625,
+  "model": "openai/gpt-oss-120b"
+}
