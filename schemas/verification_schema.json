@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VerificationResult",
+  "type": "object",
+  "required": [
+    "verification_id",
+    "hypothesis_id",
+    "status",
+    "check_type",
+    "check_code_or_query",
+    "execution_output",
+    "verified_evidence_ids",
+    "reasoning"
+  ],
+  "properties": {
+    "verification_id": {
+      "type": "string",
+      "pattern": "^VER-[A-Z0-9_-]+$",
+      "description": "Unique verification run identifier."
+    },
+    "hypothesis_id": {
+      "type": "string",
+      "description": "The ID of the hypothesis evaluated."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["CONFIRMED", "REJECTED", "INCONCLUSIVE"],
+      "description": "Verification outcome status."
+    },
+    "check_type": {
+      "type": "string",
+      "enum": ["code_invariant", "metric_correlation", "log_sequence", "state_transition", "config_validation"],
+      "description": "Type of verification check executed."
+    },
+    "check_code_or_query": {
+      "type": "string",
+      "description": "The exact script, query, or invariant assertion used to verify."
+    },
+    "execution_output": {
+      "type": "string",
+      "description": "Raw execution stdout, test output, or query response."
+    },
+    "verified_evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of evidence IDs verified during this check."
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "Justification of why the check confirms, rejects, or leaves inconclusive the hypothesis."
+    }
+  },
+  "additionalProperties": false
+}

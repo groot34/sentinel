@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "IncidentInvestigationReport",
+  "type": "object",
+  "required": [
+    "incident_id",
+    "status",
+    "primary_root_cause",
+    "confirmed_hypothesis_id",
+    "supporting_evidence_ids",
+    "verification_summary",
+    "executive_summary",
+    "timeline",
+    "fix_proposal"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Identifier of the investigated incident."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["CONFIRMED", "INCONCLUSIVE"],
+      "description": "Report status. Must only be CONFIRMED if backed by verified hypotheses and >=2 independent evidence items."
+    },
+    "primary_root_cause": {
+      "type": "string",
+      "description": "Verified root cause explanation."
+    },
+    "confirmed_hypothesis_id": {
+      "type": "string",
+      "description": "ID of the confirmed hypothesis."
+    },
+    "supporting_evidence_ids": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "string"
+      },
+      "description": "At least two independent verified evidence items supporting the root cause."
+    },
+    "verification_summary": {
+      "type": "string",
+      "description": "Summary of programmatic verification checks and outcomes."
+    },
+    "executive_summary": {
+      "type": "string",
+      "description": "Clear, evidence-backed overview for engineering leaders and on-call."
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp", "event"],
+        "properties": {
+          "timestamp": {"type": "string"},
+          "event": {"type": "string"},
+          "evidence_id": {"type": "string"}
+        }
+      },
+      "description": "Reconstructed chronological sequence of events."
+    },
+    "fix_proposal": {
+      "type": "object",
+      "required": [
+        "human_approval_notice",
+        "description",
+        "patch_diff",
+        "regression_test",
+        "rollback_plan"
+      ],
+      "properties": {
+        "human_approval_notice": {
+          "type": "string",
+          "enum": ["AWAITING HUMAN APPROVAL — this fix has not been applied."],
+          "description": "Mandatory safety gate disclaimer."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed explanation of the proposed fix."
+        },
+        "patch_diff": {
+          "type": "string",
+          "description": "Proposed git diff / code patch."
+        },
+        "regression_test": {
+          "type": "string",
+          "description": "Automated regression test code validating the fix."
+        },
+        "rollback_plan": {
+          "type": "string",
+          "description": "Safe rollback procedure in case of regression."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

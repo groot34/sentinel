@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EvidenceItem",
+  "type": "object",
+  "required": [
+    "evidence_id",
+    "source_type",
+    "description",
+    "raw_snippet"
+  ],
+  "properties": {
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^EV-[A-Z0-9_-]+$",
+      "description": "Unique identifier for this evidence item (e.g. EV-LOG-001, EV-MET-002, EV-CODE-003)."
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["logs", "metrics", "code", "config", "deploy"],
+      "description": "Origin of the evidence item."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "Timestamp or time window associated with this evidence."
+    },
+    "description": {
+      "type": "string",
+      "description": "Concise summary of what this piece of evidence demonstrates."
+    },
+    "raw_snippet": {
+      "type": "string",
+      "description": "Raw log line, metric point, code diff, or configuration extract."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional structured context such as service name, metric key, or file path."
+    }
+  },
+  "additionalProperties": false
+}

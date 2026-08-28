@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrchestratorState",
+  "type": "object",
+  "required": [
+    "incident_id",
+    "stage",
+    "evidence_items",
+    "hypotheses",
+    "verification_results",
+    "is_complete"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Identifier of the incident under investigation."
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "INGESTION",
+        "EVIDENCE_EXTRACTION",
+        "HYPOTHESIS_GENERATION",
+        "VERIFICATION",
+        "SYNTHESIS",
+        "FIX_PROPOSAL",
+        "COMPLETED",
+        "FAILED"
+      ],
+      "description": "Current pipeline execution phase."
+    },
+    "evidence_items": {
+      "type": "array",
+      "items": {
+        "$ref": "evidence_schema.json"
+      },
+      "description": "Accumulated evidence items across logs, metrics, and code."
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "$ref": "hypothesis_schema.json"
+      },
+      "description": "Formulated hypotheses."
+    },
+    "verification_results": {
+      "type": "array",
+      "items": {
+        "$ref": "verification_schema.json"
+      },
+      "description": "Outcomes of all verification checks."
+    },
+    "final_report": {
+      "$ref": "report_schema.json"
+    },
+    "is_complete": {
+      "type": "boolean",
+      "description": "Whether investigation has concluded."
+    },
+    "error": {
+      "type": "string",
+      "description": "Error details if stage failed."
+    }
+  },
+  "additionalProperties": false
+}

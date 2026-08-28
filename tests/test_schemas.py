@@ -1,0 +1,131 @@
+"""Test suite to validate all Sentinel JSON schemas."""
+
+import json
+from pathlib import Path
+import pytest
+import jsonschema
+
+
+SCHEMAS_DIR = Path(__file__).parent.parent / "schemas"
+
+SCHEMA_FILES = [
+    "baseline_schema.json",
+    "evidence_schema.json",
+    "hypothesis_schema.json",
+    "verification_schema.json",
+    "orchestrator_schema.json",
+    "report_schema.json",
+]
+
+
+@pytest.mark.parametrize("schema_filename", SCHEMA_FILES)
+def test_schema_file_exists_and_is_valid_json(schema_filename: str) -> None:
+    schema_path = SCHEMAS_DIR / schema_filename
+    assert schema_path.exists(), f"Schema file {schema_filename} does not exist."
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema_data = json.load(f)
+    assert isinstance(schema_data, dict), f"Schema {schema_filename} is not a valid JSON object."
+    assert "$schema" in schema_data, f"Schema {schema_filename} missing '$schema' definition."
+    assert "properties" in schema_data, f"Schema {schema_filename} missing 'properties'."
+
+
+def test_baseline_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "baseline_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "incident_id": "INC-001",
+        "root_cause_guess": "Database connection pool exhausted due to leak in retry loop",
+        "reasoning": "Logs show multiple timeout errors following deployment of retry middleware.",
+        "confidence": 0.85,
+        "suggested_mitigation": "Increase pool size and rollback retry middleware",
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_evidence_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "evidence_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "evidence_id": "EV-LOG-001",
+        "source_type": "logs",
+        "timestamp": "2026-08-28T12:00:00Z",
+        "description": "500 Internal Server Error spikes in auth service",
+        "raw_snippet": "ERROR 2026-08-28T12:00:00Z [auth-svc] Connection pool timeout after 30000ms",
+        "metadata": {"service": "auth-svc", "severity": "ERROR"},
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_hypothesis_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "hypothesis_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "hypothesis_id": "HYP-001",
+        "incident_id": "INC-001",
+        "title": "Connection Leak in Auth Retry Middleware",
+        "description": "The new retry loop acquires connections without releasing them on non-retryable exceptions.",
+        "supporting_evidence_ids": ["EV-LOG-001", "EV-CODE-002"],
+        "falsification_criteria": "If active connections return to baseline after traffic surge without retry failures.",
+        "verification_plan": "Check if connection pool active count strictly monotonically increases with retry events.",
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_verification_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "verification_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "verification_id": "VER-001",
+        "hypothesis_id": "HYP-001",
+        "status": "CONFIRMED",
+        "check_type": "code_invariant",
+        "check_code_or_query": "assert unclosed_connections_count > 0",
+        "execution_output": "Check passed: 42 connections leaked across 42 retry failures.",
+        "verified_evidence_ids": ["EV-LOG-001", "EV-CODE-002"],
+        "reasoning": "Metric series confirms pool exhaustion precisely correlates with retry exception timestamps.",
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_report_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "report_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "incident_id": "INC-001",
+        "status": "CONFIRMED",
+        "primary_root_cause": "Database connection leak triggered by unhandled exception path in retry middleware.",
+        "confirmed_hypothesis_id": "HYP-001",
+        "supporting_evidence_ids": ["EV-LOG-001", "EV-CODE-002"],
+        "verification_summary": "Executable check verified 42 unreleased connections during retry failures.",
+        "executive_summary": "At 12:00 UTC, the auth service experienced degraded availability due to connection exhaustion.",
+        "timeline": [
+            {
+                "timestamp": "2026-08-28T11:58:00Z",
+                "event": "Deployment v2.4.1 completed",
+                "evidence_id": "EV-CODE-001"
+            },
+            {
+                "timestamp": "2026-08-28T12:00:00Z",
+                "event": "Connection pool timeout errors begin",
+                "evidence_id": "EV-LOG-001"
+            }
+        ],
+        "fix_proposal": {
+          "human_approval_notice": "AWAITING HUMAN APPROVAL — this fix has not been applied.",
+          "description": "Wrap database connection in a context manager / try-finally block in retry handler.",
+          "patch_diff": "--- a/auth/retry.py\n+++ b/auth/retry.py\n- conn = db.get_connection()\n+ with db.get_connection() as conn:",
+          "regression_test": "def test_retry_releases_connection_on_error(): ...",
+          "rollback_plan": "Revert commit a1b2c3d and deploy v2.4.0."
+        }
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
