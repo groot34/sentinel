@@ -1,0 +1,452 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "logs_evidence": {
+    "incident_id": "inc_04_memory_leak",
+    "agent": "logs_agent",
+    "summary": "The upload-service showed rising memory usage, reaching 85% of its container limit, then critical memory pressure and OOM kill, with corresponding warnings and fatal kernel messages.",
+    "evidence": [
+      {
+        "evidence_id": "EV-LOG-001",
+        "source": "logs",
+        "reference": "logs/application.log:9",
+        "timestamp": "2026-08-28T14:11:33Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)",
+        "interpretation": "Container termination due to OOM, confirming memory exhaustion."
+      },
+      {
+        "evidence_id": "EV-LOG-002",
+        "source": "logs",
+        "reference": "logs/application.log:8",
+        "timestamp": "2026-08-28T14:11:32Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child",
+        "interpretation": "Kernel OOM killer selected the python process, indicating system-wide memory pressure."
+      },
+      {
+        "evidence_id": "EV-LOG-003",
+        "source": "logs",
+        "reference": "logs/application.log:7",
+        "timestamp": "2026-08-28T14:11:00Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident",
+        "interpretation": "Upload-service reported critical memory usage shortly before OOM events."
+      },
+      {
+        "evidence_id": "EV-LOG-004",
+        "source": "logs",
+        "reference": "logs/application.log:6",
+        "timestamp": "2026-08-28T14:09:00Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)",
+        "interpretation": "Early warning of high memory consumption, preceding critical pressure."
+      },
+      {
+        "evidence_id": "EV-LOG-005",
+        "source": "logs",
+        "reference": "logs/application.log:4",
+        "timestamp": "2026-08-28T14:05:40Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor",
+        "interpretation": "Unrelated warning, likely not connected to memory issue."
+      }
+    ]
+  },
+  "metrics_evidence": {
+    "incident_id": "inc_04_memory_leak",
+    "agent": "metrics_agent",
+    "summary": "Observed sharp spikes in memory usage, GC time, and active uploads at 14:11\u202fZ, a single OOM kill at 14:12\u202fZ, and a strong positive correlation between memory RSS and GC time over the 14:00\u201114:12 window.",
+    "evidence": [
+      {
+        "evidence_id": "EV-MET-001",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:11:00Z",
+        "metric": "memory_rss_mb",
+        "value": 995.0,
+        "type": "spike",
+        "interpretation": "Memory RSS sharply increased to 995\u202fMB, far above the baseline of ~85\u202fMB."
+      },
+      {
+        "evidence_id": "EV-MET-002",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:11:00Z",
+        "metric": "garbage_collection_time_ms",
+        "value": 520.0,
+        "type": "spike",
+        "interpretation": "Garbage collection time jumped to 520\u202fms, orders of magnitude above the baseline of ~4.6\u202fms."
+      },
+      {
+        "evidence_id": "EV-MET-003",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:11:00Z",
+        "metric": "active_uploads",
+        "value": 15.0,
+        "type": "spike",
+        "interpretation": "Active uploads rose to 15, exceeding the typical level of ~6."
+      },
+      {
+        "evidence_id": "EV-MET-004",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 8",
+        "timestamp": "2026-08-28T14:12:00Z",
+        "metric": "oom_kills_total",
+        "value": 1.0,
+        "type": "spike",
+        "interpretation": "One OOM kill was recorded, whereas the baseline count is zero."
+      },
+      {
+        "evidence_id": "EV-MET-005",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv",
+        "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+        "metric": "memory_rss_mb~garbage_collection_time_ms",
+        "value": 0.9000525358529804,
+        "type": "correlation",
+        "interpretation": "Strong positive correlation (r\u22480.90) between memory RSS and GC time over the sampled window."
+      }
+    ]
+  },
+  "code_evidence": {
+    "incident_id": "inc_04_memory_leak",
+    "agent": "code_agent",
+    "summary": "The recent change replaces streaming text extraction with storing the raw file bytes in a globally shared mutable dictionary and returns the byte length, while a class\u2011level mutable dict is declared for audit tracing. This introduces a global collection that can grow with each upload.",
+    "evidence": [
+      {
+        "evidence_id": "EV-CODE-001",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "suspicious_pattern",
+        "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+        "interpretation": "Pattern flagged as an unbounded collection: code now adds entries to a global dict keyed by upload_id, which may grow without explicit limits."
+      },
+      {
+        "evidence_id": "EV-CODE-002",
+        "source": "code",
+        "reference": "service/app.py:5",
+        "type": "suspicious_pattern",
+        "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+        "interpretation": "Declaration of a mutable class\u2011level dictionary that is shared across the application, enabling state to persist between requests."
+      },
+      {
+        "evidence_id": "EV-CODE-003",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "added_code",
+        "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+        "interpretation": "Added code stores the incoming file bytes in the global AUDIT_TRACE_REGISTRY and returns its length, removing prior processing logic."
+      },
+      {
+        "evidence_id": "EV-CODE-004",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "removed_code",
+        "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+        "interpretation": "Removed code previously created a BytesIO stream and called _extract_text, indicating a shift away from streaming text extraction."
+      }
+    ]
+  },
+  "hypotheses": {
+    "incident_id": "inc_04_memory_leak",
+    "hypotheses": [
+      {
+        "hypothesis_id": "HYP-001",
+        "claim": "The introduction of the global mutable dictionary AUDIT_TRACE_REGISTRY that stores raw file bytes for each upload causes unbounded memory growth, leading to the OOM kill.",
+        "evidence_ids": [
+          "EV-CODE-001",
+          "EV-CODE-002",
+          "EV-CODE-003",
+          "EV-CODE-004",
+          "EV-MET-001",
+          "EV-MET-002"
+        ],
+        "supporting_reasoning": "Code changes added a class\u2011level dict (AUDIT_TRACE_REGISTRY) that retains a reference to every uploaded file's bytes and never clears entries. As uploads increase, the dict grows without bound, inflating the process RSS (EV-MET-001) and causing GC time to spike (EV-MET-002). The memory surge aligns with the OOM events recorded in the logs.",
+        "falsification_criteria": [
+          "If the size of AUDIT_TRACE_REGISTRY remains constant under a high volume of uploads, the hypothesis is disproved.",
+          "If disabling or removing the registry code does not change the memory RSS or OOM occurrence under identical load, the hypothesis is disproved."
+        ],
+        "verification_plan": [
+          "Instrument the application to log the number of entries and total byte size stored in AUDIT_TRACE_REGISTRY at regular intervals.",
+          "Deploy a test build where the registry insertion is commented out and replay the same upload workload, measuring RSS and GC time.",
+          "Compare memory and OOM metrics between the original and modified builds; a significant reduction would support the hypothesis."
+        ]
+      },
+      {
+        "hypothesis_id": "HYP-002",
+        "claim": "A sudden spike in concurrent upload requests exceeded the container's memory limit, causing system\u2011wide memory pressure and the OOM kill.",
+        "evidence_ids": [
+          "EV-MET-003",
+          "EV-LOG-004",
+          "EV-LOG-003",
+          "EV-MET-001"
+        ],
+        "supporting_reasoning": "Metrics show active uploads rose to 15 (EV-MET-003), well above the typical 6, while memory usage warnings (85% of limit) and critical alerts appear shortly before the OOM (EV-LOG-004, EV-LOG-003). The RSS jump to ~995\u202fMB (EV-MET-001) matches the container limit of 1024\u202fMB, indicating the load alone could have saturated memory.",
+        "falsification_criteria": [
+          "If request logs prove that concurrent uploads remained at baseline levels during the OOM window, the hypothesis is disproved.",
+          "If reproducing the same upload volume in a controlled test does not cause memory to approach the container limit, the hypothesis is disproved."
+        ],
+        "verification_plan": [
+          "Extract timestamps of upload requests from application logs to compute concurrent upload count during the OOM period.",
+          "Run a load test that mimics the observed peak of 15 concurrent uploads and monitor container memory usage.",
+          "Confirm whether memory consumption reaches the limit and triggers OOM under the reproduced load."
+        ]
+      },
+      {
+        "hypothesis_id": "HYP-003",
+        "claim": "Replacing streaming processing (BytesIO) with direct storage of full file bytes increased per\u2011request memory footprint, elevating GC overhead and precipitating the OOM kill.",
+        "evidence_ids": [
+          "EV-CODE-004",
+          "EV-MET-002",
+          "EV-MET-005",
+          "EV-LOG-003"
+        ],
+        "supporting_reasoning": "The removed streaming code (EV-CODE-004) eliminated the use of a temporary BytesIO buffer, causing the entire file payload to be retained in memory. This change coincides with a sharp increase in GC pause time (EV-MET-002) and a strong positive correlation between RSS and GC time (EV-MET-005). The resulting memory pressure is reflected in the critical OOM log entry (EV-LOG-003).",
+        "falsification_criteria": [
+          "If reinstating the BytesIO streaming logic does not reduce memory RSS or GC time under the same load, the hypothesis is disproved.",
+          "If profiling shows that per\u2011request memory usage is unchanged despite the code change, the hypothesis is disproved."
+        ],
+        "verification_plan": [
+          "Create a branch that restores the original streaming implementation using BytesIO as in the removed code.",
+          "Execute a load test identical to the production spike, measuring per\u2011request memory allocation and GC duration.",
+          "Compare these metrics to the current version; a measurable reduction would validate the hypothesis."
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "incident_id": "inc_04_memory_leak",
+    "results": [
+      {
+        "hypothesis_id": "HYP-001",
+        "verdict": "CONFIRMED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-001",
+              "EV-MET-002"
+            ],
+            "reference": "service\\app.py:5",
+            "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-001",
+              "EV-MET-002"
+            ],
+            "reference": "service\\app.py:5",
+            "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-001",
+              "EV-MET-002"
+            ],
+            "reference": "service\\app.py:5",
+            "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-001",
+              "EV-MET-002"
+            ],
+            "reference": "service\\app.py:5",
+            "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-001",
+              "EV-MET-002"
+            ],
+            "reference": "service\\app.py:5",
+            "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+          }
+        ],
+        "reasoning": "All required checks passed: Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.; Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.; Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly. (references: service\\app.py:5, service\\app.py:5, service\\app.py:5)",
+        "confidence": 0.95
+      },
+      {
+        "hypothesis_id": "HYP-002",
+        "verdict": "CONFIRMED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-003",
+              "EV-LOG-004",
+              "EV-LOG-003",
+              "EV-MET-001"
+            ],
+            "reference": "metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-003",
+              "EV-LOG-004",
+              "EV-LOG-003",
+              "EV-MET-001"
+            ],
+            "reference": "metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-003",
+              "EV-LOG-004",
+              "EV-LOG-003",
+              "EV-MET-001"
+            ],
+            "reference": "metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-003",
+              "EV-LOG-004",
+              "EV-LOG-003",
+              "EV-MET-001"
+            ],
+            "reference": "metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-003",
+              "EV-LOG-004",
+              "EV-LOG-003",
+              "EV-MET-001"
+            ],
+            "reference": "metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          }
+        ],
+        "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7, metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7, metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7; metrics/metrics.csv:row 7)",
+        "confidence": 0.95
+      },
+      {
+        "hypothesis_id": "HYP-003",
+        "verdict": "CONFIRMED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-005",
+              "EV-LOG-003"
+            ],
+            "reference": "git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-005",
+              "EV-LOG-003"
+            ],
+            "reference": "git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-005",
+              "EV-LOG-003"
+            ],
+            "reference": "git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-005",
+              "EV-LOG-003"
+            ],
+            "reference": "git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-005",
+              "EV-LOG-003"
+            ],
+            "reference": "git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7",
+            "detail": "4 of 4 referenced evidence items grounded."
+          }
+        ],
+        "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7, git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7, git_diff.patch:hunk 1; metrics/metrics.csv:row 7; metrics/metrics.csv; logs/application.log:7)",
+        "confidence": 0.95
+      }
+    ]
+  }
+}

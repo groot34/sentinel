@@ -115,6 +115,41 @@ Results are written to:
 - `eval/results_baseline.csv` — full results with correctness verdicts
 - `eval/baseline_summary.json` — accuracy, token usage, and model lock
 
+## Running the Hypothesis Engine (requires Groq)
+```bash
+# Generate hypotheses from pre-extracted evidence bundles
+python agents/hypothesis_engine.py \
+  --incident-id inc_01_n_plus_one_query \
+  --logs eval/sample_runs/logs_agent_inc_01.json \
+  --metrics eval/sample_runs/metrics_agent_inc_01.json \
+  --code eval/sample_runs/code_agent_inc_01.json \
+  --out eval/sample_runs/hypothesis_inc_01.json
+```
+
+Rules: one Groq call only; 1–4 hypotheses; every evidence_id must be present in inputs.
+
+## Running the Verification Agent (No Groq)
+```bash
+# Verify hypotheses against the incident bundle using deterministic read-only checks
+python agents/verification_agent.py \
+  incidents/inc_10_multi_symptom_cascade \
+  --hypotheses eval/sample_runs/hypothesis_inc_10.json \
+  --logs eval/sample_runs/logs_agent_inc_10.json \
+  --metrics eval/sample_runs/metrics_agent_inc_10.json \
+  --code eval/sample_runs/code_agent_inc_10.json \
+  --out eval/sample_runs/hypothesis_verification_inc_10.json
+```
+
+Verification is pure Python: AST scanning, log/metric CSV parsing, git-diff line counting, and referenced-excerpt grounding. No mutations, no shell execution, no LLM. Each hypothesis verdict is strictly computed from check PASS/FAIL counts.
+
+## Running the Full Hypothesis + Verification Chain (Incidents 01/04/07/10)
+```bash
+# Produces hypothesis_*.json and hypothesis_verification_*.json under eval/sample_runs/.
+# Reuses existing evidence samples when present; generates missing logs/metrics samples first.
+# Requires GROQ_API_KEY only when evidence samples or hypotheses need generation.
+python run_hypothesis_verification.py
+```
+
 ## Running Advanced Sentinel (Not Yet Implemented)
 ```bash
 python -m eval.run_eval --mode advanced

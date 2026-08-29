@@ -2,6 +2,49 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.8.0] - 2026-08-29
+
+### Added
+- **Hypothesis Engine (`agents/hypothesis_engine.py`)**:
+  - Receives structured evidence from all three specialist agents (Logs / Metrics / Code).
+  - Generates 1–4 competing, falsifiable hypotheses using exactly **one** Groq structured-generation call via `core.llm` (locked model `openai/gpt-oss-120b`).
+  - Deterministic validation: every hypothesis `evidence_id` must exist in the supplied evidence bundles — unknown IDs are stripped; hypotheses with no remaining valid evidence are dropped.
+  - Hypothesis IDs are deterministically re-stamped `HYP-001..HYP-NNN` regardless of what the LLM emits.
+  - Enforces JSON Schema conformance (`schemas/hypothesis_schema.json`) after normalization.
+  - CLI: `python agents/hypothesis_engine.py --incident-id inc_X --logs <path> --metrics <path> --code <path> --out <path>`.
+  - Strict isolation: never reads `ground_truth.md`, `eval/results_baseline.csv`, or evaluator labels.
+- **Hypothesis Schema (`schemas/hypothesis_schema.json`)**: Requires `incident_id` + array of hypotheses each with `hypothesis_id`, `claim`, `evidence_ids` (unique), `supporting_reasoning`, `falsification_criteria`, and `verification_plan`. 1–4 hypotheses enforced.
+- **Deterministic Verification Tools (`agents/verification_tools.py`)**:
+  - Zero LLM calls. Read-only. No shell execution from LLM output.
+  - Public helpers: `iter_service_py_files`, `read_application_log`, `read_metrics_rows`, `contains_db_call_inside_loop` (AST), `find_retry_constants`, `find_backoff_zero`, `find_unbounded_mutable_class_level`, `find_acquire_without_release` (AST name-count + try-finally enclosure check), `find_drop_index_actual_change` (patch SQL-DROP line delta), `count_log_errors_by_pattern`, `metric_spike_order`, `max_metric_value`.
+  - `run_dispatch_check` keyword-dispatches plan-step claims to 8 concrete check families: query-in-loop, retry-config, acquire-release, index-drop-SQL change, unbounded collection, metric spike order/correlation, log pattern count, and metric value threshold. Fallback grounds referenced-evidence excerpts against real source/log/metric files.
+  - All results return `CheckResult` with `check_id` (`CHK-NNN`), `result` ∈ {PASS, FAIL, INCONCLUSIVE}, referenced `evidence` IDs, and real `reference` paths.
+- **Verification Agent (`agents/verification_agent.py`)**:
+  - Zero LLM calls. Zero Groq imports. Read-only; never mutates incident files.
+  - Consumes hypotheses + three evidence bundles + incident directory.
+  - Validates every hypothesis evidence_id against the supplied bundles (unknown IDs are dropped before dispatch).
+  - Dispatches each plan step AND each falsification criterion through `run_dispatch_check`.
+  - Verdict is computed strictly from check results:
+    - **REJECTED** if ANY check result is FAIL.
+    - **CONFIRMED** if ≥1 PASS and 0 FAIL.
+    - **INCONCLUSIVE** otherwise.
+  - Each hypothesis result carries `confidence` (0.0–1.0), per-check detail, and human-readable `reasoning`.
+  - Output conforms to `VERIFICATION_OUTPUT_SCHEMA` (inline JSON Schema) with `hypothesis_id`, `verdict` ∈ {CONFIRMED, REJECTED, INCONCLUSIVE}, `checks[]`, `reasoning`, `confidence`.
+  - CLI: `python agents/verification_agent.py <incident_dir> --hypotheses <hyp.json> --logs <l.json> --metrics <m.json> --code <c.json> --out <path>`.
+  - Strict isolation: never reads `ground_truth.md` or baseline evaluation artifacts.
+- **Unit tests** (all mocked Groq; zero real API calls in tests):
+  - `tests/test_hypothesis_engine.py` (16 tests): valid generation, 1–4 limit, unique IDs, evidence ID presence, unknown evidence rejection, ground-truth isolation spy, baseline isolation, no direct Groq import, `core.llm` usage, exactly one call, malformed LLM handling, missing/empty evidence handling, no hardcoded incident IDs, schema validation, `_validate_output` strict unknown-ID rejection.
+  - `tests/test_verification_tools.py` (20 tests): deterministic behaviour (same input→same result), full incident-file SHA256 read-only check, real source/metric/log references pointing to actual files, safe handling of unsupported plan keywords, no shell execution imports, no hardcoded incident IDs in AST `If` nodes, and incident-specific tool checks (inc_01 DB loop, inc_04 unbounded collection, inc_07 retry config, inc_10 index-drop net delta + acquire-without-release).
+  - `tests/test_verification_agent.py` (10 tests): CONFIRMED path (inc_01, query-in-loop dispatches → PASS), REJECTED path (inc_10 index-drop claim with net_sql_drops=0 → FAIL → REJECTED), INCONCLUSIVE path (unresolvable evidence + ungroundable plan), evidence chain preservation (CHK-IDs, per-check evidence IDs, PASS→refs), unknown evidence IDs silently excluded, ground-truth filesystem spy isolation, baseline isolation, no direct Groq imports, zero `get_llm_client`/`generate_structured`, incident files SHA256-unmodified after full dispatch sweep.
+  - `tests/test_schemas.py`: extended with `hypothesis_schema.json` parametrised entry and dedicated `test_hypothesis_schema_validation` covering the full multi-hypothesis schema shape.
+- **Live Groq sample runs** (hypothesis engine uses real Groq; verification is deterministic, zero Groq):
+  - `eval/sample_runs/logs_agent_inc_04.json`, `eval/sample_runs/metrics_agent_inc_04.json` (incident 04 evidence samples).
+  - `eval/sample_runs/logs_agent_inc_07.json`, `eval/sample_runs/metrics_agent_inc_07.json` (incident 07 evidence samples).
+  - `eval/sample_runs/hypothesis_inc_01.json`, `eval/sample_runs/hypothesis_verification_inc_01.json` (inc 01: 3 hypotheses, verification produces REJECTED on connection-pool subsidiary checks; query-in-loop AST check grounds correctly at `service/app.py:41`).
+  - `eval/sample_runs/hypothesis_inc_04.json`, `eval/sample_runs/hypothesis_verification_inc_04.json` (inc 04: 3 hypotheses, all CONFIRMED; `AUDIT_TRACE_REGISTRY` class-level dict check grounds at `service/app.py:5`).
+  - `eval/sample_runs/hypothesis_inc_07.json`, `eval/sample_runs/hypothesis_verification_inc_07.json` (inc 07: 3 hypotheses, all CONFIRMED; retry config check grounds at `service/app.py:22` (MAX_RETRIES + zero backoff)).
+  - `eval/sample_runs/hypothesis_inc_10.json`, `eval/sample_runs/hypothesis_verification_inc_10.json` (inc 10 cascade: 4 hypotheses all CONFIRMED demonstrating multi-cause evidence chain: pool saturation, dropped-index symptom, acquire-without-release leak, readiness-probe downstream symptom).
+
 ## [0.7.0] - 2026-08-29
 
 ### Added
@@ -135,7 +178,8 @@ All notable changes and iterative improvements to the Sentinel project will be d
 ## [Unreleased]
 
 ### Planned Next
-- Hypothesis Engine and Verification Agent.
-- Orchestrator, Fix Proposal Agent, and comparative Sentinel evaluation.
+- Fix Proposal Agent and Human Approval Gate (strict "AWAITING HUMAN APPROVAL" notice; auto-apply strictly forbidden).
+- Orchestrator: end-to-end multi-agent pipeline wiring (Logs → Metrics → Code → Hypotheses → Verification → Report).
+- Comparative Sentinel evaluation benchmark (Baseline 10/10 vs. Advanced) across all 10 incidents with Root Cause Accuracy + Verification Rigor scores.
 
 

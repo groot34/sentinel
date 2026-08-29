@@ -34,7 +34,8 @@ All agents interact exclusively with `core.llm.GroqLLMClient` via `get_llm_clien
 agents/logs_agent.py ────────┐
 agents/metrics_agent.py ─────┼──► core/llm.py (GroqLLMClient) ──► Groq API (openai/gpt-oss-120b)
 agents/code_agent.py ────────┤
-agents/verification_agent.py ┘
+agents/hypothesis_engine.py ─┘
+  └─ verification_agent.py: ZERO LLM calls (deterministic Python only)
 ```
 
 ### Logs Agent pipeline (implemented)
@@ -86,6 +87,85 @@ structured code evidence (schemas/code_agent_schema.json)
 ```
 
 The Code Agent reports what changed in the source and what behaviour that change may introduce. It does not emit a verified root cause.
+
+### Hypothesis Engine pipeline (implemented)
+
+```
+┌──────────────────────┐
+│ Logs Evidence        │  EV-LOG-NNN
+│ Metrics Evidence     │  EV-MET-NNN   ──►  allowed evidence ID set
+│ Code Evidence        │  EV-CODE-NNN
+└──────────────────────┘
+           │
+           ▼
+ONE Groq structured-generation call (core.llm, openai/gpt-oss-120b, temp=0.0)
+           │
+           ▼
+Raw hypothesis JSON (claim + evidence_ids + falsification + plan)
+           │
+           ▼
+Deterministic validation + repair:
+  • Unknown evidence IDs stripped
+  • Hypotheses with no valid evidence dropped
+  • IDs re-stamped HYP-001..HYP-NNN
+  • 1 ≤ |hypotheses| ≤ 4 enforced
+  • JSON Schema validate against hypothesis_schema.json
+           │
+           ▼
+1–4 competing, falsifiable hypotheses (schemas/hypothesis_schema.json)
+```
+
+The Hypothesis Engine **proposes**; it never verifies. Exactly one Groq call. Never reads ground truth. Never reads baseline results.
+
+### Verification pipeline (implemented — ZERO Groq)
+
+```
+Incident directory
+  + hypothesis_claim + plan_step
+  + referenced_evidence (EV-LOG/MET/CODE IDs)
+           │
+           ▼
+Keyword dispatch (agents/verification_tools.py: run_dispatch_check)
+  ├─ AST: DB call inside For/While loop?
+  ├─ AST: retry constants MAX_RETRIES / backoff = 0 / retry loops?
+  ├─ AST: acquire() without guaranteed release()?
+  ├─ AST: class-level or module-level mutable dict/list?
+  ├─ Patch: DROP INDEX SQL line delta (added − removed)?
+  ├─ Metrics CSV: metric spike ordering / max values?
+  ├─ Log file: pattern counts (ERROR / WARN / retry / …)?
+  └─ Fallback: ground referenced excerpts against real source/logs/metrics
+           │
+           ▼
+CheckResult { check_id=CHK-NNN, result ∈ {PASS, FAIL, INCONCLUSIVE},
+              evidence[] ← EV-IDs, reference ← real file:line or git_diff.patch }
+           │
+           ▼
+Verdict rule (agents/verification_agent.py: _checks_to_verdict):
+  • ANY FAIL → REJECTED
+  • ≥1 PASS AND 0 FAIL → CONFIRMED
+  • otherwise → INCONCLUSIVE
+           │
+           ▼
+Per-hypothesis: hypothesis_id, verdict, checks[], reasoning, confidence (0.0–1.0)
+```
+
+The Verification Agent **tests**; it never invokes Groq. Verdict is always computed deterministically from check results. Strictly read-only (SHA256 of incident files unchanged after full sweep).
+
+### Full reasoning chain topology
+
+```
+Logs Evidence ─────┐
+Metrics Evidence ──┼──→ Hypothesis Engine (1× Groq)
+Code Evidence ─────┘           │
+                               ▼
+                         HYP-001..HYP-00N
+                               │
+                               ▼
+                      Verification Tools (deterministic, 0 Groq)
+                               │
+                               ▼
+                 CONFIRMED / REJECTED / INCONCLUSIVE  ←  per HYP-NNN
+```
 
 ### Key Architectural Guardrails
 1. **Zero Secret Leakage**: `_sanitize_message` strips Groq/OpenAI pattern tokens from all exceptions, error logs, and stack traces.

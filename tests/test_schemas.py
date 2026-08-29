@@ -145,13 +145,26 @@ def test_hypothesis_schema_validation() -> None:
         schema = json.load(f)
 
     valid_sample = {
-        "hypothesis_id": "HYP-001",
-        "incident_id": "INC-001",
-        "title": "Connection Leak in Auth Retry Middleware",
-        "description": "The new retry loop acquires connections without releasing them on non-retryable exceptions.",
-        "supporting_evidence_ids": ["EV-LOG-001", "EV-CODE-002"],
-        "falsification_criteria": "If active connections return to baseline after traffic surge without retry failures.",
-        "verification_plan": "Check if connection pool active count strictly monotonically increases with retry events.",
+        "incident_id": "inc_01_n_plus_one_query",
+        "hypotheses": [
+            {
+                "hypothesis_id": "HYP-001",
+                "claim": "A database query inside the order-item loop caused excessive query volume and pool exhaustion.",
+                "evidence_ids": ["EV-LOG-001", "EV-MET-002", "EV-CODE-003"],
+                "supporting_reasoning": (
+                    "Logs show pool exhaustion by the bulk-order serializer, metrics show elevated DB connection counts, "
+                    "and code evidence locates a DB-style call inside the order-item For loop (N+1 amplification)."
+                ),
+                "falsification_criteria": [
+                    "If query count does not increase with item count, reject this hypothesis.",
+                    "If the DB call sits outside any loop, reject this hypothesis.",
+                ],
+                "verification_plan": [
+                    "Inspect the serializer query path using AST-based loop+DB-call analysis.",
+                    "Run the supplied invariant check that correlates item count with emitted query calls.",
+                ],
+            }
+        ],
     }
     jsonschema.validate(instance=valid_sample, schema=schema)
 

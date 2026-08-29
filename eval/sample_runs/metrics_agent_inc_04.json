@@ -1,0 +1,57 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "metrics_agent",
+  "summary": "Observed sharp spikes in memory usage, GC time, and active uploads at 14:11\u202fZ, a single OOM kill at 14:12\u202fZ, and a strong positive correlation between memory RSS and GC time over the 14:00\u201114:12 window.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "memory_rss_mb",
+      "value": 995.0,
+      "type": "spike",
+      "interpretation": "Memory RSS sharply increased to 995\u202fMB, far above the baseline of ~85\u202fMB."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 520.0,
+      "type": "spike",
+      "interpretation": "Garbage collection time jumped to 520\u202fms, orders of magnitude above the baseline of ~4.6\u202fms."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "active_uploads",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "Active uploads rose to 15, exceeding the typical level of ~6."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "oom_kills_total",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "One OOM kill was recorded, whereas the baseline count is zero."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~garbage_collection_time_ms",
+      "value": 0.9000525358529804,
+      "type": "correlation",
+      "interpretation": "Strong positive correlation (r\u22480.90) between memory RSS and GC time over the sampled window."
+    }
+  ]
+}

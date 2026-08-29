@@ -1,0 +1,81 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The recent code change that raised MAX_RETRIES to 10 and set BACKOFF_BASE_SECONDS to 0.0 caused immediate, rapid retries, producing the outbound request surge and downstream overload.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-CODE-005",
+        "EV-CODE-006",
+        "EV-LOG-004",
+        "EV-LOG-005",
+        "EV-LOG-006",
+        "EV-LOG-002",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "The diff shows the retry ceiling was increased from 2 to 10 and any back\u2011off delay was removed. The loop in EV-CODE-003 will now iterate up to ten times without pause. Logs EV-LOG-004\u2011006 record three immediate retries for the same charge within the same second, and EV-LOG-002 documents a ten\u2011fold outbound rate increase. Metrics EV-MET-001 confirm outbound calls spiking to 525\u202freq/s, matching the code\u2011driven behavior.",
+      "falsification_criteria": [
+        "Runtime inspection shows MAX_RETRIES remained at 2 during the incident",
+        "Configuration variable BACKOFF_SECONDS is non\u2011zero in the deployed container",
+        "No more than two retry attempts are observed for any request in tracing data"
+      ],
+      "verification_plan": [
+        "Retrieve the deployed container image hash and compare its source to the commit containing EV-CODE-002",
+        "Query the environment variables of the running service for BACKOFF_SECONDS and MAX_RETRIES values at the incident timestamp",
+        "Instrument the retry loop to log the attempt count per request and verify counts exceed two",
+        "Cross\u2011reference retry timestamps with the code version to ensure the new logic was active"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "The downstream payment gateway\u2019s rate\u2011limiting (HTTP\u202f429) and service\u2011unavailable responses (HTTP\u202f503) triggered the client\u2019s retry loop, and the gateway\u2019s capacity limits amplified the stampede independently of client configuration.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-LOG-003",
+        "EV-LOG-002",
+        "EV-MET-002",
+        "EV-MET-003",
+        "EV-MET-007"
+      ],
+      "supporting_reasoning": "EV-LOG-003 records the initial 503 response that started the retry process. EV-LOG-001 notes the gateway collapsing under the retry surge, with both 429 and 503 responses. Metrics EV-MET-002 and EV-MET-003 show spikes to 75\u202f% and 48\u202f% respectively for those error codes, and EV-MET-007 reports a strong correlation (0.82) between outbound calls and 429 rate, indicating the gateway\u2019s feedback loop drove the storm.",
+      "falsification_criteria": [
+        "Gateway logs for the interval show no 429 or 503 responses",
+        "Rate\u2011limit thresholds were not reached according to gateway monitoring",
+        "Outbound request volume does not correlate with gateway error responses"
+      ],
+      "verification_plan": [
+        "Obtain the downstream gateway\u2019s access logs for the incident window and count 503 and 429 status codes",
+        "Review the gateway\u2019s rate\u2011limit configuration and compare request volume against thresholds",
+        "Plot outbound request timestamps against gateway error timestamps to assess temporal correlation",
+        "Check whether the gateway reported resource exhaustion or throttling events during the period"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The surge was caused by synchronized, jitter\u2011free retries due to the zero back\u2011off setting, not by increased inbound traffic, as evidenced by the drop in ingress rate concurrent with the outbound spike.",
+      "evidence_ids": [
+        "EV-MET-004",
+        "EV-MET-001",
+        "EV-MET-007",
+        "EV-CODE-002",
+        "EV-CODE-006"
+      ],
+      "supporting_reasoning": "EV-MET-004 shows ingress requests fell to 48\u202freq/s while EV-MET-001 records outbound calls jumping to 525\u202freq/s, indicating traffic was generated internally. The code change in EV-CODE-002 (and matching config EV-CODE-006) removed any back\u2011off delay, eliminating jitter and causing many instances to retry at the same moment, which aligns with the high correlation reported in EV-MET-007.",
+      "falsification_criteria": [
+        "Back\u2011off value was non\u2011zero at runtime, introducing jitter",
+        "Ingress request rate was actually higher than baseline during the incident",
+        "Outbound spikes occur without any change to back\u2011off configuration"
+      ],
+      "verification_plan": [
+        "Inspect the live configuration of BACKOFF_SECONDS in the running containers",
+        "Analyze timestamps of retry attempts across multiple service instances to detect synchronization",
+        "Compare ingress request metrics before, during, and after the incident to confirm the drop",
+        "Run a controlled test with back\u2011off enabled to verify reduction in outbound spike"
+      ]
+    }
+  ]
+}

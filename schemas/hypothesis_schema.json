@@ -1,49 +1,65 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Hypothesis",
+  "title": "HypothesisEngineOutput",
   "type": "object",
-  "required": [
-    "hypothesis_id",
-    "incident_id",
-    "title",
-    "description",
-    "supporting_evidence_ids",
-    "falsification_criteria",
-    "verification_plan"
-  ],
+  "required": ["incident_id", "hypotheses"],
   "properties": {
-    "hypothesis_id": {
-      "type": "string",
-      "pattern": "^HYP-[A-Z0-9_-]+$",
-      "description": "Unique hypothesis identifier (e.g. HYP-001)."
-    },
     "incident_id": {
       "type": "string",
-      "description": "Identifier of the incident being investigated."
+      "description": "Identifier of the incident under investigation."
     },
-    "title": {
-      "type": "string",
-      "description": "Short descriptive title of the hypothesis."
-    },
-    "description": {
-      "type": "string",
-      "description": "Detailed explanation of the causal mechanism."
-    },
-    "supporting_evidence_ids": {
+    "hypotheses": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 4,
       "items": {
-        "type": "string"
-      },
-      "description": "Evidence IDs supporting this hypothesis. Must not be empty."
-    },
-    "falsification_criteria": {
-      "type": "string",
-      "description": "Concrete condition under which this hypothesis is conclusively proven false."
-    },
-    "verification_plan": {
-      "type": "string",
-      "description": "Executable or programmatic check planned to confirm or reject this hypothesis."
+        "type": "object",
+        "required": [
+          "hypothesis_id",
+          "claim",
+          "evidence_ids",
+          "supporting_reasoning",
+          "falsification_criteria",
+          "verification_plan"
+        ],
+        "properties": {
+          "hypothesis_id": {
+            "type": "string",
+            "pattern": "^HYP-[0-9]{3}$",
+            "description": "Unique hypothesis identifier, e.g. HYP-001."
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Specific, falsifiable statement of a candidate root cause."
+          },
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string"},
+            "description": "Evidence IDs that directly support this claim."
+          },
+          "supporting_reasoning": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Narrative explanation linking the cited evidence to the claim."
+          },
+          "falsification_criteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"},
+            "description": "Concrete conditions that, if observed, would disprove the hypothesis."
+          },
+          "verification_plan": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"},
+            "description": "Ordered list of concrete verification steps to test the hypothesis."
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

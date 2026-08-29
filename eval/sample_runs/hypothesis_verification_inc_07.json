@@ -1,0 +1,649 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "logs_evidence": {
+    "incident_id": "inc_07_retry_storm",
+    "agent": "logs_agent",
+    "summary": "Observed a transient 503 SERVICE_UNAVAILABLE from the downstream gateway followed by rapid immediate retries (1/10 to 3/10) and a sudden 10x outbound request rate increase, culminating in a downstream payment gateway collapse with HTTP 429/503 responses, indicating a retry\u2011storm pattern.",
+    "evidence": [
+      {
+        "evidence_id": "EV-LOG-001",
+        "source": "logs",
+        "reference": "logs/application.log:10",
+        "timestamp": "2026-08-28T14:05:30Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:05:30Z ERROR [payment-client] Downstream payment gateway collapsed under retry stampede (HTTP 429 & 503 cascade)",
+        "interpretation": "Shows the endpoint failure after the retry surge, confirming a stampede effect."
+      },
+      {
+        "evidence_id": "EV-LOG-002",
+        "source": "logs",
+        "reference": "logs/application.log:9",
+        "timestamp": "2026-08-28T14:05:05Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:05:05Z ERROR [payment-client] Outbound request rate amplified 10x (from 50 req/s to 500 req/s)",
+        "interpretation": "Indicates a burst in request volume coinciding with retries."
+      },
+      {
+        "evidence_id": "EV-LOG-003",
+        "source": "logs",
+        "reference": "logs/application.log:5",
+        "timestamp": "2026-08-28T14:05:00Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:05:00Z WARN [payment-client] Downstream gateway returned single transient 503 SERVICE_UNAVAILABLE",
+        "interpretation": "Initial transient failure that triggered retry logic."
+      },
+      {
+        "evidence_id": "EV-LOG-004",
+        "source": "logs",
+        "reference": "logs/application.log:6",
+        "timestamp": "2026-08-28T14:05:01Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 1/10 for charge_id=ch_991...",
+        "interpretation": "First immediate retry attempt after the 503."
+      },
+      {
+        "evidence_id": "EV-LOG-005",
+        "source": "logs",
+        "reference": "logs/application.log:7",
+        "timestamp": "2026-08-28T14:05:01Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 2/10 for charge_id=ch_991...",
+        "interpretation": "Second immediate retry, showing rapid succession."
+      },
+      {
+        "evidence_id": "EV-LOG-006",
+        "source": "logs",
+        "reference": "logs/application.log:8",
+        "timestamp": "2026-08-28T14:05:01Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 3/10 for charge_id=ch_991...",
+        "interpretation": "Third immediate retry, contributing to the observed burst."
+      }
+    ]
+  },
+  "metrics_evidence": {
+    "incident_id": "inc_07_retry_storm",
+    "agent": "metrics_agent",
+    "summary": "Several metrics show abrupt changes around 14:06\u201114:08\u202fUTC on 2026\u201108\u201128: outbound gateway call rate spikes sharply, error\u2011rate percentages (503 and 429) rise sharply, inbound request rate drops, and the 503/429 rates shift relative to their baseline. A strong positive correlation is observed between outbound call volume and 429 error rate, indicating they move together during the window.",
+    "evidence": [
+      {
+        "evidence_id": "EV-MET-001",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 6",
+        "timestamp": "2026-08-28T14:06:00Z",
+        "metric": "outbound_gateway_calls_sec",
+        "value": 525.0,
+        "type": "spike",
+        "interpretation": "Outbound gateway calls per second jump to 525, far above the baseline mean of 51, indicating a massive surge in outbound traffic."
+      },
+      {
+        "evidence_id": "EV-MET-002",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:08:00Z",
+        "metric": "gateway_503_pct",
+        "value": 75.0,
+        "type": "spike",
+        "interpretation": "HTTP\u202f503 response percentage spikes to 75\u202f%, whereas the baseline is 0\u202f%, showing a sudden increase in server\u2011unavailable errors."
+      },
+      {
+        "evidence_id": "EV-MET-003",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 6",
+        "timestamp": "2026-08-28T14:06:00Z",
+        "metric": "gateway_429_pct",
+        "value": 48.0,
+        "type": "spike",
+        "interpretation": "HTTP\u202f429 response percentage rises to 48\u202f%, also far above the zero baseline, indicating many rate\u2011limit rejections."
+      },
+      {
+        "evidence_id": "EV-MET-004",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:08:00Z",
+        "metric": "ingress_charge_reqs_sec",
+        "value": 48.0,
+        "type": "drop",
+        "interpretation": "Ingress request rate drops to 48\u202freq/s, below the baseline mean of 51, suggesting a reduction in incoming traffic concurrent with the outbound surge."
+      },
+      {
+        "evidence_id": "EV-MET-005",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:08:00Z",
+        "metric": "gateway_503_pct",
+        "value": 75.0,
+        "type": "period_change",
+        "interpretation": "The 503 error percentage shows a period\u2011level increase of 33\u202f% compared to the prior window, confirming a sustained rise."
+      },
+      {
+        "evidence_id": "EV-MET-006",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 6",
+        "timestamp": "2026-08-28T14:06:00Z",
+        "metric": "gateway_429_pct",
+        "value": 48.0,
+        "type": "period_change",
+        "interpretation": "The 429 error percentage exhibits a period\u2011level increase of 20.75\u202f% over the baseline window."
+      },
+      {
+        "evidence_id": "EV-MET-007",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv",
+        "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+        "metric": "outbound_gateway_calls_sec~gateway_429_pct",
+        "value": 0.8215214818418446,
+        "type": "correlation",
+        "interpretation": "Pearson correlation of 0.82 between outbound calls and 429 error rate indicates they tend to rise together during the observed interval."
+      }
+    ]
+  },
+  "code_evidence": {
+    "incident_id": "inc_07_retry_storm",
+    "agent": "code_agent",
+    "summary": "The diff raises MAX_RETRIES from 2 to 10 and sets BACKOFF_BASE_SECONDS to 0.0, while the application contains a retry loop that will now execute up to the higher limit without any back\u2011off delay. Corresponding configuration files also expose the same higher retry count and zero back\u2011off values.",
+    "evidence": [
+      {
+        "evidence_id": "EV-CODE-001",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "removed_code",
+        "excerpt": "-    MAX_RETRIES = 2\n-    BACKOFF_BASE_SECONDS = 0.5",
+        "interpretation": "Shows the original limits: only 2 retries and a 0.5\u2011second back\u2011off, which constrained repeated attempts."
+      },
+      {
+        "evidence_id": "EV-CODE-002",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "added_code",
+        "excerpt": "+    MAX_RETRIES = 10\n+    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter",
+        "interpretation": "Introduces a higher retry ceiling (10) and removes any delay between attempts, enabling rapid repeated calls."
+      },
+      {
+        "evidence_id": "EV-CODE-003",
+        "source": "code",
+        "reference": "service/app.py:22-26",
+        "type": "suspicious_pattern",
+        "excerpt": "        while attempts < self.MAX_RETRIES:\n            attempts += 1\n            resp = self.gateway.charge(amount)\n            if resp.get(\"status\") == 200:\n                return resp",
+        "interpretation": "Loop will now iterate up to the new MAX_RETRIES value, potentially invoking the gateway many times before giving up."
+      },
+      {
+        "evidence_id": "EV-CODE-004",
+        "source": "code",
+        "reference": "service/app.py:14",
+        "type": "suspicious_pattern",
+        "excerpt": "    MAX_RETRIES = 10",
+        "interpretation": "Local constant mirrors the increased retry count introduced in the diff."
+      },
+      {
+        "evidence_id": "EV-CODE-005",
+        "source": "config",
+        "reference": "docker-compose.yml:6",
+        "type": "suspicious_pattern",
+        "excerpt": "      - MAX_RETRIES=10",
+        "interpretation": "Container environment also reflects the higher retry limit, ensuring consistency across deployment."
+      },
+      {
+        "evidence_id": "EV-CODE-006",
+        "source": "config",
+        "reference": "docker-compose.yml:7",
+        "type": "suspicious_pattern",
+        "excerpt": "      - BACKOFF_SECONDS=0.0",
+        "interpretation": "Environment variable removes back\u2011off delay, matching the code change that sets BACKOFF_BASE_SECONDS to zero."
+      }
+    ]
+  },
+  "hypotheses": {
+    "incident_id": "inc_07_retry_storm",
+    "hypotheses": [
+      {
+        "hypothesis_id": "HYP-001",
+        "claim": "The recent code change that raised MAX_RETRIES to 10 and set BACKOFF_BASE_SECONDS to 0.0 caused immediate, rapid retries, producing the outbound request surge and downstream overload.",
+        "evidence_ids": [
+          "EV-CODE-001",
+          "EV-CODE-002",
+          "EV-CODE-003",
+          "EV-CODE-004",
+          "EV-CODE-005",
+          "EV-CODE-006",
+          "EV-LOG-004",
+          "EV-LOG-005",
+          "EV-LOG-006",
+          "EV-LOG-002",
+          "EV-MET-001"
+        ],
+        "supporting_reasoning": "The diff shows the retry ceiling was increased from 2 to 10 and any back\u2011off delay was removed. The loop in EV-CODE-003 will now iterate up to ten times without pause. Logs EV-LOG-004\u2011006 record three immediate retries for the same charge within the same second, and EV-LOG-002 documents a ten\u2011fold outbound rate increase. Metrics EV-MET-001 confirm outbound calls spiking to 525\u202freq/s, matching the code\u2011driven behavior.",
+        "falsification_criteria": [
+          "Runtime inspection shows MAX_RETRIES remained at 2 during the incident",
+          "Configuration variable BACKOFF_SECONDS is non\u2011zero in the deployed container",
+          "No more than two retry attempts are observed for any request in tracing data"
+        ],
+        "verification_plan": [
+          "Retrieve the deployed container image hash and compare its source to the commit containing EV-CODE-002",
+          "Query the environment variables of the running service for BACKOFF_SECONDS and MAX_RETRIES values at the incident timestamp",
+          "Instrument the retry loop to log the attempt count per request and verify counts exceed two",
+          "Cross\u2011reference retry timestamps with the code version to ensure the new logic was active"
+        ]
+      },
+      {
+        "hypothesis_id": "HYP-002",
+        "claim": "The downstream payment gateway\u2019s rate\u2011limiting (HTTP\u202f429) and service\u2011unavailable responses (HTTP\u202f503) triggered the client\u2019s retry loop, and the gateway\u2019s capacity limits amplified the stampede independently of client configuration.",
+        "evidence_ids": [
+          "EV-LOG-001",
+          "EV-LOG-003",
+          "EV-LOG-002",
+          "EV-MET-002",
+          "EV-MET-003",
+          "EV-MET-007"
+        ],
+        "supporting_reasoning": "EV-LOG-003 records the initial 503 response that started the retry process. EV-LOG-001 notes the gateway collapsing under the retry surge, with both 429 and 503 responses. Metrics EV-MET-002 and EV-MET-003 show spikes to 75\u202f% and 48\u202f% respectively for those error codes, and EV-MET-007 reports a strong correlation (0.82) between outbound calls and 429 rate, indicating the gateway\u2019s feedback loop drove the storm.",
+        "falsification_criteria": [
+          "Gateway logs for the interval show no 429 or 503 responses",
+          "Rate\u2011limit thresholds were not reached according to gateway monitoring",
+          "Outbound request volume does not correlate with gateway error responses"
+        ],
+        "verification_plan": [
+          "Obtain the downstream gateway\u2019s access logs for the incident window and count 503 and 429 status codes",
+          "Review the gateway\u2019s rate\u2011limit configuration and compare request volume against thresholds",
+          "Plot outbound request timestamps against gateway error timestamps to assess temporal correlation",
+          "Check whether the gateway reported resource exhaustion or throttling events during the period"
+        ]
+      },
+      {
+        "hypothesis_id": "HYP-003",
+        "claim": "The surge was caused by synchronized, jitter\u2011free retries due to the zero back\u2011off setting, not by increased inbound traffic, as evidenced by the drop in ingress rate concurrent with the outbound spike.",
+        "evidence_ids": [
+          "EV-MET-004",
+          "EV-MET-001",
+          "EV-MET-007",
+          "EV-CODE-002",
+          "EV-CODE-006"
+        ],
+        "supporting_reasoning": "EV-MET-004 shows ingress requests fell to 48\u202freq/s while EV-MET-001 records outbound calls jumping to 525\u202freq/s, indicating traffic was generated internally. The code change in EV-CODE-002 (and matching config EV-CODE-006) removed any back\u2011off delay, eliminating jitter and causing many instances to retry at the same moment, which aligns with the high correlation reported in EV-MET-007.",
+        "falsification_criteria": [
+          "Back\u2011off value was non\u2011zero at runtime, introducing jitter",
+          "Ingress request rate was actually higher than baseline during the incident",
+          "Outbound spikes occur without any change to back\u2011off configuration"
+        ],
+        "verification_plan": [
+          "Inspect the live configuration of BACKOFF_SECONDS in the running containers",
+          "Analyze timestamps of retry attempts across multiple service instances to detect synchronization",
+          "Compare ingress request metrics before, during, and after the incident to confirm the drop",
+          "Run a controlled test with back\u2011off enabled to verify reduction in outbound spike"
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "incident_id": "inc_07_retry_storm",
+    "results": [
+      {
+        "hypothesis_id": "HYP-001",
+        "verdict": "CONFIRMED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-006",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-007",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-CODE-005",
+              "EV-CODE-006",
+              "EV-LOG-004",
+              "EV-LOG-005",
+              "EV-LOG-006",
+              "EV-LOG-002",
+              "EV-MET-001"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          }
+        ],
+        "reasoning": "All required checks passed: Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST). (references: service\\app.py:22, service\\app.py:22, service\\app.py:22)",
+        "confidence": 0.95
+      },
+      {
+        "hypothesis_id": "HYP-002",
+        "verdict": "CONFIRMED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-006",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-007",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-LOG-001",
+              "EV-LOG-003",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-007"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          }
+        ],
+        "reasoning": "All required checks passed: Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST). (references: service\\app.py:22, service\\app.py:22, service\\app.py:22)",
+        "confidence": 0.95
+      },
+      {
+        "hypothesis_id": "HYP-003",
+        "verdict": "CONFIRMED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": "service\\app.py:22",
+            "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+            "detail": "4 of 5 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "No candidate metric spikes could be ordered.",
+            "result": "INCONCLUSIVE",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+            "detail": "4 of 5 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+            "detail": "4 of 5 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-006",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+            "detail": "4 of 5 referenced evidence items grounded."
+          },
+          {
+            "check_id": "CHK-007",
+            "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+            "result": "PASS",
+            "evidence": [
+              "EV-MET-004",
+              "EV-MET-001",
+              "EV-MET-007",
+              "EV-CODE-002",
+              "EV-CODE-006"
+            ],
+            "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+            "detail": "4 of 5 referenced evidence items grounded."
+          }
+        ],
+        "reasoning": "All required checks passed: Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: service\\app.py:22, metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1, metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1)",
+        "confidence": 0.89
+      }
+    ]
+  }
+}

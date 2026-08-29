@@ -1,0 +1,523 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "logs_evidence": {
+    "incident_id": "inc_01_n_plus_one_query",
+    "agent": "logs_agent",
+    "summary": "Warnings and errors show rising DB pool latency, pool exhaustion, and request timeouts, accompanied by a degraded healthcheck reporting high query queue depth; network retransmissions are noted but appear unrelated.",
+    "evidence": [
+      {
+        "evidence_id": "EV-LOG-001",
+        "source": "logs",
+        "reference": "logs/application.log:9",
+        "timestamp": "2026-08-28T14:10:30Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:10:30Z ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer",
+        "interpretation": "DB connection pool reached its maximum of 20 active connections, all held by bulk order processing, indicating possible contention for connections."
+      },
+      {
+        "evidence_id": "EV-LOG-002",
+        "source": "logs",
+        "reference": "logs/application.log:8",
+        "timestamp": "2026-08-28T14:10:05Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:10:05Z ERROR [order-service] [http-worker-4] GET /api/v1/orders/bulk?page=3 504 GATEWAY_TIMEOUT - 10002ms (queries executed: 184 before timeout)",
+        "interpretation": "HTTP request timed out after >10\u202fs while processing many queries, suggesting downstream latency or resource saturation."
+      },
+      {
+        "evidence_id": "EV-LOG-003",
+        "source": "logs",
+        "reference": "logs/application.log:12",
+        "timestamp": "2026-08-28T14:15:00Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:15:00Z ERROR [order-service] [http-worker-1] Healthcheck degraded: DB query queue depth = 142",
+        "interpretation": "Healthcheck reports a large DB query queue (142), indicating backlog and possible pressure on the database layer."
+      },
+      {
+        "evidence_id": "EV-LOG-004",
+        "source": "logs",
+        "reference": "logs/application.log:7",
+        "timestamp": "2026-08-28T14:09:12Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:09:12Z WARN [order-service] [db-pool] Query pool latency exceeding threshold: 450ms avg wait",
+        "interpretation": "Average wait time for acquiring a DB connection is 450\u202fms, exceeding the configured threshold and hinting at contention."
+      },
+      {
+        "evidence_id": "EV-LOG-005",
+        "source": "logs",
+        "reference": "logs/application.log:6",
+        "timestamp": "2026-08-28T14:08:45Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:08:45Z WARN [order-service] [http-worker-1] GET /api/v1/orders/bulk?page=2 200 OK - 890ms (queries: 250)",
+        "interpretation": "Bulk order request completed successfully but took 890\u202fms with 250 queries, showing elevated latency."
+      },
+      {
+        "evidence_id": "EV-LOG-006",
+        "source": "logs",
+        "reference": "logs/application.log:11",
+        "timestamp": "2026-08-28T14:12:15Z",
+        "type": "error",
+        "excerpt": "2026-08-28T14:12:15Z ERROR [order-service] [http-worker-2] GET /api/v1/orders/1002 500 INTERNAL_SERVER_ERROR - TimeoutAcquiringConnection: pool empty",
+        "interpretation": "Request failed due to inability to acquire a DB connection (pool empty), reinforcing evidence of pool exhaustion."
+      },
+      {
+        "evidence_id": "EV-LOG-007",
+        "source": "logs",
+        "reference": "logs/application.log:10",
+        "timestamp": "2026-08-28T14:11:00Z",
+        "type": "warning",
+        "excerpt": "2026-08-28T14:11:00Z WARN [order-service] [network-monitor] TCP retransmissions observed on replica bond0 (packet_loss=0.01%) - distractor",
+        "interpretation": "Minor network retransmissions detected; marked as low relevance to the observed DB pool issues."
+      }
+    ]
+  },
+  "metrics_evidence": {
+    "incident_id": "inc_01_n_plus_one_query",
+    "agent": "metrics_agent",
+    "summary": "Several metrics show extreme deviations around 14:10\u201114:15\u202fUTC: request latency, database query count per request, CPU usage, and error rate all spike sharply, while request rate drops. High positive correlations link CPU usage with active connections and query volume, and latency closely follows error rate.",
+    "evidence": [
+      {
+        "evidence_id": "EV-MET-001",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 9",
+        "timestamp": "2026-08-28T14:12:00Z",
+        "metric": "latency_p95_ms",
+        "value": 10000.0,
+        "type": "spike",
+        "interpretation": "p95 latency jumps to 10\u202fs, far exceeding the normal mean of ~13\u202fms."
+      },
+      {
+        "evidence_id": "EV-MET-002",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:10:00Z",
+        "metric": "db_queries_per_req",
+        "value": 250.0,
+        "type": "spike",
+        "interpretation": "Queries per request rise to 250, orders of magnitude above the baseline (~1)."
+      },
+      {
+        "evidence_id": "EV-MET-003",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 8",
+        "timestamp": "2026-08-28T14:11:00Z",
+        "metric": "db_cpu_percent",
+        "value": 99.1,
+        "type": "spike",
+        "interpretation": "Database CPU utilization reaches 99\u202f%, well above the typical ~9\u202f%."
+      },
+      {
+        "evidence_id": "EV-MET-004",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 10",
+        "timestamp": "2026-08-28T14:15:00Z",
+        "metric": "error_rate_pct",
+        "value": 78.1,
+        "type": "spike",
+        "interpretation": "Error rate climbs to 78\u202f%, whereas the baseline is 0\u202f%."
+      },
+      {
+        "evidence_id": "EV-MET-005",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 7",
+        "timestamp": "2026-08-28T14:10:00Z",
+        "metric": "active_db_connections",
+        "value": 20.0,
+        "type": "spike",
+        "interpretation": "Active DB connections increase to 20, far above the normal ~2.3."
+      },
+      {
+        "evidence_id": "EV-MET-006",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 5",
+        "timestamp": "2026-08-28T14:07:00Z",
+        "metric": "req_per_sec",
+        "value": 52.1,
+        "type": "spike",
+        "interpretation": "Request rate spikes to 52.1\u202frps, modestly above the usual 46.4\u202frps."
+      },
+      {
+        "evidence_id": "EV-MET-007",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 10",
+        "timestamp": "2026-08-28T14:15:00Z",
+        "metric": "req_per_sec",
+        "value": 35.0,
+        "type": "drop",
+        "interpretation": "Request rate drops to 35\u202frps, well below the baseline."
+      },
+      {
+        "evidence_id": "EV-MET-008",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv:row 10",
+        "timestamp": "2026-08-28T14:15:00Z",
+        "metric": "db_cpu_percent",
+        "value": 99.0,
+        "type": "threshold",
+        "interpretation": "CPU usage exceeds the 90\u202f% alert threshold."
+      },
+      {
+        "evidence_id": "EV-MET-009",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv",
+        "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+        "metric": "active_db_connections~db_cpu_percent",
+        "value": 0.996675266278448,
+        "type": "correlation",
+        "interpretation": "Active DB connections and CPU percent are almost perfectly positively correlated (r\u22480.997)."
+      },
+      {
+        "evidence_id": "EV-MET-010",
+        "source": "metrics",
+        "reference": "metrics/metrics.csv",
+        "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+        "metric": "db_queries_per_req~db_cpu_percent",
+        "value": 0.9733594034700669,
+        "type": "correlation",
+        "interpretation": "Queries per request and CPU percent show a strong positive correlation (r\u22480.973)."
+      }
+    ]
+  },
+  "code_evidence": {
+    "incident_id": "inc_01_n_plus_one_query",
+    "agent": "code_agent",
+    "summary": "The recent change adds an \"items\" array to the order serialization and introduces a loop that performs a database lookup for each order item, while also removing a standalone \"item_count\" line. This introduces a pattern of a DB query inside a per\u2011item loop, which may affect query volume.",
+    "evidence": [
+      {
+        "evidence_id": "EV-CODE-001",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "added_code",
+        "excerpt": "+            \"item_count\": len(order.items),\n+            \"items\": []\n+        for item in order.items:\n+            address = db_session.query_address_by_id(item.shipping_address_id)\n+            data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})",
+        "interpretation": "Adds initialization of an empty \"items\" list and a loop that queries the address table for each item, extending the serialized payload with per\u2011item details."
+      },
+      {
+        "evidence_id": "EV-CODE-002",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "removed_code",
+        "excerpt": "-            \"item_count\": len(order.items)",
+        "interpretation": "Removes the previous line that only emitted the item count without a trailing comma; the line is re\u2011added in the added_code block with a comma, indicating a formatting change rather than functional logic."
+      },
+      {
+        "evidence_id": "EV-CODE-003",
+        "source": "code",
+        "reference": "service/app.py:40-42",
+        "type": "suspicious_pattern",
+        "excerpt": "        for item in order.items:\n            address = db_session.query_address_by_id(item.shipping_address_id)\n            data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})",
+        "interpretation": "Shows a direct database call inside a loop over order items, matching a known N+1 query pattern."
+      },
+      {
+        "evidence_id": "EV-CODE-004",
+        "source": "git_diff",
+        "reference": "git_diff.patch:hunk 1",
+        "type": "suspicious_pattern",
+        "excerpt": "-            \"item_count\": len(order.items)\n+            \"item_count\": len(order.items),\n+            \"items\": []\n+        for item in order.items:\n+            address = db_session.query_address_by_id(item.shipping_address_id)\n+            data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})",
+        "interpretation": "Diff highlights the introduction of a loop that performs a DB query per item, flagged as a potential N+1 query pattern."
+      }
+    ]
+  },
+  "hypotheses": {
+    "incident_id": "inc_01_n_plus_one_query",
+    "hypotheses": [
+      {
+        "hypothesis_id": "HYP-001",
+        "claim": "The recent code change introduced an N+1 query pattern in the order\u2011serialization path, causing a surge in per\u2011request database queries that exhausted the connection pool.",
+        "evidence_ids": [
+          "EV-CODE-003",
+          "EV-CODE-004",
+          "EV-MET-002",
+          "EV-MET-003",
+          "EV-LOG-001"
+        ],
+        "supporting_reasoning": "Code evidence EV-CODE-003 and the diff EV-CODE-004 reveal a loop that issues a DB query for each order item, a classic N+1 pattern. Metrics EV-MET-002 show queries per request jumping to 250, and EV-MET-003 records CPU at 99%, both consistent with massive query load. Log EV-LOG-001 reports the pool exhausted at its 20\u2011connection limit, matching the overload caused by the extra queries.",
+        "falsification_criteria": [
+          "If profiling after the code change shows that the number of DB queries per bulk request remains at the baseline (~1) rather than hundreds, the hypothesis is disproved."
+        ],
+        "verification_plan": [
+          "Deploy the previous version without the loop and capture DB query counts for a bulk order request.",
+          "Instrument the DB session to log the exact number of queries executed per request in the current version.",
+          "Compare connection\u2011pool usage and error rates between the two versions.",
+          "Observe whether latency and CPU utilization drop after reverting the change."
+        ]
+      },
+      {
+        "hypothesis_id": "HYP-002",
+        "claim": "A transient surge in incoming request rate overwhelmed the database, filling the connection pool regardless of code changes.",
+        "evidence_ids": [
+          "EV-MET-006",
+          "EV-MET-001",
+          "EV-LOG-002",
+          "EV-LOG-003",
+          "EV-MET-003"
+        ],
+        "supporting_reasoning": "Metrics EV-MET-006 show request rate spiking to 52.1\u202frps, while EV-MET-001 records p95 latency jumping to 10\u202fs. Log EV-LOG-002 documents a 504 gateway timeout during bulk processing, and EV-LOG-003 reports a DB query queue depth of 142, indicating backlog. CPU utilization at 99% (EV-MET-003) aligns with a sudden load increase.",
+        "falsification_criteria": [
+          "If the request\u2011rate time series for the incident window stays at or below the normal baseline (~46\u202frps), the hypothesis is falsified."
+        ],
+        "verification_plan": [
+          "Extract the request\u2011rate series for the incident period and compare it to the baseline.",
+          "Correlate request\u2011rate spikes with latency, queue depth, and CPU metrics.",
+          "Replay the observed request pattern in a staging environment to see if it reproduces pool exhaustion.",
+          "Demonstrate that throttling the request rate eliminates the errors."
+        ]
+      },
+      {
+        "hypothesis_id": "HYP-003",
+        "claim": "The database connection pool is misconfigured with a maximum size of 20, which is insufficient for the workload, causing exhaustion under normal traffic.",
+        "evidence_ids": [
+          "EV-MET-005",
+          "EV-LOG-001",
+          "EV-LOG-004",
+          "EV-MET-008",
+          "EV-MET-009"
+        ],
+        "supporting_reasoning": "Metrics EV-MET-005 record active DB connections reaching the pool limit of 20, and EV-MET-008 notes CPU usage exceeding the 90\u202f% alert threshold. Log EV-LOG-001 confirms the pool was exhausted at 20/20 connections, while EV-LOG-004 shows connection\u2011acquisition latency of 450\u202fms. Correlation EV-MET-009 shows a near\u2011perfect link between active connections and CPU load, suggesting the pool size is a bottleneck.",
+        "falsification_criteria": [
+          "If increasing the pool max size (e.g., to 40) does not reduce exhaustion events under the same traffic pattern, the hypothesis is disproved."
+        ],
+        "verification_plan": [
+          "Raise the DB connection\u2011pool max size configuration to a higher value (e.g., 40).",
+          "Run the same workload and monitor active connections, pool\u2011exhaustion logs, and latency.",
+          "Check whether error rates and CPU usage decrease after the change.",
+          "If errors persist despite the larger pool, reject the hypothesis."
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "incident_id": "inc_01_n_plus_one_query",
+    "results": [
+      {
+        "hypothesis_id": "HYP-001",
+        "verdict": "REJECTED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "AST scan detected database calls inside a for/while loop.",
+            "result": "PASS",
+            "evidence": [
+              "EV-CODE-003",
+              "EV-CODE-004"
+            ],
+            "reference": "service\\app.py:41 (query_address_by_id)",
+            "detail": "service\\app.py:41 (query_address_by_id)"
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-LOG-001"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-LOG-001"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-LOG-001"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-LOG-001"
+            ],
+            "reference": null,
+            "detail": null
+          }
+        ],
+        "reasoning": "Deterministic falsification check(s) failed: Every acquire() in inspected files has a corresponding release().; Every acquire() in inspected files has a corresponding release()..",
+        "confidence": 0.86
+      },
+      {
+        "hypothesis_id": "HYP-002",
+        "verdict": "REJECTED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-006",
+              "EV-MET-001",
+              "EV-LOG-002",
+              "EV-LOG-003",
+              "EV-MET-003"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-006",
+              "EV-MET-001",
+              "EV-LOG-002",
+              "EV-LOG-003",
+              "EV-MET-003"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-006",
+              "EV-MET-001",
+              "EV-LOG-002",
+              "EV-LOG-003",
+              "EV-MET-003"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-006",
+              "EV-MET-001",
+              "EV-LOG-002",
+              "EV-LOG-003",
+              "EV-MET-003"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-006",
+              "EV-MET-001",
+              "EV-LOG-002",
+              "EV-LOG-003",
+              "EV-MET-003"
+            ],
+            "reference": null,
+            "detail": null
+          }
+        ],
+        "reasoning": "Deterministic falsification check(s) failed: Every acquire() in inspected files has a corresponding release().; Every acquire() in inspected files has a corresponding release()..",
+        "confidence": 0.95
+      },
+      {
+        "hypothesis_id": "HYP-003",
+        "verdict": "REJECTED",
+        "checks": [
+          {
+            "check_id": "CHK-001",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-005",
+              "EV-LOG-001",
+              "EV-LOG-004",
+              "EV-MET-008",
+              "EV-MET-009"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-002",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-005",
+              "EV-LOG-001",
+              "EV-LOG-004",
+              "EV-MET-008",
+              "EV-MET-009"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-003",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-005",
+              "EV-LOG-001",
+              "EV-LOG-004",
+              "EV-MET-008",
+              "EV-MET-009"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-004",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-005",
+              "EV-LOG-001",
+              "EV-LOG-004",
+              "EV-MET-008",
+              "EV-MET-009"
+            ],
+            "reference": null,
+            "detail": null
+          },
+          {
+            "check_id": "CHK-005",
+            "description": "Every acquire() in inspected files has a corresponding release().",
+            "result": "FAIL",
+            "evidence": [
+              "EV-MET-005",
+              "EV-LOG-001",
+              "EV-LOG-004",
+              "EV-MET-008",
+              "EV-MET-009"
+            ],
+            "reference": null,
+            "detail": null
+          }
+        ],
+        "reasoning": "Deterministic falsification check(s) failed: Every acquire() in inspected files has a corresponding release().; Every acquire() in inspected files has a corresponding release()..",
+        "confidence": 0.95
+      }
+    ]
+  }
+}

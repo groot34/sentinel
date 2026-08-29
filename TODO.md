@@ -38,9 +38,12 @@
   - Implemented `agents/code_agent.py` using `core.llm` and locked model `openai/gpt-oss-120b`.
   - Schema: `schemas/code_agent_schema.json`.
   - Unit tests mocked; live Groq sample runs for incidents 01, 04, 07, and 10.
-- [ ] **Milestone 7: Hypothesis Engine & Verification Agent**
-  - Implement `agents/hypothesis_engine.py` generating 1–4 falsifiable hypotheses with evidence IDs.
-  - Implement `agents/verification_agent.py` executing programmatic invariant checks (`CONFIRMED`, `REJECTED`, `INCONCLUSIVE`).
+- [x] **Milestone 7: Hypothesis Engine & Verification Agent**
+  - Implemented `agents/hypothesis_engine.py` generating 1–4 falsifiable hypotheses with evidence ID validation (one Groq structured call via `core.llm`).
+  - Implemented `agents/verification_tools.py`: zero-LLM deterministic AST/log/metric invariant checkers.
+  - Implemented `agents/verification_agent.py` executing programmatic invariant checks and emitting `CONFIRMED`, `REJECTED`, `INCONCLUSIVE` verdicts strictly from check results (zero LLM calls).
+  - Schema: `schemas/hypothesis_schema.json` (1–4 hypotheses, unique EV-IDs, falsification + plan).
+  - Unit tests mocked (46 tests across hypothesis engine + verification tools + verification agent); live Groq + deterministic verification sample runs for incidents 01, 04, 07, and 10.
 - [ ] **Milestone 8: Fix Proposal Agent & Human Approval Gate**
   - Implement `agents/fix_proposal_agent.py` with patch generation and regression test writing.
   - Enforce `"AWAITING HUMAN APPROVAL — this fix has not been applied."`

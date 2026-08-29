@@ -1,0 +1,68 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The recent code change introduced an N+1 query pattern in the order\u2011serialization path, causing a surge in per\u2011request database queries that exhausted the connection pool.",
+      "evidence_ids": [
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-MET-002",
+        "EV-MET-003",
+        "EV-LOG-001"
+      ],
+      "supporting_reasoning": "Code evidence EV-CODE-003 and the diff EV-CODE-004 reveal a loop that issues a DB query for each order item, a classic N+1 pattern. Metrics EV-MET-002 show queries per request jumping to 250, and EV-MET-003 records CPU at 99%, both consistent with massive query load. Log EV-LOG-001 reports the pool exhausted at its 20\u2011connection limit, matching the overload caused by the extra queries.",
+      "falsification_criteria": [
+        "If profiling after the code change shows that the number of DB queries per bulk request remains at the baseline (~1) rather than hundreds, the hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Deploy the previous version without the loop and capture DB query counts for a bulk order request.",
+        "Instrument the DB session to log the exact number of queries executed per request in the current version.",
+        "Compare connection\u2011pool usage and error rates between the two versions.",
+        "Observe whether latency and CPU utilization drop after reverting the change."
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "A transient surge in incoming request rate overwhelmed the database, filling the connection pool regardless of code changes.",
+      "evidence_ids": [
+        "EV-MET-006",
+        "EV-MET-001",
+        "EV-LOG-002",
+        "EV-LOG-003",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "Metrics EV-MET-006 show request rate spiking to 52.1\u202frps, while EV-MET-001 records p95 latency jumping to 10\u202fs. Log EV-LOG-002 documents a 504 gateway timeout during bulk processing, and EV-LOG-003 reports a DB query queue depth of 142, indicating backlog. CPU utilization at 99% (EV-MET-003) aligns with a sudden load increase.",
+      "falsification_criteria": [
+        "If the request\u2011rate time series for the incident window stays at or below the normal baseline (~46\u202frps), the hypothesis is falsified."
+      ],
+      "verification_plan": [
+        "Extract the request\u2011rate series for the incident period and compare it to the baseline.",
+        "Correlate request\u2011rate spikes with latency, queue depth, and CPU metrics.",
+        "Replay the observed request pattern in a staging environment to see if it reproduces pool exhaustion.",
+        "Demonstrate that throttling the request rate eliminates the errors."
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The database connection pool is misconfigured with a maximum size of 20, which is insufficient for the workload, causing exhaustion under normal traffic.",
+      "evidence_ids": [
+        "EV-MET-005",
+        "EV-LOG-001",
+        "EV-LOG-004",
+        "EV-MET-008",
+        "EV-MET-009"
+      ],
+      "supporting_reasoning": "Metrics EV-MET-005 record active DB connections reaching the pool limit of 20, and EV-MET-008 notes CPU usage exceeding the 90\u202f% alert threshold. Log EV-LOG-001 confirms the pool was exhausted at 20/20 connections, while EV-LOG-004 shows connection\u2011acquisition latency of 450\u202fms. Correlation EV-MET-009 shows a near\u2011perfect link between active connections and CPU load, suggesting the pool size is a bottleneck.",
+      "falsification_criteria": [
+        "If increasing the pool max size (e.g., to 40) does not reduce exhaustion events under the same traffic pattern, the hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Raise the DB connection\u2011pool max size configuration to a higher value (e.g., 40).",
+        "Run the same workload and monitor active connections, pool\u2011exhaustion logs, and latency.",
+        "Check whether error rates and CPU usage decrease after the change.",
+        "If errors persist despite the larger pool, reject the hypothesis."
+      ]
+    }
+  ]
+}

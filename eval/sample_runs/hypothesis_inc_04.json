@@ -1,0 +1,67 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The introduction of the global mutable dictionary AUDIT_TRACE_REGISTRY that stores raw file bytes for each upload causes unbounded memory growth, leading to the OOM kill.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-MET-001",
+        "EV-MET-002"
+      ],
+      "supporting_reasoning": "Code changes added a class\u2011level dict (AUDIT_TRACE_REGISTRY) that retains a reference to every uploaded file's bytes and never clears entries. As uploads increase, the dict grows without bound, inflating the process RSS (EV-MET-001) and causing GC time to spike (EV-MET-002). The memory surge aligns with the OOM events recorded in the logs.",
+      "falsification_criteria": [
+        "If the size of AUDIT_TRACE_REGISTRY remains constant under a high volume of uploads, the hypothesis is disproved.",
+        "If disabling or removing the registry code does not change the memory RSS or OOM occurrence under identical load, the hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Instrument the application to log the number of entries and total byte size stored in AUDIT_TRACE_REGISTRY at regular intervals.",
+        "Deploy a test build where the registry insertion is commented out and replay the same upload workload, measuring RSS and GC time.",
+        "Compare memory and OOM metrics between the original and modified builds; a significant reduction would support the hypothesis."
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "A sudden spike in concurrent upload requests exceeded the container's memory limit, causing system\u2011wide memory pressure and the OOM kill.",
+      "evidence_ids": [
+        "EV-MET-003",
+        "EV-LOG-004",
+        "EV-LOG-003",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "Metrics show active uploads rose to 15 (EV-MET-003), well above the typical 6, while memory usage warnings (85% of limit) and critical alerts appear shortly before the OOM (EV-LOG-004, EV-LOG-003). The RSS jump to ~995\u202fMB (EV-MET-001) matches the container limit of 1024\u202fMB, indicating the load alone could have saturated memory.",
+      "falsification_criteria": [
+        "If request logs prove that concurrent uploads remained at baseline levels during the OOM window, the hypothesis is disproved.",
+        "If reproducing the same upload volume in a controlled test does not cause memory to approach the container limit, the hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Extract timestamps of upload requests from application logs to compute concurrent upload count during the OOM period.",
+        "Run a load test that mimics the observed peak of 15 concurrent uploads and monitor container memory usage.",
+        "Confirm whether memory consumption reaches the limit and triggers OOM under the reproduced load."
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "Replacing streaming processing (BytesIO) with direct storage of full file bytes increased per\u2011request memory footprint, elevating GC overhead and precipitating the OOM kill.",
+      "evidence_ids": [
+        "EV-CODE-004",
+        "EV-MET-002",
+        "EV-MET-005",
+        "EV-LOG-003"
+      ],
+      "supporting_reasoning": "The removed streaming code (EV-CODE-004) eliminated the use of a temporary BytesIO buffer, causing the entire file payload to be retained in memory. This change coincides with a sharp increase in GC pause time (EV-MET-002) and a strong positive correlation between RSS and GC time (EV-MET-005). The resulting memory pressure is reflected in the critical OOM log entry (EV-LOG-003).",
+      "falsification_criteria": [
+        "If reinstating the BytesIO streaming logic does not reduce memory RSS or GC time under the same load, the hypothesis is disproved.",
+        "If profiling shows that per\u2011request memory usage is unchanged despite the code change, the hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Create a branch that restores the original streaming implementation using BytesIO as in the removed code.",
+        "Execute a load test identical to the production spike, measuring per\u2011request memory allocation and GC duration.",
+        "Compare these metrics to the current version; a measurable reduction would validate the hypothesis."
+      ]
+    }
+  ]
+}
