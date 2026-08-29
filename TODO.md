@@ -18,17 +18,17 @@
   - Executed benchmark on Groq (`openai/gpt-oss-120b`) across all 10 synthetic incidents.
   - Measured 10/10 root-cause accuracy, 0% verification score, 15.98s average latency.
   - Saved outputs to `eval/results_baseline.csv` and `eval/baseline_summary.json`.
-
+- [x] **Milestone 6a: Logs Agent + Deterministic Log Tools** (2026-08-29)
+  - Implemented `agents/log_tools.py` (no LLM calls).
+  - Implemented `agents/logs_agent.py` using `core.llm` and locked model `openai/gpt-oss-120b`.
+  - Schema: `schemas/logs_agent_schema.json`.
+  - Unit tests mocked; live Groq sample runs for incidents 01 and 10.
 
 
 ---
 
 ## Upcoming Milestones
-- [ ] **Milestone 5: Baseline Benchmark Evaluation Runner**
-  - Implement full 10-incident evaluation loop in `eval/run_eval.py --mode baseline`.
-  - Score baseline accuracy, hallucination rate, and evidence citations against `ground_truth.md`.
-- [ ] **Milestone 6: Specialized Evidence Gathering Agents**
-  - Implement `agents/logs_agent.py` (deterministic log parser + Groq summarizer).
+- [ ] **Milestone 6b: Remaining Specialized Evidence Agents**
   - Implement `agents/metrics_agent.py` (statistical anomaly detector + Groq summarizer).
   - Implement `agents/code_agent.py` (diff inspection + AST/file analyzer).
 - [ ] **Milestone 7: Hypothesis Engine & Verification Agent**

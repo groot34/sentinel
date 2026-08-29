@@ -1,0 +1,70 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "agent": "logs_agent",
+  "summary": "Warnings and errors show rising DB pool latency, pool exhaustion, and request timeouts, accompanied by a degraded healthcheck reporting high query queue depth; network retransmissions are noted but appear unrelated.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:10:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:10:30Z ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer",
+      "interpretation": "DB connection pool reached its maximum of 20 active connections, all held by bulk order processing, indicating possible contention for connections."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:10:05Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:10:05Z ERROR [order-service] [http-worker-4] GET /api/v1/orders/bulk?page=3 504 GATEWAY_TIMEOUT - 10002ms (queries executed: 184 before timeout)",
+      "interpretation": "HTTP request timed out after >10\u202fs while processing many queries, suggesting downstream latency or resource saturation."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:12",
+      "timestamp": "2026-08-28T14:15:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:15:00Z ERROR [order-service] [http-worker-1] Healthcheck degraded: DB query queue depth = 142",
+      "interpretation": "Healthcheck reports a large DB query queue (142), indicating backlog and possible pressure on the database layer."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:09:12Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:09:12Z WARN [order-service] [db-pool] Query pool latency exceeding threshold: 450ms avg wait",
+      "interpretation": "Average wait time for acquiring a DB connection is 450\u202fms, exceeding the configured threshold and hinting at contention."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:08:45Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:08:45Z WARN [order-service] [http-worker-1] GET /api/v1/orders/bulk?page=2 200 OK - 890ms (queries: 250)",
+      "interpretation": "Bulk order request completed successfully but took 890\u202fms with 250 queries, showing elevated latency."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:11",
+      "timestamp": "2026-08-28T14:12:15Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:12:15Z ERROR [order-service] [http-worker-2] GET /api/v1/orders/1002 500 INTERNAL_SERVER_ERROR - TimeoutAcquiringConnection: pool empty",
+      "interpretation": "Request failed due to inability to acquire a DB connection (pool empty), reinforcing evidence of pool exhaustion."
+    },
+    {
+      "evidence_id": "EV-LOG-007",
+      "source": "logs",
+      "reference": "logs/application.log:10",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:11:00Z WARN [order-service] [network-monitor] TCP retransmissions observed on replica bond0 (packet_loss=0.01%) - distractor",
+      "interpretation": "Minor network retransmissions detected; marked as low relevance to the observed DB pool issues."
+    }
+  ]
+}

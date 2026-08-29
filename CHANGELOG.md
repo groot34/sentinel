@@ -2,6 +2,25 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.5.0] - 2026-08-29
+
+### Added
+- **Deterministic Log Tools (`agents/log_tools.py`)**:
+  - Mechanical extractors with no LLM calls: `search_log`, `find_error_lines`, `find_warning_lines`, `count_pattern`, `find_bursts`, `extract_time_window`, `extract_context`, `extract_request_ids`, `collect_candidate_evidence`.
+  - 1-indexed references of the form `logs/application.log:<line>` pointing at exact original excerpts.
+- **Logs Evidence Agent (`agents/logs_agent.py`)**:
+  - Loads `logs/application.log` from an incident directory, never `ground_truth.md`.
+  - Runs deterministic extraction first, then exactly one `core.llm` structured summarisation call (`openai/gpt-oss-120b`).
+  - Returns observational evidence JSON (not a root-cause diagnosis), with stable IDs `EV-LOG-001+` grounded to real lines.
+  - CLI: `python -m agents.logs_agent <incident_dir> --output <path>`.
+- **Logs Agent Schema (`schemas/logs_agent_schema.json`)**: Structured evidence contract with `incident_id`, `agent`, `summary`, and traceable evidence items.
+- **Unit tests**:
+  - `tests/test_log_tools.py` (11 tests) covering search, false references, errors, warnings, counts, context, time windows, request IDs, bursts, empty logs.
+  - `tests/test_logs_agent.py` (11 tests, mocked Groq) covering core.llm usage, single call, ground-truth isolation, malformed JSON fallback, empty/noisy logs, unique IDs, unmodified incident files.
+- **Live Groq sample runs** (not a Sentinel benchmark):
+  - `eval/sample_runs/logs_agent_inc_01.json`
+  - `eval/sample_runs/logs_agent_inc_10.json`
+
 ## [0.4.0] - 2026-08-29
 
 
@@ -71,8 +90,8 @@ All notable changes and iterative improvements to the Sentinel project will be d
 ## [Unreleased]
 
 ### Planned Next
-- `baseline/baseline_agent.py`: Single-call unverified LLM baseline runner for fair comparative benchmark.
-- Specialized Evidence Agents (`logs_agent.py`, `metrics_agent.py`, `code_agent.py`).
-- Verification Engine (`verification_agent.py`) executing programmatic invariant checks.
+- Specialized Evidence Agents (`metrics_agent.py`, `code_agent.py`).
+- Hypothesis Engine and Verification Agent.
+- Orchestrator, Fix Proposal Agent, and comparative Sentinel evaluation.
 
 

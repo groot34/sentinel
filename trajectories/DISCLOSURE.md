@@ -8,7 +8,9 @@ In compliance with the hackathon transparency requirements, this document record
 |:---|:---|:---|:---|:---|
 | *Repository Skeleton & Setup* | Antigravity AI Coding Agent | Gemini 3.7 Flash | Antigravity IDE | 2026-08-28 |
 | *Synthetic Incidents Generation* | *[To be recorded upon execution]* | *[Model]* | *[Harness]* | *[Date]* |
-| *Baseline Implementation* | *[To be recorded upon execution]* | *[Model]* | *[Harness]* | *[Date]* |
+| *Baseline Implementation* | Antigravity AI Coding Agent | Gemini 3.7 Flash | Antigravity IDE | 2026-08-29 |
+| *Baseline Evaluation Benchmark* | Antigravity AI Coding Agent | Claude Sonnet 4.6 | Antigravity IDE | 2026-08-29 |
+| *Logs Agent + Deterministic Log Tools* | Cursor Grok 4.6 | Cursor Grok 4.6 | Cursor IDE | 2026-08-29 |
 | *Advanced Sentinel Multi-Agent* | *[To be recorded upon execution]* | *[Model]* | *[Harness]* | *[Date]* |
 | *Evaluation & Benchmark Execution* | *[To be recorded upon execution]* | *[Model]* | *[Harness]* | *[Date]* |
 

@@ -1,0 +1,88 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "agent": "logs_agent",
+  "summary": "Multiple warnings and errors observed between 14:04 and 14:07, including transient disk pressure, query latency spikes, client retries, DB connection\u2011pool saturation, health\u2011check timeouts, gateway timeouts and pod termination, indicating escalating resource pressure and cascading failures.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:30Z ERROR [ledger-service] [db-pool] Connection pool saturated: 15/15 connections held by long-running sequential scans",
+      "interpretation": "DB connection pool fully utilized by long\u2011running scans, showing resource contention."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [ledger-service] GET /api/v1/health 500 INTERNAL_SERVER_ERROR - Healthcheck failed to acquire DB connection within 500ms",
+      "interpretation": "Health endpoint could not obtain a DB connection quickly, reflecting pool pressure."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:11",
+      "timestamp": "2026-08-28T14:06:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:30Z FATAL [k8s] Readiness probe failed 3 consecutive times. Kubernetes killing pod ledger-service-67b8d-x9q42",
+      "interpretation": "Kubernetes marked the pod unready and terminated it after repeated probe failures."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:12",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:00Z ERROR [ingress] 502 BAD_GATEWAY: No live upstream backend pods available for ledger-service",
+      "interpretation": "Ingress reported no healthy backend pods, likely a consequence of the pod termination."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:04:45Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:45Z WARN [ledger-service] [db] Query 'SELECT * FROM ledger_entries WHERE account_id = ? ORDER BY entry_date DESC' query time jumped to 1850ms (Seq Scan on 5M rows)",
+      "interpretation": "Database query latency spiked, indicating heavy scanning workload."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 1",
+      "interpretation": "Client observed a timeout and initiated the first retry."
+    },
+    {
+      "evidence_id": "EV-LOG-007",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 2",
+      "interpretation": "A second retry was triggered shortly after the first, showing repeated timeouts."
+    },
+    {
+      "evidence_id": "EV-LOG-008",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:15Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:15Z WARN [ledger-service] [k8s-autoscaler] Worker node 4 reported transient disk pressure event - distractor",
+      "interpretation": "Node reported transient disk pressure, a potential I/O stress indicator."
+    },
+    {
+      "evidence_id": "EV-LOG-009",
+      "source": "logs",
+      "reference": "logs/application.log:10",
+      "timestamp": "2026-08-28T14:06:15Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:15Z ERROR [ledger-service] GET /api/v1/accounts/10293/balance 504 GATEWAY_TIMEOUT",
+      "interpretation": "Client request timed out, likely due to underlying DB latency or pool saturation."
+    }
+  ]
+}

@@ -15,6 +15,7 @@ SCHEMA_FILES = [
     "verification_schema.json",
     "orchestrator_schema.json",
     "report_schema.json",
+    "logs_agent_schema.json",
 ]
 
 
@@ -40,6 +41,30 @@ def test_baseline_schema_validation() -> None:
         "reasoning": "Logs show multiple timeout errors following deployment of retry middleware.",
         "confidence": 0.85,
         "suggested_mitigation": "Increase pool size and rollback retry middleware",
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_logs_agent_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "logs_agent_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "agent": "logs_agent",
+        "summary": "Errors show pool exhaustion after bulk queries.",
+        "evidence": [
+            {
+                "evidence_id": "EV-LOG-001",
+                "source": "logs",
+                "reference": "logs/application.log:9",
+                "timestamp": "2026-08-28T14:10:30Z",
+                "type": "error",
+                "excerpt": "ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer",
+                "interpretation": "Connection pool is fully occupied.",
+            }
+        ],
     }
     jsonschema.validate(instance=valid_sample, schema=schema)
 

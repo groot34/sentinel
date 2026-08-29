@@ -27,9 +27,22 @@ cp .env.example .env
 
 ## Running Tests (No API Key Required)
 ```bash
-# Run full test suite — 42 tests, zero real Groq API calls
+# Run full test suite — zero real Groq API calls
 pytest
 ```
+
+## Running Logs Agent (Evidence Only)
+```bash
+# Incident 01 — deterministic log tools + one Groq summarisation call
+python -m agents.logs_agent incidents/inc_01_n_plus_one_query \
+  --output eval/sample_runs/logs_agent_inc_01.json
+
+# Incident 10 — multi-symptom case (observations only, not a root-cause diagnosis)
+python -m agents.logs_agent incidents/inc_10_multi_symptom_cascade \
+  --output eval/sample_runs/logs_agent_inc_10.json
+```
+
+Requires `GROQ_API_KEY` and locked model `openai/gpt-oss-120b`. The Logs Agent does not read `ground_truth.md` and does not run the Sentinel benchmark.
 
 ## Running Single Baseline Diagnosis
 ```bash

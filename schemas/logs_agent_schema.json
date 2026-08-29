@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LogsAgentEvidence",
+  "description": "Structured, traceable log evidence produced by the Logs Agent. This is not a root-cause diagnosis.",
+  "type": "object",
+  "required": ["incident_id", "agent", "evidence"],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Identifier of the analyzed incident bundle."
+    },
+    "agent": {
+      "type": "string",
+      "const": "logs_agent",
+      "description": "Producing agent. Always logs_agent."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short organisation of log observations. Must not claim a verified root cause."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Prioritised log evidence items with stable IDs and precise source references.",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "source",
+          "reference",
+          "type",
+          "excerpt"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^EV-LOG-[0-9]{3,}$",
+            "description": "Stable unique identifier (e.g. EV-LOG-001)."
+          },
+          "source": {
+            "type": "string",
+            "const": "logs",
+            "description": "Origin of this evidence item."
+          },
+          "reference": {
+            "type": "string",
+            "description": "Precise source locator, e.g. logs/application.log:42."
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Timestamp extracted from the log line when present."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["error", "warning", "pattern", "burst", "context"],
+            "description": "Deterministic extraction category."
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "Exact original log line text. Must not be paraphrased."
+          },
+          "interpretation": {
+            "type": "string",
+            "description": "LLM organisation/priority note. Observational only, not a diagnosis."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

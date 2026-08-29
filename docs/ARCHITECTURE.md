@@ -14,7 +14,7 @@ To guarantee strict reproducibility and avoid vendor lock-in, Sentinel separates
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ LAYER B: Sentinel Runtime (Execution Time)                  │
-│ Free Groq API (`llama-3.3-70b-versatile`)                   │
+│ Free Groq API (`openai/gpt-oss-120b`)                       │
 └──────────────────────────────┬──────────────────────────────┘
                                │
                ┌───────────────┴───────────────┐
@@ -32,10 +32,26 @@ All agents interact exclusively with `core.llm.GroqLLMClient` via `get_llm_clien
 
 ```
 agents/logs_agent.py ────────┐
-agents/metrics_agent.py ─────┼──► core/llm.py (GroqLLMClient) ──► Groq API (llama-3.3-70b-versatile)
+agents/metrics_agent.py ─────┼──► core/llm.py (GroqLLMClient) ──► Groq API (openai/gpt-oss-120b)
 agents/code_agent.py ────────┤
 agents/verification_agent.py ┘
 ```
+
+### Logs Agent pipeline (implemented)
+
+```
+incident logs (logs/application.log)
+        ↓
+deterministic log tools (agents/log_tools.py)
+        ↓
+candidate evidence (exact excerpts + file:line references)
+        ↓
+Groq evidence summarisation (one generate_structured call)
+        ↓
+structured log evidence (schemas/logs_agent_schema.json)
+```
+
+The Logs Agent organises observations only. It does not emit a verified root cause.
 
 ### Key Architectural Guardrails
 1. **Zero Secret Leakage**: `_sanitize_message` strips Groq/OpenAI pattern tokens from all exceptions, error logs, and stack traces.
