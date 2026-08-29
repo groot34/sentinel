@@ -1,0 +1,77 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "agent": "metrics_agent",
+  "summary": "Metrics show a sharp spike in outbound gateway calls at 14:06Z, concurrent spikes in 503 and 429 error percentages, a drop in ingress charge request rate, period changes for the error percentages, and a strong positive correlation between outbound calls and 429 errors.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "outbound_gateway_calls_sec",
+      "value": 525.0,
+      "type": "spike",
+      "interpretation": "Outbound gateway calls per second surged far above the baseline (z\u2011score ~474), indicating an abnormal increase at this time."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_503_pct",
+      "value": 75.0,
+      "type": "spike",
+      "interpretation": "HTTP 503 error percentage jumped to 75%, a marked deviation from the usual zero rate."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "gateway_429_pct",
+      "value": 48.0,
+      "type": "spike",
+      "interpretation": "HTTP 429 error percentage rose to 48%, another significant spike relative to the baseline."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "ingress_charge_reqs_sec",
+      "value": 48.0,
+      "type": "drop",
+      "interpretation": "Ingress charge request rate fell to 48/sec, a drop of 3 units below the baseline (z\u2011score -3)."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_503_pct",
+      "value": 75.0,
+      "type": "period_change",
+      "interpretation": "The 503 error percentage increased by 33 percentage points compared to the prior period."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "gateway_429_pct",
+      "value": 48.0,
+      "type": "period_change",
+      "interpretation": "The 429 error percentage rose by about 20.75 percentage points relative to the baseline period."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "outbound_gateway_calls_sec~gateway_429_pct",
+      "value": 0.8215214818418446,
+      "type": "correlation",
+      "interpretation": "Outbound gateway calls and 429 error percentage exhibit a strong positive Pearson correlation (r\u22480.82) over the sampled interval."
+    }
+  ]
+}

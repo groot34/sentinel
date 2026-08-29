@@ -1,0 +1,39 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "agent": "code_agent",
+  "summary": "Observed a connection\u2011acquire method that increments active connections without a guaranteed release, and a migration change that adds a comment before a DROP INDEX statement without altering the actual SQL command.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "code",
+      "reference": "service/app.py:9-13",
+      "type": "suspicious_pattern",
+      "excerpt": "    def acquire(self):\n        if self.active_conns >= self.max_conns:\n            raise TimeoutError(\"DB Pool Full\")\n        self.active_conns += 1\n        return self",
+      "interpretation": "The acquire method raises an error when the pool is full and increments active_conns, but there is no explicit release path shown, which may affect connection lifecycle."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+      "interpretation": "The original migration line that drops the index was removed in the diff, indicating a change to the migration script."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+      "interpretation": "A comment line was added before the DROP INDEX statement; the SQL command itself remains unchanged."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "changed_config",
+      "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;\n+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+      "interpretation": "The migration file was edited to include a descriptive comment, which does not modify the operational effect of the DROP INDEX command."
+    }
+  ]
+}

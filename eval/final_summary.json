@@ -1,0 +1,177 @@
+{
+  "model": "openai/gpt-oss-120b",
+  "total_incidents": 10,
+  "baseline": {
+    "total": 10,
+    "correct": 10,
+    "incorrect": 0,
+    "review": 0,
+    "failures": 0,
+    "accuracy": 1.0,
+    "accuracy_pct": "10/10 = 100.0%",
+    "avg_latency_seconds": 15.984,
+    "total_tokens": 26544,
+    "total_llm_calls": 10,
+    "verification_score": 0,
+    "note": "Single-shot Groq model. Guesses root cause without executable verification. Numbers locked from baseline_summary.json produced by commit e999b2a live run."
+  },
+  "sentinel": {
+    "total": 10,
+    "correct": 10,
+    "incorrect": 0,
+    "review": 0,
+    "failures": 0,
+    "accuracy": 1.0,
+    "accuracy_pct": "10/10 = 100.0%",
+    "avg_latency_seconds": 145.436,
+    "total_tokens": 0,
+    "total_llm_calls": 58,
+    "verified_root_causes": 10,
+    "verified_root_causes_pct": "10/10 = 100.0%",
+    "hypotheses_generated": 31,
+    "hypotheses_confirmed": 30,
+    "hypotheses_rejected": 1,
+    "hypotheses_inconclusive": 0,
+    "note": "Multi-agent pipeline with deterministic, read-only verification. Each root cause has a traceable evidence chain HYP \u2192 EV-IDs \u2192 CHK-IDs \u2192 PASS/FAIL \u2192 verdict. Total Groq calls \u2248 sum of individual stage calls (verification itself uses 0 Groq). Instrumentation gap: sentinel stage-level token counts are not reported by IncidentOrchestrator (0 recorded)."
+  },
+  "comparison": {
+    "accuracy_delta": 0.0,
+    "accuracy_delta_pct": "+0.0 percentage points",
+    "relative_improvement": 0.0,
+    "latency_delta_seconds": 129.452,
+    "token_delta": -26544,
+    "additional_llm_calls": 48,
+    "incidents_improved": 0,
+    "incidents_regressed": 0,
+    "incidents_equal": 10,
+    "verification_improvement": "Sentinel verified: 10/10 = 100% of incidents have \u22651 CONFIRMED hypothesis. Baseline verification = 0% (no checks executed)."
+  },
+  "per_incident": [
+    {
+      "incident_id": "inc_01_n_plus_one_query",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 1,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "N+1 query in loop for items",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_02_cache_stampede",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 4,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "A misconfigured 5\u2011second cache TTL caused rapid expirations, leading to a cache stampede and downstream DB overload.",
+      "verdict_explanation": "Identified all core causal mechanisms (2/2 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_03_consumer_lag",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "A poll timeout (max.poll.interval.ms) on worker\u20112 caused a rebalance storm, removing the worker from the consumer group and leading to a sudden drop in consumption rate and lag accumulation.",
+      "verdict_explanation": "Identified all core causal mechanisms (2/2 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_04_memory_leak",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "The newly introduced global AUDIT_TRACE_REGISTRY dict that stores raw bytes of each uploaded file causes unbounded memory growth, leading to the OOM kill.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_05_race_condition",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "The recent in\u2011memory check\u2011then\u2011act implementation (without locking) introduced a race condition that allowed concurrent reservations to oversell SKU\u2011901, producing negative inventory.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_06_connection_exhaustion",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "Invalid date filters cause unhandled ValueError exceptions that prevent connection release, leaking pool connections and leading to exhaustion.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_07_retry_storm",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "The recent code change that raised MAX_RETRIES to 10 and set BACKOFF_BASE_SECONDS to 0.0 caused immediate, rapid retries, producing the outbound request surge and downstream overload.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_08_cascading_timeout",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "An external tax service latency spike to ~25\u201130\u202fseconds, independent of code changes, blocked all worker threads, leading to 504 gateway timeouts and 503 service\u2011busy responses.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_09_dropped_index",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 3,
+      "sentinel_status": "COMPLETED",
+      "root_cause": "The removal of index idx_tenant_status_name caused the search queries to fall back to full sequential scans, which saturated disk I/O and produced the observed latency spikes.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    },
+    {
+      "incident_id": "inc_10_multi_symptom_cascade",
+      "baseline": "CORRECT",
+      "sentinel": "CORRECT",
+      "sentinel_verified": true,
+      "sentinel_confirmed": 4,
+      "sentinel_status": "PARTIAL",
+      "root_cause": "The service failure cascade was triggered by DB connection\u2011pool saturation caused by long\u2011running sequential scans on the ledger_entries table.",
+      "verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+      "error": ""
+    }
+  ],
+  "safety": {
+    "ground_truth_isolated": true,
+    "baseline_isolated": true,
+    "source_modifications": 0,
+    "patches_auto_applied": 0,
+    "approval_mode": "non-interactive (auto-reject); approval auto-rejection is not treated as investigation failure (Milestone \u00a75)."
+  },
+  "integrity": {
+    "baseline_numbers_from": "eval\\baseline_summary.json",
+    "sentinel_numbers_from": "eval\\final_comparison.csv",
+    "denominator": 10,
+    "correctness_rule": "sentinel accuracy = s_correct / total_incidents. Failures are NOT removed from the denominator. PARTIAL status (e.g. fix_proposal stage rate-limited) does NOT reduce correctness if diagnosis and verification produced a verdict (per Milestone \u00a75: approval/safety-gate rejection is not an investigation failure).",
+    "instrumentation_gaps": [
+      "Sentinel stage token counts not exposed by IncidentOrchestrator \u2192 0 in output."
+    ]
+  }
+}

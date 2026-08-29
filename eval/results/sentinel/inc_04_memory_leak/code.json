@@ -1,0 +1,39 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "code_agent",
+  "summary": "The diff adds a global mutable dictionary AUDIT_TRACE_REGISTRY and stores uploaded file bytes in it, while removing the previous stream\u2011based text extraction logic. A class\u2011level mutable collection is also declared in app.py. These changes introduce unbounded in\u2011memory storage of raw file data, which could affect memory usage.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Adds a module\u2011level dict and stores each uploaded file's raw bytes in it, returning the byte length instead of processing the content."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+      "interpretation": "Removes the previous creation of an in\u2011memory BytesIO stream and the call to _extract_text, eliminating the earlier processing path."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Pattern flagged as 'unbounded_collection': the new global dict may grow without bound as each upload stores the full byte payload."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "code",
+      "reference": "service/app.py:5",
+      "type": "suspicious_pattern",
+      "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+      "interpretation": "Declaration of a mutable dict at module scope, a known source of unbounded memory growth if entries are never evicted."
+    }
+  ]
+}

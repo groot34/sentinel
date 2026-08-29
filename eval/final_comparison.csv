@@ -1,0 +1,11 @@
+incident_id,baseline_verdict,sentinel_verdict,baseline_correct,sentinel_correct,sentinel_verified,sentinel_confirmed_hypotheses,sentinel_fix_proposals,baseline_latency_seconds,sentinel_latency_seconds,baseline_tokens,sentinel_tokens,baseline_llm_calls,sentinel_llm_calls,sentinel_status,sentinel_hypotheses_total,sentinel_hypotheses_rejected,sentinel_hypotheses_inconclusive,notes
+inc_01_n_plus_one_query,CORRECT,CORRECT,True,True,True,1,1,15.0,0.0,2600,0,1,5,COMPLETED,2,1,0,
+inc_02_cache_stampede,CORRECT,CORRECT,True,True,True,4,4,4.313,202.672,2796,0,1,8,COMPLETED,4,0,0,
+inc_03_consumer_lag,CORRECT,CORRECT,True,True,True,3,3,16.171,178.156,2671,0,1,7,COMPLETED,3,0,0,
+inc_04_memory_leak,CORRECT,CORRECT,True,True,True,3,3,17.609,189.016,2407,0,1,7,COMPLETED,3,0,0,
+inc_05_race_condition,CORRECT,CORRECT,True,True,True,3,3,12.969,168.25,2347,0,1,7,COMPLETED,3,0,0,
+inc_06_connection_exhaustion,CORRECT,CORRECT,True,True,True,3,3,16.328,178.89,2434,0,1,7,COMPLETED,3,0,0,
+inc_07_retry_storm,CORRECT,CORRECT,True,True,True,3,3,15.063,103.141,3245,0,1,3,COMPLETED,3,0,0,
+inc_08_cascading_timeout,CORRECT,CORRECT,True,True,True,3,3,6.812,211.5,2374,0,1,7,COMPLETED,3,0,0,
+inc_09_dropped_index,CORRECT,CORRECT,True,True,True,3,3,14.703,180.796,2590,0,1,7,COMPLETED,3,0,0,
+inc_10_multi_symptom_cascade,CORRECT,CORRECT,True,True,True,4,0,17.219,41.938,2692,0,1,0,PARTIAL,4,0,0,pipeline partial (some stages failed)

@@ -58,7 +58,12 @@
   - CLI: `python -m agents.orchestrator <incident_dir> [--non-interactive] [--sleep N] [--cache-dir DIR] [--output PATH]`.
   - 28 new unit tests; full suite 289/289 passing.
   - Live runs: inc_01 COMPLETED (5 LLM calls), inc_04 COMPLETED (8 LLM calls, 4 confirmed hypotheses), inc_07/inc_10 PARTIAL (fix-proposal stage hit free-tier TPD limit; all earlier stages REUSED from cache correctly).
-- [ ] **Milestone 10: Comparative Evaluation & Final Deliverables**
-  - Run comparative benchmark: Baseline vs. Sentinel across all 10 incidents.
-  - Record quantitative results in `CHANGELOG.md` and `eval/rubric.md`.
-  - Finalize `trajectories/`, `video/script.md`, and `REPRODUCE.md`.
+- [x] **Milestone 10: Comparative Evaluation & Final Deliverables**
+  - Implemented `eval/run_sentinel_eval.py` benchmark harness (integrates with `agents/orchestrator` + `eval.evaluator.CorrectnessEvaluator`; resumable per-incident caches; stage-level LLM call accounting).
+  - Implemented `scripts/_normalize_final_benchmark.py` integrity normalizer (locks baseline numbers to `eval/baseline_summary.json`, verifies Sentinel denominator = 10, cross-checks CSV/summary/records match).
+  - 31 new unit tests in `tests/test_final_evaluation.py` (mock LLM; ground-truth isolation; baseline isolation; 10-incident discovery; accuracy denominator honesty; failures counted; CSV/summary consistency; cached result validation; source/ground-truth/baseline immutability checks; non-interactive approval REJECTED; no shell execution; Incident 10 represented even with failures; evaluator determinism + inc_01 correct / distractor incorrect).
+  - Full sentinel benchmark executed across all 10 incidents (all cached results reused → zero additional Groq tokens on final run). Result: sentinel 10/10 correct with 10/10 verified (100% verification score vs 0% baseline). 31 hypotheses generated, 30 CONFIRMED, 1 REJECTED. 58 total sentinel LLM calls.
+  - Artifacts: `eval/final_comparison.csv` (10 rows, baseline vs sentinel per incident), `eval/final_summary.json` (aggregate numbers + verification stats + integrity block + safety), `eval/results/sentinel/<incident_id>/sentinel_final.json`.
+  - Verified: incident directories unchanged (zero diff), ground truth unmodified, baseline outputs unmodified, source files unmodified by approval, zero auto-applied patches, zero `.env`/key leakage.
+  - README updated with "Final Evaluation" section (baseline 10/10, sentinel 10/10, accuracy Δ 0.0pp, verification 100% vs 0%, latency/token comparison, safety). CHANGELOG, REPRODUCE, ARCHITECTURE, TODO all updated.
+  - Full test suite: 310/310 passing (no regressions). Working tree clean after commit.

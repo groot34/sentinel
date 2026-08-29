@@ -1,0 +1,212 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [payment-client] Downstream gateway returned single transient 503 SERVICE_UNAVAILABLE",
+      "interpretation": "Initial transient failure from downstream gateway, observed as a 503 warning."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 1/10 for charge_id=ch_991...",
+      "interpretation": "First immediate retry attempt after the 503 warning."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 2/10 for charge_id=ch_991...",
+      "interpretation": "Second immediate retry attempt, indicating rapid retry loop."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 3/10 for charge_id=ch_991...",
+      "interpretation": "Third immediate retry, further evidence of a retry storm."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:05:05Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:05Z ERROR [payment-client] Outbound request rate amplified 10x (from 50 req/s to 500 req/s)",
+      "interpretation": "Observed 10x amplification of outbound request rate, indicating a burst of traffic likely driven by retries."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:10",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:30Z ERROR [payment-client] Downstream payment gateway collapsed under retry stampede (HTTP 429 & 503 cascade)",
+      "interpretation": "Downstream gateway failure due to overload from the retry storm, resulting in cascade of 429 and 503 errors."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "outbound_gateway_calls_sec",
+      "value": 525.0,
+      "type": "spike",
+      "interpretation": "Outbound gateway calls per second surged far above the baseline (z\u2011score ~474), indicating an abnormal increase at this time."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_503_pct",
+      "value": 75.0,
+      "type": "spike",
+      "interpretation": "HTTP 503 error percentage jumped to 75%, a marked deviation from the usual zero rate."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "gateway_429_pct",
+      "value": 48.0,
+      "type": "spike",
+      "interpretation": "HTTP 429 error percentage rose to 48%, another significant spike relative to the baseline."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "ingress_charge_reqs_sec",
+      "value": 48.0,
+      "type": "drop",
+      "interpretation": "Ingress charge request rate fell to 48/sec, a drop of 3 units below the baseline (z\u2011score -3)."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_503_pct",
+      "value": 75.0,
+      "type": "period_change",
+      "interpretation": "The 503 error percentage increased by 33 percentage points compared to the prior period."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "gateway_429_pct",
+      "value": 48.0,
+      "type": "period_change",
+      "interpretation": "The 429 error percentage rose by about 20.75 percentage points relative to the baseline period."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "outbound_gateway_calls_sec~gateway_429_pct",
+      "value": 0.8215214818418446,
+      "type": "correlation",
+      "interpretation": "Outbound gateway calls and 429 error percentage exhibit a strong positive Pearson correlation (r\u22480.82) over the sampled interval."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    MAX_RETRIES = 10\n+    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter",
+      "interpretation": "Shows the new constants that increase retry attempts and eliminate back\u2011off, enabling faster repeated calls."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-    MAX_RETRIES = 2\n-    BACKOFF_BASE_SECONDS = 0.5",
+      "interpretation": "Removes the previous lower retry limit and modest back\u2011off, indicating a deliberate shift toward more aggressive retry behavior."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:22-26",
+      "type": "suspicious_pattern",
+      "excerpt": "        while attempts < self.MAX_RETRIES:\n            attempts += 1\n            resp = self.gateway.charge(amount)\n            if resp.get(\"status\") == 200:\n                return resp",
+      "interpretation": "Implements a retry loop that will now iterate up to the increased MAX_RETRIES value."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "code",
+      "reference": "service/app.py:15",
+      "type": "suspicious_pattern",
+      "excerpt": "    BACKOFF_BASE_SECONDS = 0.0",
+      "interpretation": "Defines zero back\u2011off in the application, meaning retries will occur without delay."
+    },
+    {
+      "evidence_id": "EV-CODE-005",
+      "source": "code",
+      "reference": "service/app.py:14",
+      "type": "suspicious_pattern",
+      "excerpt": "    MAX_RETRIES = 10",
+      "interpretation": "Sets the in\u2011process retry limit to ten, matching the diff change."
+    },
+    {
+      "evidence_id": "EV-CODE-006",
+      "source": "config",
+      "reference": "docker-compose.yml:6",
+      "type": "suspicious_pattern",
+      "excerpt": "      - MAX_RETRIES=10",
+      "interpretation": "Environment variable propagates the higher retry count to the container runtime."
+    },
+    {
+      "evidence_id": "EV-CODE-007",
+      "source": "config",
+      "reference": "docker-compose.yml:7",
+      "type": "suspicious_pattern",
+      "excerpt": "      - BACKOFF_SECONDS=0.0",
+      "interpretation": "Environment variable removes back\u2011off delay at the container level, aligning with the code constants."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-CODE-004",
+    "EV-CODE-005",
+    "EV-CODE-006",
+    "EV-CODE-007",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-LOG-005",
+    "EV-LOG-006",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

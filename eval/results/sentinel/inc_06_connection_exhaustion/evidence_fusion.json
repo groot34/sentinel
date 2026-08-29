@@ -1,0 +1,156 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [reporting-service] Invalid date filter provided by user 109: '2026-99-99' -> raising ValueError",
+      "interpretation": "Observational: user supplied an impossible date, service logged a warning and raised ValueError."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [reporting-service] Invalid date filter provided by user 110: 'INVALID_DATE' -> raising ValueError",
+      "interpretation": "Observational: another malformed date input, similar warning recorded shortly after the previous one."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [reporting-service] Active pool connections: 10/10. Available: 0.",
+      "interpretation": "Observational: connection pool reached its maximum size, no free connections available at this moment."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:06:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:30Z ERROR [reporting-service] GET /api/v1/reports 500 INTERNAL_SERVER_ERROR - TimeoutError: QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00",
+      "interpretation": "Observational: a request failed with 500 due to the pool limit being hit and a timeout while waiting for a connection."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "metric": "active_connections",
+      "value": 10.0,
+      "type": "spike",
+      "interpretation": "Active connections spiked far above the recent baseline, indicating a sudden surge in usage."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "metric": "idle_connections",
+      "value": 0.0,
+      "type": "drop",
+      "interpretation": "Idle connections dropped to zero, the opposite of their typical level, suggesting resources were fully consumed."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "pool_timeout_errors",
+      "value": 24.0,
+      "type": "spike",
+      "interpretation": "Pool timeout errors rose sharply, reflecting many requests failing to acquire a connection."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "invalid_request_count",
+      "value": 10.0,
+      "type": "spike",
+      "interpretation": "Invalid request count increased markedly, coinciding with the connection surge."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "active_connections~idle_connections",
+      "value": -0.9999999999999999,
+      "type": "correlation",
+      "interpretation": "Active and idle connections are almost perfectly negatively correlated over the window."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "active_connections~invalid_request_count",
+      "value": 0.984473894675649,
+      "type": "correlation",
+      "interpretation": "Active connections and invalid requests show a strong positive correlation."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "idle_connections~invalid_request_count",
+      "value": -0.984473894675649,
+      "type": "correlation",
+      "interpretation": "Idle connections and invalid requests are strongly inversely correlated."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+        # Date parser can raise ValueError before conn.release()\n+        if not date_filter.startswith(\"2026-\"):\n+            raise ValueError(f\"Unsupported date format: {date_filter}\")",
+      "interpretation": "Adds a validation step that raises ValueError before the explicit conn.release(), introducing a potential leak of the acquired connection when an unsupported date is supplied."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "code",
+      "reference": "service/app.py:8-12",
+      "type": "suspicious_pattern",
+      "excerpt": "    def acquire(self):\n        if self.active >= self.size:\n            raise TimeoutError(\"Connection pool exhausted!\")\n        self.active += 1\n        return self",
+      "interpretation": "Acquires a connection by incrementing the active counter but does not pair this with a guaranteed release, so any early exit after acquire can leave the pool count inflated."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:24-30",
+      "type": "suspicious_pattern",
+      "excerpt": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+      "interpretation": "Acquires a connection, performs a query, then validates the date before releasing; if the date is invalid, the function raises before conn.release(), leaving the connection held."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

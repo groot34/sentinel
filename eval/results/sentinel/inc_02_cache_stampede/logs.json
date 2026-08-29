@@ -1,0 +1,52 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "agent": "logs_agent",
+  "summary": "Concurrent cache misses generated a surge of database queries, causing a connection pool spike, DB lock timeout, and a sharp drop in cache hit ratio. Warnings about simultaneous cache miss and pool pressure precede errors indicating service strain.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:04:16Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:16Z WARN [catalog-service] [worker-4] Simultaneous cache miss on key 'category:electronics:page1': 32 concurrent requests querying Postgres DB",
+      "interpretation": "Shows 32 concurrent requests missed the same cache key, indicating a potential cache stampede."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:04:20Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:04:20Z ERROR [catalog-service] [db] Postgres connection pool spike: 50 concurrent heavy catalog queries",
+      "interpretation": "Reports Postgres connection pool spike with 50 concurrent heavy catalog queries, reflecting increased DB load."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:00Z ERROR [catalog-service] HTTP GET /api/v1/categories/electronics 503 SERVICE_UNAVAILABLE - DB lock timeout",
+      "interpretation": "HTTP request returned 503 Service Unavailable due to DB lock timeout, showing service impact."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [catalog-service] Cache hit ratio plummeted to 12.1% under 200 RPS",
+      "interpretation": "Cache hit ratio dropped to 12.1% under 200 RPS, indicating cache effectiveness degradation."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:08Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:08Z WARN [catalog-service] [image-loader] Deprecated image URL format detected in catalog banner payload - distractor",
+      "interpretation": "Deprecated image URL format warning, unrelated to cache behavior but noted."
+    }
+  ]
+}

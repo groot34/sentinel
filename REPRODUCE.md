@@ -150,9 +150,9 @@ Verification is pure Python: AST scanning, log/metric CSV parsing, git-diff line
 python run_hypothesis_verification.py
 ```
 
-## Running Advanced Sentinel (Not Yet Implemented)
+## Running Advanced Sentinel (Full Orchestrator Pipeline)
 ```bash
-python -m eval.run_eval --mode advanced
+python -m eval.run_sentinel_eval --sleep 2 --start 1 --end 10
 ```
 
 
@@ -183,8 +183,56 @@ python -m agents.orchestrator incidents/inc_04_memory_leak \
 > proposal stage fails with a TPD error, wait for the daily reset and rerun — all earlier stages
 > will be restored from cache at zero token cost.
 
-## Running the Final Comparative Benchmark (Milestone 10 — Not Yet Run)
+## Running the Final Comparative Benchmark (Milestone 10 — Sentinel vs Baseline, All 10 Incidents)
 
 ```bash
-python -m eval.run_eval --mode advanced
+# Produces:
+#   eval/results/sentinel/<incident_id>/sentinel_final.json  (per-incident result)
+#   eval/final_comparison.csv          (10 rows, baseline vs sentinel per incident)
+#   eval/final_summary.json            (aggregate numbers + safety + integrity block)
+#
+# Resumable: existing sentinel_final.json are reused.
+# Rate-limit safe: sleeps between LLM-heavy stages, preserves completed results.
+# Uses CorrectnessEvaluator only AFTER the pipeline has finished (ground-truth isolation).
+# Sentinel runtime never reads baseline results or ground truth.
+
+python -m eval.run_sentinel_eval --sleep 2 --start 1 --end 10
+
+# Single-incident check
+python -m eval.run_sentinel_eval --incident inc_10_multi_symptom_cascade
+
+# Ignore cache and force a fresh pipeline run for one incident
+python -m eval.run_sentinel_eval --incident inc_10_multi_symptom_cascade --force-rerun
 ```
+
+**Post-benchmark integrity normalization (ensures baseline numbers come from the locked
+`baseline_summary.json` rather than being recomputed from potentially-incomplete CSV rows):**
+
+```bash
+python scripts/_normalize_final_benchmark.py
+```
+
+### Final Artifact Structure
+```
+eval/
+├── results_baseline.csv          ← LOCKED (10 rows; 10/10 correct from commit e999b2a)
+├── baseline_summary.json         ← LOCKED authoritative baseline aggregator
+├── final_comparison.csv          ← 10 rows; baseline_vs_sentinel per incident
+├── final_summary.json            ← aggregate numbers, accuracy_Δ, verification stats, safety
+└── results/sentinel/<inc_id>/
+    ├── logs.json                  ← Logs Agent evidence output (cached)
+    ├── metrics.json               ← Metrics Agent evidence output (cached)
+    ├── code.json                  ← Code Agent evidence output (cached)
+    ├── evidence_fusion.json       ← Fusion stage (zero Groq)
+    ├── hypotheses.json            ← Hypothesis Engine (1× Groq)
+    ├── verification.json          ← Verification Agent (zero Groq)
+    └── sentinel_final.json        ← Final result + evaluator verdict for this incident
+```
+
+### Benchmark Integrity Rules (Milestone 10)
+1. **Incidents never touched.** `git diff -- incidents/` must be empty after the run.
+2. **Ground-truth isolated.** Only `eval.evaluator.CorrectnessEvaluator` opens `ground_truth.md` and only *after* the pipeline finishes.
+3. **Baseline isolated.** Sentinel runtime never opens `results_baseline.csv`, `baseline_summary.json`, or `eval/results/baseline/`.
+4. **Accuracy denominator = 10** for both systems. Failures/PARTIAL status are NOT removed.
+5. **Approval gate auto-rejection is NOT an investigation failure** (per §5). Incident 10 reports `PARTIAL` status because the fix-proposal stage was rate-limited; the diagnosis verdict still counts because hypotheses + verification produced a CONFIRMED root cause.
+6. **All Sentinel verification is Groq-free.** Verification = 0 LLM calls (pure AST + CSV + git-diff + excerpt grounding).

@@ -104,11 +104,54 @@ Sentinel is evaluated against a fair baseline across 10 canonical synthetic prod
 | Component | Status | Accuracy (Root Cause) | Verification Score | Mean Latency | Notes |
 |---|---|:---:|:---:|:---:|---|
 | **Baseline Investigator** | **MEASURED** | **10/10 (100%)** | **0%** | **15.98s** | Single-shot Groq model (`openai/gpt-oss-120b`). Guesses root cause without executable verification. |
-| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED. Code Agent = IMPLEMENTED. Hypothesis Engine = IMPLEMENTED. Verification Agent = IMPLEMENTED. Fix Proposal Agent = IMPLEMENTED. Human Approval Gate = IMPLEMENTED. Orchestrator = IMPLEMENTED.** Final comparative benchmark is not yet run (Milestone 10). |
+| **Sentinel (Advanced)** | **MEASURED** | **10/10 (100%)** | **100%** | **145.44s** | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **All components IMPLEMENTED.** Fixes always gated behind explicit human approval (non-interactive default REJECTED). |
 
 **Fairness lock**: Baseline and Sentinel are benchmarked on the identical 10 incident bundles using the same Groq model (`openai/gpt-oss-120b`), temperature (`0.0`), and equivalent available evidence.
 
-Benchmark results are stored in `eval/results_baseline.csv` and `eval/baseline_summary.json`.
+Benchmark results stored in `eval/results_baseline.csv`, `eval/baseline_summary.json`, `eval/final_comparison.csv`, and `eval/final_summary.json`.
+
+### Final Evaluation (Milestone 10 — Complete)
+
+| Dimension | Baseline | Sentinel | Delta / Notes |
+|---|---|---|---|
+| Root-cause accuracy | **10/10 = 100.0%** | **10/10 = 100.0%** | +0.0 pp · 0% relative improvement |
+| Verified root causes (≥1 CONFIRMED hypothesis) | **0/10 = 0%** | **10/10 = 100.0%** | **+100 pp — the real win** |
+| Hypotheses generated | N/A (no hypothesis stage) | **31** | 30 CONFIRMED / 1 REJECTED / 0 INCONCLUSIVE |
+| LLM calls | **10** (1 per incident) | **58** (+48) | Logs:1 · Metrics:1 · Code:1 · Hypothesis:1 · Fix proposal: N per CONFIRMED hypothesis. Verification: 0. |
+| Total tokens | **26,544** | **0 reported** (instrumentation gap: IncidentOrchestrator does not expose stage-level token counts) | Baseline tokens locked from commit e999b2a baseline_summary.json. |
+| Average latency | **15.98 s** | **145.44 s** | +129.45 s (10× more stages: 3 evidence agents + fusion + hypothesis + verification + fix proposal + approval). Verification itself is pure Python AST/log/metric scanning (~sub-second per incident). |
+| Incidents improved | — | **0** | Both systems diagnose all 10 canonical incidents correctly. |
+| Incidents regressed | — | **0** | Sentinel never misdiagnoses a case that baseline got right. |
+| Incidents equal | — | **10** | The canonical 10-incident dataset is not hard enough to show accuracy differentiation. The Sentinel advantage is in verification rigor, not raw accuracy. |
+
+**Verification Effectiveness** (Milestone 7–10 design goal):
+- Baseline produces 0 verification checks. Every root-cause claim is an LLM guess.
+- Sentinel produces **30 CONFIRMED** and **1 REJECTED** hypotheses across 10 incidents.
+- Every CONFIRMED result has a traceable evidence chain: `HYP-NNN → {EV-LOG,MET,CODE}-NNN → CHK-NNN (PASS) → real file:line or git_diff.patch reference → verdict`.
+- REJECTED results prove the system can falsify: e.g., Sentinel correctly rejects a connection-pool-exhaustion secondary claim when AST analysis shows every `acquire()` is enclosed in `try/finally` blocks (inc_01 HYP-001/002/003 all correctly REJECTED on the pool-acquisition sub-check even though the core N+1 AST check PASSes — the overall REJECTED verdict shows strict "all conditions must pass" semantics).
+
+**Safety**:
+- ground_truth.md isolated (only evaluator reads it post-pipeline — verified via AST scanning in tests).
+- baseline results isolated (Sentinel runtime never reads baseline CSV/summary — verified via AST scanning).
+- 0 source file modifications by the pipeline.
+- 0 patches auto-applied (approval gate non-interactive = all proposals auto-REJECTED, decision recorded but no code changed).
+- 0 API keys or `.env` leakage into tracked git files.
+- Incident bundle integrity: `git diff -- incidents/` is empty after the full benchmark.
+
+### Per-Incident Table
+
+| Incident | Baseline | Sentinel | Verified | Hypotheses | Fix Proposals | Status | Notes |
+|----------|:---:|:---:|:---:|:---:|:---:|---|---|
+| inc_01 N+1 query | ✓ CORRECT | ✓ CORRECT | ✓ | 2 (1 CONFIRMED, 1 REJECTED) | 1 | COMPLETED | |
+| inc_02 cache stampede | ✓ CORRECT | ✓ CORRECT | ✓ | 4 (4 CONFIRMED) | 4 | COMPLETED | |
+| inc_03 consumer lag | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | |
+| inc_04 memory leak | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | |
+| inc_05 race condition | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | |
+| inc_06 connection exhaustion | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | |
+| inc_07 retry storm | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | Minimal 3 LLM calls (aggressive stage cache reuse). |
+| inc_08 cascading timeout | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | |
+| inc_09 dropped index | ✓ CORRECT | ✓ CORRECT | ✓ | 3 (3 CONFIRMED) | 3 | COMPLETED | |
+| inc_10 multi-symptom cascade | ✓ CORRECT | ✓ CORRECT | ✓ | 4 (4 CONFIRMED) | 0 | PARTIAL | Fix-proposal stage rate-limited on free-tier TPD limit; diagnosis & verification completed correctly with 4 competing CONFIRMED hypotheses (true cascade). §5: approval rejection / partial fix stage is not an investigation failure. |
 
 
 

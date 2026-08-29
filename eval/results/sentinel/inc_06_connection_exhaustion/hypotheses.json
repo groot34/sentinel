@@ -1,0 +1,72 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "Invalid date filters cause unhandled ValueError exceptions that prevent connection release, leaking pool connections and leading to exhaustion.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-LOG-002",
+        "EV-CODE-001",
+        "EV-CODE-003",
+        "EV-MET-006",
+        "EV-MET-004"
+      ],
+      "supporting_reasoning": "The logs record warnings for malformed dates and subsequent ValueError raises. The code adds a validation step that raises before conn.release(), and the generate_report function acquires a connection before validating the date, so an exception aborts the release. Metrics show a strong positive correlation between invalid request count and active connections, indicating that each bad request may retain a connection.",
+      "falsification_criteria": [
+        "No increase in active connection count after reproducing an invalid date request",
+        "Connection release is logged even when ValueError is raised"
+      ],
+      "verification_plan": [
+        "Instrument the reporting-service to log pool.active count at request start and end",
+        "Send a request with an invalid date filter (e.g., \"2026-99-99\")",
+        "Observe whether active count remains elevated after the request completes",
+        "Inspect the exception handling path to confirm conn.release() is executed in a finally block"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "The connection pool's acquire method increments the active counter without a guaranteed release, causing leaks across all code paths and eventual pool exhaustion.",
+      "evidence_ids": [
+        "EV-CODE-002",
+        "EV-LOG-003",
+        "EV-LOG-004",
+        "EV-MET-001",
+        "EV-MET-002"
+      ],
+      "supporting_reasoning": "The acquire implementation raises a TimeoutError when the pool is full but never ensures a matching release, and no finally clause is present. Logs show the pool hitting its maximum size and subsequent timeout errors. Metrics record a spike in active connections and a drop of idle connections to zero, consistent with connections being retained.",
+      "falsification_criteria": [
+        "Adding a guaranteed release (e.g., using a context manager) eliminates pool exhaustion under the same load",
+        "Instrumentation shows active count decreasing appropriately for every acquire call"
+      ],
+      "verification_plan": [
+        "Add logging to both acquire and release methods to record each invocation",
+        "Run a typical workload without invalid date inputs",
+        "Verify that active count never exceeds the configured pool size",
+        "Introduce a context\u2011manager wrapper that guarantees release and confirm that errors disappear"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "A sudden surge in legitimate request traffic exceeded the pool's capacity, causing connection exhaustion independent of invalid inputs.",
+      "evidence_ids": [
+        "EV-MET-001",
+        "EV-MET-003",
+        "EV-MET-005",
+        "EV-LOG-003",
+        "EV-LOG-004"
+      ],
+      "supporting_reasoning": "Metrics show a sharp spike in active connections and pool timeout errors, while idle connections dropped to zero, indicating high usage. The negative correlation between active and idle connections supports a scenario where demand outstripped supply. Logs confirm the pool reached its limit and requests timed out, without requiring malformed inputs.",
+      "falsification_criteria": [
+        "Request rate metrics for the incident window remain at baseline levels",
+        "Increasing the pool size eliminates the errors without any code changes"
+      ],
+      "verification_plan": [
+        "Extract HTTP request count per minute for the incident timeframe and compare to normal periods",
+        "Temporarily raise the pool size (e.g., from 10 to 20) and monitor for disappearance of timeout errors",
+        "Correlate timestamps of request spikes with connection\u2011exhaustion log entries",
+        "Confirm that invalid request count does not drive the active\u2011connection spike"
+      ]
+    }
+  ]
+}

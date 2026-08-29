@@ -1,0 +1,52 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "agent": "logs_agent",
+  "summary": "Observed rising processing latency, consumer lag crossing critical threshold, poll interval timeout, and a rebalance storm affecting worker-2, with ancillary broker advisory warnings.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:07:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:30Z ERROR [event-consumer] Consumer lag on topic 'orders.created' crossed critical alert threshold: 45,000 messages",
+      "interpretation": "Shows that consumer lag reached a critical level, indicating backlog accumulation."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:09:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:09:00Z ERROR [event-consumer] [kafka] max.poll.interval.ms (300000ms) exceeded by worker-2 due to blocking partner HTTP calls",
+      "interpretation": "Indicates poll interval timeout, likely caused by slow external HTTP calls."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:09:15Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:09:15Z ERROR [event-consumer] Consumer rebalance storm triggered: worker-2 kicked from consumer group",
+      "interpretation": "Rebalance event following the poll timeout, causing worker-2 to leave the group."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:06:00Z WARN [event-consumer] Event processing time per record increased from 0.8ms to 240.0ms (webhook HTTP latency)",
+      "interpretation": "Shows a sharp increase in processing latency, likely related to the blocking HTTP calls."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:05:12Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:12Z WARN [event-consumer] [kafka-cluster] Broker 2 logged partition balance advisory message - distractor",
+      "interpretation": "Broker advisory about partition balance; may be unrelated but noted for context."
+    }
+  ]
+}

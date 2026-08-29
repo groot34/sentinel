@@ -66,3 +66,6 @@ venv.bak/
 # OS generated
 .DS_Store
 Thumbs.db
+
+# IDE/Tool metadata
+.kiro/

@@ -1,0 +1,43 @@
+{
+  "incident_id": "inc_09_dropped_index",
+  "agent": "logs_agent",
+  "summary": "The logs show a sequence of performance\u2011related warnings and errors: Elasticsearch reports a yellow cluster health with an unassigned replica, a database query plan shift to a full sequential scan, disk I/O saturation at 100%, and a sharp increase in API latency (p99 up to 6800\u202fms). These observations suggest resource pressure and degraded response times but do not identify a definitive cause.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [search-service] Database disk read I/O saturated at 100% (full table scans on 2,000,000 rows)",
+      "interpretation": "Indicates that the database storage subsystem was fully utilized, likely contributing to slower query execution."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:00Z ERROR [search-service] GET /api/v1/search?tenant_id=t_42&status=active latency spiked to 2400ms (p99=6800ms)",
+      "interpretation": "Shows a marked latency spike for search requests, matching the period of I/O saturation."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:20Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:20Z WARN [search-service] [elasticsearch] ES cluster health YELLOW: unassigned replica shard on dev node - distractor",
+      "interpretation": "Elasticsearch cluster health degraded to yellow, indicating reduced redundancy that may affect query routing."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [search-service] [db] Query execution plan changed: Seq Scan on items (cost=0.00..45210.00 rows=500000)",
+      "interpretation": "The optimizer chose a full sequential scan, which can increase load on the storage layer."
+    }
+  ]
+}

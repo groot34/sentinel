@@ -1,0 +1,77 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "agent": "metrics_agent",
+  "summary": "Several metrics show abrupt changes around 14:06\u201114:08\u202fUTC on 2026\u201108\u201128: outbound gateway call rate spikes sharply, error\u2011rate percentages (503 and 429) rise sharply, inbound request rate drops, and the 503/429 rates shift relative to their baseline. A strong positive correlation is observed between outbound call volume and 429 error rate, indicating they move together during the window.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "outbound_gateway_calls_sec",
+      "value": 525.0,
+      "type": "spike",
+      "interpretation": "Outbound gateway calls per second jump to 525, far above the baseline mean of 51, indicating a massive surge in outbound traffic."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_503_pct",
+      "value": 75.0,
+      "type": "spike",
+      "interpretation": "HTTP\u202f503 response percentage spikes to 75\u202f%, whereas the baseline is 0\u202f%, showing a sudden increase in server\u2011unavailable errors."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "gateway_429_pct",
+      "value": 48.0,
+      "type": "spike",
+      "interpretation": "HTTP\u202f429 response percentage rises to 48\u202f%, also far above the zero baseline, indicating many rate\u2011limit rejections."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "ingress_charge_reqs_sec",
+      "value": 48.0,
+      "type": "drop",
+      "interpretation": "Ingress request rate drops to 48\u202freq/s, below the baseline mean of 51, suggesting a reduction in incoming traffic concurrent with the outbound surge."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_503_pct",
+      "value": 75.0,
+      "type": "period_change",
+      "interpretation": "The 503 error percentage shows a period\u2011level increase of 33\u202f% compared to the prior window, confirming a sustained rise."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "gateway_429_pct",
+      "value": 48.0,
+      "type": "period_change",
+      "interpretation": "The 429 error percentage exhibits a period\u2011level increase of 20.75\u202f% over the baseline window."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "outbound_gateway_calls_sec~gateway_429_pct",
+      "value": 0.8215214818418446,
+      "type": "correlation",
+      "interpretation": "Pearson correlation of 0.82 between outbound calls and 429 error rate indicates they tend to rise together during the observed interval."
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The recent in\u2011memory check\u2011then\u2011act implementation (without locking) introduced a race condition that allowed concurrent reservations to oversell SKU\u2011901, producing negative inventory.",
+      "evidence_ids": [
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-MET-001",
+        "EV-MET-002",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "EV-CODE-002 and EV-CODE-003 show the new code reads stock, checks it, then writes back without any atomic guarantee. EV-MET-001 records a sudden surge to 50 concurrent checkout threads, providing the concurrency needed for interleaved executions. EV-MET-002 and EV-MET-003 document spikes in oversold units and reconciliation errors that coincide with the code change, linking the non\u2011atomic logic to the observed negative stock.",
+      "falsification_criteria": [
+        "If a controlled single\u2011threaded test of the new code never produces a negative stock value, the hypothesis is falsified",
+        "If logs from a replicated environment show that all stock updates are serialized at the database level despite the in\u2011memory logic, the hypothesis is falsified"
+      ],
+      "verification_plan": [
+        "Review the implementation of get_stock, set_stock, and reservation handling to confirm absence of mutexes or DB transactions",
+        "Instrument the reservation path to record timestamps of read\u2011check\u2011write sequences under high concurrency",
+        "Replay the incident window with a load generator using the new code and verify whether negative stock occurs",
+        "Revert the code to the original atomic DB decrement (as in EV-CODE-001) and confirm that oversell disappears"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "Transient Redis replica replication delays caused workers to read stale stock values, leading to reservations being approved based on outdated inventory and resulting in oversell.",
+      "evidence_ids": [
+        "EV-LOG-003",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "EV-LOG-003 notes a 12\u202fms replication ping delay, indicating that replica data may lag behind the primary. EV-MET-001 shows a spike to 50 concurrent checkout threads, increasing the chance that some workers read from a lagging replica during the surge, which could explain the mismatch between reported stock (10) and reservations (18).",
+      "falsification_criteria": [
+        "If the inventory service is confirmed to read exclusively from the primary database during the incident window, the hypothesis is falsified",
+        "If replication lag measurements during the spike remain below the time needed for a reservation transaction, the hypothesis is falsified"
+      ],
+      "verification_plan": [
+        "Determine the data source used by get_stock (primary DB vs Redis replica) during reservation processing",
+        "Measure real\u2011time replication lag of the Redis replica during a simulated load matching EV-MET-001",
+        "Force the service to read only from the primary and repeat the high\u2011concurrency test to see if oversell persists",
+        "Introduce artificial replication delay and observe whether oversell frequency changes"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The removal of the atomic database decrement guard eliminated a built\u2011in safety check, allowing stock to be decremented below zero even in the absence of concurrency.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002"
+      ],
+      "supporting_reasoning": "EV-CODE-001 documents the prior safe atomic decrement operation that inherently prevented negative stock. EV-CODE-002 shows that this operation was replaced with an in\u2011memory check\u2011then\u2011act pattern lacking any database\u2011level guard, meaning a single reservation could potentially drive stock negative if the guard logic is flawed or bypassed.",
+      "falsification_criteria": [
+        "If database constraints or triggers still prevent stock from dropping below zero despite the code change, the hypothesis is falsified",
+        "If a single\u2011threaded execution of the new code never produces a negative stock value, the hypothesis is falsified"
+      ],
+      "verification_plan": [
+        "Inspect the database schema for constraints that enforce non\u2011negative stock values",
+        "Execute a single\u2011threaded reservation for SKU\u2011901 using the new code and verify the resulting stock level",
+        "Re\u2011introduce the atomic decrement (as in EV-CODE-001) in a test environment and confirm that negative stock no longer occurs",
+        "Review unit and integration test coverage to ensure the guard logic is exercised"
+      ]
+    }
+  ]
+}

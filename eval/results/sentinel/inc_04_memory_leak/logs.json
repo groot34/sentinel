@@ -1,0 +1,52 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "logs_agent",
+  "summary": "The upload-service showed rising memory usage, reaching 85% of its container limit, then critical memory pressure and OOM kill, with corresponding warnings and errors logged in quick succession.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:09:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)",
+      "interpretation": "Indicates high memory consumption approaching container limit."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident",
+      "interpretation": "Shows memory pressure became critical, near full usage."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:11:32Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child",
+      "interpretation": "Kernel OOM event triggered, selecting a process to kill."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:11:33Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)",
+      "interpretation": "Container terminated due to OOM kill."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:05:40Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor",
+      "interpretation": "Unrelated warning, likely not linked to memory issue."
+    }
+  ]
+}

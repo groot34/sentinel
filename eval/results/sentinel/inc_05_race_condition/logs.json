@@ -1,0 +1,43 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "agent": "logs_agent",
+  "summary": "Multiple error entries indicate inventory count mismatches and an overselling invariant breach shortly after a stock check, preceded by a warning about replication ping delay. The sequence suggests rapid state changes leading to negative stock values.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:02:05Z ERROR [inventory-service] [audit] Inventory reconciliation mismatch: Total reservations = 18, Initial Stock = 10, Negative Stock = -8!",
+      "interpretation": "Shows a reconciliation error where reservations exceed available stock, resulting in negative stock."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:02:06Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:02:06Z ERROR [inventory-service] Overselling invariant breached for item SKU-901",
+      "interpretation": "Indicates that the system detected an oversell condition for SKU-901."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:3",
+      "timestamp": "2026-08-28T14:02:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:02:01Z WARN [inventory-service] [redis-replica] Replication ping delay 12ms observed - distractor",
+      "interpretation": "Notes a brief replication latency, which may affect data freshness."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:02:02Z",
+      "type": "context",
+      "excerpt": "2026-08-28T14:02:02Z INFO [inventory-service] [worker-3] Checked stock for SKU-901: current=10. Approving reservation for user 403.",
+      "interpretation": "Provides the stock level before the reservation that later contributed to the mismatch."
+    }
+  ]
+}

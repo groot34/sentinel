@@ -1,0 +1,39 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "code_agent",
+  "summary": "The change introduces a module\u2011level mutable dictionary AUDIT_TRACE_REGISTRY and stores raw file bytes keyed by upload_id, while removing the previous BytesIO stream processing. The added global collection could retain data for each upload, and the diff is flagged as an unbounded collection pattern, suggesting a possible increase in memory usage.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "code",
+      "reference": "service/app.py:5",
+      "type": "suspicious_pattern",
+      "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+      "interpretation": "Defines a module\u2011level mutable dict that persists for the lifetime of the process, which may accumulate entries over time."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Adds a global registry and stores the full file_bytes for each upload_id, returning only the length; this creates a new persistent reference to the uploaded data."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+      "interpretation": "Removes the previous in\u2011memory stream processing that likely released the data after extraction, replacing it with persistent storage."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Pattern detection flags the added global mutable collection as an unbounded collection, indicating a risk of uncontrolled memory growth if entries are not cleaned up."
+    }
+  ]
+}

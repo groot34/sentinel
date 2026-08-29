@@ -1,0 +1,1190 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "baseline_verdict": "CORRECT",
+  "sentinel_verdict": "CORRECT",
+  "baseline_correct": true,
+  "sentinel_correct": true,
+  "sentinel_verified": true,
+  "sentinel_confirmed_hypotheses": 4,
+  "sentinel_fix_proposals": 4,
+  "baseline_latency_seconds": 4.313,
+  "sentinel_latency_seconds": 202.672,
+  "baseline_tokens": 2796,
+  "sentinel_tokens": 0,
+  "baseline_llm_calls": 1,
+  "sentinel_llm_calls": 8,
+  "sentinel_status": "COMPLETED",
+  "sentinel_hypotheses_total": 4,
+  "sentinel_hypotheses_rejected": 0,
+  "sentinel_hypotheses_inconclusive": 0,
+  "notes": "",
+  "_sentinel_root_cause": "A misconfigured 5\u2011second cache TTL caused rapid expirations, leading to a cache stampede and downstream DB overload.",
+  "_sentinel_verdict_explanation": "Identified all core causal mechanisms (2/2 criteria groups matched).",
+  "_sentinel_error": "",
+  "_orchestrator_result": {
+    "incident_id": "inc_02_cache_stampede",
+    "pipeline_status": "COMPLETED",
+    "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+    "llm_call_count": 8,
+    "stages": {
+      "logs": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "agent": "logs_agent",
+          "summary": "Concurrent cache misses generated a surge of database queries, causing a connection pool spike, DB lock timeout, and a sharp drop in cache hit ratio. Warnings about simultaneous cache miss and pool pressure precede errors indicating service strain.",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:04:16Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:04:16Z WARN [catalog-service] [worker-4] Simultaneous cache miss on key 'category:electronics:page1': 32 concurrent requests querying Postgres DB",
+              "interpretation": "Shows 32 concurrent requests missed the same cache key, indicating a potential cache stampede."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:04:20Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:04:20Z ERROR [catalog-service] [db] Postgres connection pool spike: 50 concurrent heavy catalog queries",
+              "interpretation": "Reports Postgres connection pool spike with 50 concurrent heavy catalog queries, reflecting increased DB load."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:05:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:05:00Z ERROR [catalog-service] HTTP GET /api/v1/categories/electronics 503 SERVICE_UNAVAILABLE - DB lock timeout",
+              "interpretation": "HTTP request returned 503 Service Unavailable due to DB lock timeout, showing service impact."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:9",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:06:00Z ERROR [catalog-service] Cache hit ratio plummeted to 12.1% under 200 RPS",
+              "interpretation": "Cache hit ratio dropped to 12.1% under 200 RPS, indicating cache effectiveness degradation."
+            },
+            {
+              "evidence_id": "EV-LOG-005",
+              "source": "logs",
+              "reference": "logs/application.log:4",
+              "timestamp": "2026-08-28T14:04:08Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:04:08Z WARN [catalog-service] [image-loader] Deprecated image URL format detected in catalog banner payload - distractor",
+              "interpretation": "Deprecated image URL format warning, unrelated to cache behavior but noted."
+            }
+          ]
+        }
+      },
+      "metrics": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "agent": "metrics_agent",
+          "summary": "At 14:08\u202fZ the system shows extreme spikes in latency, DB reads and error rate, concurrent drops in cache hit ratio and Redis ops, and strong correlations among these metrics, indicating a rapid degradation episode.",
+          "evidence": [
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "p95_latency_ms",
+              "value": 5000.0,
+              "type": "spike",
+              "interpretation": "p95 latency rose to 5000\u202fms, far exceeding the normal mean (~8.5\u202fms) and indicating a severe slowdown."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "db_read_qps",
+              "value": 1600.0,
+              "type": "spike",
+              "interpretation": "Database read QPS jumped to 1600, orders of magnitude above the baseline (~12.5\u202fQPS)."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "error_rate_pct",
+              "value": 68.5,
+              "type": "spike",
+              "interpretation": "Error rate spiked to 68.5\u202f%, whereas the prior period showed essentially zero errors."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct",
+              "value": 9.5,
+              "type": "drop",
+              "interpretation": "Cache hit ratio fell dramatically to 9.5\u202f% from a typical ~98\u202f%."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "redis_ops_per_sec",
+              "value": 410.0,
+              "type": "drop",
+              "interpretation": "Redis operations per second dropped to 410, well below the normal ~2397\u202fops/s."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 4",
+              "timestamp": "2026-08-28T14:04:00Z",
+              "metric": "cache_hit_ratio_pct",
+              "value": 98.0,
+              "type": "threshold",
+              "interpretation": "Cache hit ratio at 14:04\u202fZ met the >=90\u202f% threshold, confirming healthy cache performance before the incident."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "error_rate_pct",
+              "value": 68.5,
+              "type": "period_change",
+              "interpretation": "Error rate increased from a baseline mean of 0\u202f% to 68.5\u202f% (\u0394\u202f+32.5\u202f%)."
+            },
+            {
+              "evidence_id": "EV-MET-008",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct",
+              "value": 9.5,
+              "type": "period_change",
+              "interpretation": "Cache hit ratio fell from a baseline mean of 98.23\u202f% to 9.5\u202f% (\u0394\u202f\u201188.7\u202f%)."
+            },
+            {
+              "evidence_id": "EV-MET-009",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "p95_latency_ms~error_rate_pct",
+              "value": 0.9972396891579437,
+              "type": "correlation",
+              "interpretation": "Latency and error rate are almost perfectly positively correlated (r\u22480.997) over the 8\u2011minute window."
+            },
+            {
+              "evidence_id": "EV-MET-010",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "db_read_qps~redis_ops_per_sec",
+              "value": -0.9927244511923505,
+              "type": "correlation",
+              "interpretation": "DB reads and Redis ops are strongly negatively correlated (r\u2248\u20110.993), suggesting inverse behavior during the incident."
+            },
+            {
+              "evidence_id": "EV-MET-011",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct~redis_ops_per_sec",
+              "value": 0.9922895840223348,
+              "type": "correlation",
+              "interpretation": "Cache hit ratio and Redis ops move together positively (r\u22480.992)."
+            },
+            {
+              "evidence_id": "EV-MET-012",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct~db_read_qps",
+              "value": -0.9724605932585875,
+              "type": "correlation",
+              "interpretation": "Cache hit ratio and DB reads are strongly negatively correlated (r\u2248\u20110.972)."
+            },
+            {
+              "evidence_id": "EV-MET-013",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "db_read_qps~p95_latency_ms",
+              "value": 0.9488109910523861,
+              "type": "correlation",
+              "interpretation": "DB reads and latency are highly positively correlated (r\u22480.949)."
+            }
+          ]
+        }
+      },
+      "code": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "agent": "code_agent",
+          "summary": "TTL for cache was reduced from 3600 seconds to 5 seconds in service/catalog_cache.py and reflected in application code and docker-compose configuration, indicating a shift to a much shorter cache lifetime.",
+          "evidence": [
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "removed_code",
+              "excerpt": "-    # 1 hour cache with 10% jitter to prevent stampedes\n-    DEFAULT_TTL_SECONDS = 3600",
+              "interpretation": "Original code set a 1\u2011hour TTL with jitter, intended to mitigate cache stampedes."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+    # Shortened TTL for faster price sync\n+    DEFAULT_TTL_SECONDS = 5",
+              "interpretation": "New code replaces the hour\u2011long TTL with a 5\u2011second TTL, drastically shortening cache lifetime."
+            },
+            {
+              "evidence_id": "EV-CODE-003",
+              "source": "code",
+              "reference": "service/app.py:22",
+              "type": "suspicious_pattern",
+              "excerpt": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+              "interpretation": "Application file also defines the TTL as 5 seconds, reinforcing the shortened cache period."
+            },
+            {
+              "evidence_id": "EV-CODE-004",
+              "source": "config",
+              "reference": "docker-compose.yml:9",
+              "type": "suspicious_pattern",
+              "excerpt": "      - CACHE_TTL_SECONDS=5",
+              "interpretation": "Environment configuration propagates the 5\u2011second TTL to container runtime."
+            }
+          ]
+        }
+      },
+      "evidence_fusion": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:04:16Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:04:16Z WARN [catalog-service] [worker-4] Simultaneous cache miss on key 'category:electronics:page1': 32 concurrent requests querying Postgres DB",
+              "interpretation": "Shows 32 concurrent requests missed the same cache key, indicating a potential cache stampede."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:04:20Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:04:20Z ERROR [catalog-service] [db] Postgres connection pool spike: 50 concurrent heavy catalog queries",
+              "interpretation": "Reports Postgres connection pool spike with 50 concurrent heavy catalog queries, reflecting increased DB load."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:05:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:05:00Z ERROR [catalog-service] HTTP GET /api/v1/categories/electronics 503 SERVICE_UNAVAILABLE - DB lock timeout",
+              "interpretation": "HTTP request returned 503 Service Unavailable due to DB lock timeout, showing service impact."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:9",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:06:00Z ERROR [catalog-service] Cache hit ratio plummeted to 12.1% under 200 RPS",
+              "interpretation": "Cache hit ratio dropped to 12.1% under 200 RPS, indicating cache effectiveness degradation."
+            },
+            {
+              "evidence_id": "EV-LOG-005",
+              "source": "logs",
+              "reference": "logs/application.log:4",
+              "timestamp": "2026-08-28T14:04:08Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:04:08Z WARN [catalog-service] [image-loader] Deprecated image URL format detected in catalog banner payload - distractor",
+              "interpretation": "Deprecated image URL format warning, unrelated to cache behavior but noted."
+            },
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "p95_latency_ms",
+              "value": 5000.0,
+              "type": "spike",
+              "interpretation": "p95 latency rose to 5000\u202fms, far exceeding the normal mean (~8.5\u202fms) and indicating a severe slowdown."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "db_read_qps",
+              "value": 1600.0,
+              "type": "spike",
+              "interpretation": "Database read QPS jumped to 1600, orders of magnitude above the baseline (~12.5\u202fQPS)."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "error_rate_pct",
+              "value": 68.5,
+              "type": "spike",
+              "interpretation": "Error rate spiked to 68.5\u202f%, whereas the prior period showed essentially zero errors."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct",
+              "value": 9.5,
+              "type": "drop",
+              "interpretation": "Cache hit ratio fell dramatically to 9.5\u202f% from a typical ~98\u202f%."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "redis_ops_per_sec",
+              "value": 410.0,
+              "type": "drop",
+              "interpretation": "Redis operations per second dropped to 410, well below the normal ~2397\u202fops/s."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 4",
+              "timestamp": "2026-08-28T14:04:00Z",
+              "metric": "cache_hit_ratio_pct",
+              "value": 98.0,
+              "type": "threshold",
+              "interpretation": "Cache hit ratio at 14:04\u202fZ met the >=90\u202f% threshold, confirming healthy cache performance before the incident."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "error_rate_pct",
+              "value": 68.5,
+              "type": "period_change",
+              "interpretation": "Error rate increased from a baseline mean of 0\u202f% to 68.5\u202f% (\u0394\u202f+32.5\u202f%)."
+            },
+            {
+              "evidence_id": "EV-MET-008",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct",
+              "value": 9.5,
+              "type": "period_change",
+              "interpretation": "Cache hit ratio fell from a baseline mean of 98.23\u202f% to 9.5\u202f% (\u0394\u202f\u201188.7\u202f%)."
+            },
+            {
+              "evidence_id": "EV-MET-009",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "p95_latency_ms~error_rate_pct",
+              "value": 0.9972396891579437,
+              "type": "correlation",
+              "interpretation": "Latency and error rate are almost perfectly positively correlated (r\u22480.997) over the 8\u2011minute window."
+            },
+            {
+              "evidence_id": "EV-MET-010",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "db_read_qps~redis_ops_per_sec",
+              "value": -0.9927244511923505,
+              "type": "correlation",
+              "interpretation": "DB reads and Redis ops are strongly negatively correlated (r\u2248\u20110.993), suggesting inverse behavior during the incident."
+            },
+            {
+              "evidence_id": "EV-MET-011",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct~redis_ops_per_sec",
+              "value": 0.9922895840223348,
+              "type": "correlation",
+              "interpretation": "Cache hit ratio and Redis ops move together positively (r\u22480.992)."
+            },
+            {
+              "evidence_id": "EV-MET-012",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "cache_hit_ratio_pct~db_read_qps",
+              "value": -0.9724605932585875,
+              "type": "correlation",
+              "interpretation": "Cache hit ratio and DB reads are strongly negatively correlated (r\u2248\u20110.972)."
+            },
+            {
+              "evidence_id": "EV-MET-013",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "db_read_qps~p95_latency_ms",
+              "value": 0.9488109910523861,
+              "type": "correlation",
+              "interpretation": "DB reads and latency are highly positively correlated (r\u22480.949)."
+            },
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "removed_code",
+              "excerpt": "-    # 1 hour cache with 10% jitter to prevent stampedes\n-    DEFAULT_TTL_SECONDS = 3600",
+              "interpretation": "Original code set a 1\u2011hour TTL with jitter, intended to mitigate cache stampedes."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+    # Shortened TTL for faster price sync\n+    DEFAULT_TTL_SECONDS = 5",
+              "interpretation": "New code replaces the hour\u2011long TTL with a 5\u2011second TTL, drastically shortening cache lifetime."
+            },
+            {
+              "evidence_id": "EV-CODE-003",
+              "source": "code",
+              "reference": "service/app.py:22",
+              "type": "suspicious_pattern",
+              "excerpt": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+              "interpretation": "Application file also defines the TTL as 5 seconds, reinforcing the shortened cache period."
+            },
+            {
+              "evidence_id": "EV-CODE-004",
+              "source": "config",
+              "reference": "docker-compose.yml:9",
+              "type": "suspicious_pattern",
+              "excerpt": "      - CACHE_TTL_SECONDS=5",
+              "interpretation": "Environment configuration propagates the 5\u2011second TTL to container runtime."
+            }
+          ],
+          "evidence_ids": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-004",
+            "EV-MET-005",
+            "EV-MET-006",
+            "EV-MET-007",
+            "EV-MET-008",
+            "EV-MET-009",
+            "EV-MET-010",
+            "EV-MET-011",
+            "EV-MET-012",
+            "EV-MET-013"
+          ],
+          "sources": {
+            "logs": true,
+            "metrics": true,
+            "code": true
+          }
+        }
+      },
+      "hypotheses": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "hypotheses": [
+            {
+              "hypothesis_id": "HYP-001",
+              "claim": "A misconfigured 5\u2011second cache TTL caused rapid expirations, leading to a cache stampede and downstream DB overload.",
+              "evidence_ids": [
+                "EV-CODE-002",
+                "EV-CODE-003",
+                "EV-CODE-004",
+                "EV-LOG-001",
+                "EV-MET-004",
+                "EV-MET-008"
+              ],
+              "supporting_reasoning": "The code diff and config show the default TTL was changed from 1 hour to 5 seconds. Log EV-LOG-001 records 32 concurrent requests missing the same key shortly after the change, and metrics EV-MET-004 and EV-MET-008 document a dramatic drop in cache hit ratio, consistent with frequent cache invalidations.",
+              "falsification_criteria": [
+                "Observed effective CACHE_TTL_SECONDS >= 60 seconds during the incident window"
+              ],
+              "verification_plan": [
+                "Query the running container environment for CACHE_TTL_SECONDS",
+                "Inspect the compiled DEFAULT_TTL_SECONDS constant in the deployed binary",
+                "Correlate TTL value timestamps with cache miss timestamps in logs",
+                "Run a controlled load test with a correct TTL and verify miss rate does not spike"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "claim": "Redis performance degradation (ops per second drop) reduced cache availability, causing the hit\u2011ratio collapse and stampede.",
+              "evidence_ids": [
+                "EV-MET-005",
+                "EV-MET-004",
+                "EV-MET-010",
+                "EV-LOG-004"
+              ],
+              "supporting_reasoning": "Metrics EV-MET-005 show Redis ops fell to 410\u202fops/s, far below the normal ~2397\u202fops/s. Simultaneously EV-MET-004 records hit ratio falling to 9.5\u202f%. Correlation EV-MET-010 indicates a strong negative relationship between DB reads and Redis ops, suggesting Redis bottleneck drove DB load.",
+              "falsification_criteria": [
+                "Redis ops per second remained at or above baseline (~2000\u202fops/s) throughout the incident"
+              ],
+              "verification_plan": [
+                "Retrieve Redis INFO output for ops per second during the incident window",
+                "Compare ops per second to historical baseline",
+                "Check Redis error logs for timeouts or evictions",
+                "Restart Redis and observe whether hit ratio recovers"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "claim": "A sudden traffic surge generated an abnormal number of concurrent requests, overwhelming the cache and causing a stampede irrespective of TTL settings.",
+              "evidence_ids": [
+                "EV-LOG-001",
+                "EV-MET-002",
+                "EV-MET-001",
+                "EV-MET-003"
+              ],
+              "supporting_reasoning": "Log EV-LOG-001 notes 32 concurrent requests missing the same key. Metrics EV-MET-002 show DB read QPS jumped to 1600 (baseline ~12.5), EV-MET-001 records p95 latency rising to 5000\u202fms, and EV-MET-003 shows error rate spiking to 68.5\u202f%, all indicative of a traffic spike driving load.",
+              "falsification_criteria": [
+                "Request rate during the window stayed within normal range (<50\u202fRPS)"
+              ],
+              "verification_plan": [
+                "Extract per\u2011second request counts from ingress/access logs",
+                "Plot traffic volume against baseline averages",
+                "Align traffic spikes with cache\u2011miss timestamps",
+                "Validate that no external load\u2011test was triggered"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-004",
+              "claim": "Database lock contention and connection\u2011pool saturation caused the 503 errors and high latency, with cache effects being secondary.",
+              "evidence_ids": [
+                "EV-LOG-002",
+                "EV-LOG-003",
+                "EV-MET-002",
+                "EV-MET-013"
+              ],
+              "supporting_reasoning": "Log EV-LOG-002 reports a connection\u2011pool spike of 50 heavy queries; EV-LOG-003 shows 503 responses due to DB lock timeout. Metrics EV-MET-002 confirm DB reads surged, and EV-MET-013 shows a strong positive correlation between DB reads and latency, pointing to DB bottleneck.",
+              "falsification_criteria": [
+                "Postgres logs show no lock timeouts or elevated lock wait times during the incident"
+              ],
+              "verification_plan": [
+                "Query pg_stat_activity for lock wait times in the incident window",
+                "Search Postgres logs for lock timeout messages",
+                "Examine connection\u2011pool metrics for usage peaks",
+                "Run a representative query with EXPLAIN ANALYZE to assess contention"
+              ]
+            }
+          ]
+        }
+      },
+      "verification": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "results": [
+            {
+              "hypothesis_id": "HYP-001",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-CODE-004",
+                    "EV-LOG-001",
+                    "EV-MET-004",
+                    "EV-MET-008"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-CODE-004",
+                    "EV-LOG-001",
+                    "EV-MET-004",
+                    "EV-MET-008"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-CODE-004",
+                    "EV-LOG-001",
+                    "EV-MET-004",
+                    "EV-MET-008"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-CODE-004",
+                    "EV-LOG-001",
+                    "EV-MET-004",
+                    "EV-MET-008"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-CODE-004",
+                    "EV-LOG-001",
+                    "EV-MET-004",
+                    "EV-MET-008"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 6 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-005",
+                    "EV-MET-004",
+                    "EV-MET-010",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-005",
+                    "EV-MET-004",
+                    "EV-MET-010",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-005",
+                    "EV-MET-004",
+                    "EV-MET-010",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-005",
+                    "EV-MET-004",
+                    "EV-MET-010",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-005",
+                    "EV-MET-004",
+                    "EV-MET-010",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9, metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9, metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-MET-002",
+                    "EV-MET-001",
+                    "EV-MET-003"
+                  ],
+                  "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-MET-002",
+                    "EV-MET-001",
+                    "EV-MET-003"
+                  ],
+                  "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-MET-002",
+                    "EV-MET-001",
+                    "EV-MET-003"
+                  ],
+                  "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-MET-002",
+                    "EV-MET-001",
+                    "EV-MET-003"
+                  ],
+                  "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-MET-002",
+                    "EV-MET-001",
+                    "EV-MET-003"
+                  ],
+                  "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-004",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-MET-002",
+                    "EV-MET-013"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-MET-002",
+                    "EV-MET-013"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-MET-002",
+                    "EV-MET-013"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-MET-002",
+                    "EV-MET-013"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-MET-002",
+                    "EV-MET-013"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "4 of 4 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv, logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv, logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv)",
+              "confidence": 0.95
+            }
+          ]
+        }
+      },
+      "fix_proposals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 4,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "proposals": [
+            {
+              "proposal_id": "FIX-001",
+              "hypothesis_id": "HYP-001",
+              "incident_id": "inc_02_cache_stampede",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Restore cache TTL to one hour with jitter to prevent stampedes.",
+              "rationale": "The root cause was a misconfigured 5\u2011second TTL causing rapid expirations and a cache stampede; restoring the intended one\u2011hour TTL (with jitter) will keep cached data valid longer, reducing concurrent DB queries and stabilizing cache hit ratios.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Increase default TTL from 5 seconds to 1 hour with jitter comment.",
+                  "before": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+                  "after": "    DEFAULT_TTL_SECONDS = 3600  # Restored 1\u2011hour TTL with jitter"
+                },
+                {
+                  "file": "service/catalog_cache.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Revert TTL change to original 1\u2011hour value and restore jitter comment.",
+                  "before": "    # Shortened TTL for faster price sync\n    DEFAULT_TTL_SECONDS = 5",
+                  "after": "    # 1 hour cache with 10% jitter to prevent stampedes\n    DEFAULT_TTL_SECONDS = 3600"
+                }
+              ],
+              "patch": "# PROPOSED PATCH\ndiff --git a/service/app.py b/service/app.py\n--- a/service/app.py\n+++ b/service/app.py\n@@\n-    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL\n+    DEFAULT_TTL_SECONDS = 3600  # Restored 1\u2011hour TTL with jitter\n\ndiff --git a/service/catalog_cache.py b/service/catalog_cache.py\n--- a/service/catalog_cache.py\n+++ b/service/catalog_cache.py\n@@\n-    # Shortened TTL for faster price sync\n-    DEFAULT_TTL_SECONDS = 5\n+    # 1 hour cache with 10% jitter to prevent stampedes\n+    DEFAULT_TTL_SECONDS = 3600\n",
+              "expected_effect": "Cache hit ratio returns to ~98%, DB load drops dramatically, latency returns to baseline, and the cache stampede is eliminated.",
+              "risks": [
+                "Longer TTL may delay propagation of price updates, potentially serving stale data for up to an hour",
+                "If underlying data changes frequently, stale cache entries could cause inconsistencies",
+                "Increased memory usage in Redis due to longer-lived entries"
+              ],
+              "validation_plan": [
+                "Deploy the proposed changes to a staging environment",
+                "Generate a realistic load of concurrent category requests (e.g., 200 RPS)",
+                "Measure cache hit ratio; expect >90% sustained",
+                "Verify DB query count per request is reduced to near\u2011zero after warm\u2011up",
+                "Check end\u2011to\u2011end latency returns to normal (<10\u202fms)",
+                "Monitor for any stale data complaints over a 1\u2011hour window"
+              ],
+              "rollback_plan": "If regressions are observed, revert the two file modifications to set DEFAULT_TTL_SECONDS back to 5 seconds in both service/app.py and service/catalog_cache.py, redeploy the service, and re\u2011monitor metrics.",
+              "evidence_ids": [
+                "EV-CODE-002",
+                "EV-CODE-003",
+                "EV-CODE-004",
+                "EV-LOG-001",
+                "EV-MET-004",
+                "EV-MET-008"
+              ]
+            },
+            {
+              "proposal_id": "FIX-002",
+              "hypothesis_id": "HYP-002",
+              "incident_id": "inc_02_cache_stampede",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Restore a longer cache TTL to prevent cache stampedes caused by the misconfigured 5\u2011second TTL.",
+              "rationale": "The confirmed root cause is a short TTL of 5\u202fseconds (evidence EV-MET-005, EV-MET-004, EV-MET-010) which causes frequent cache expirations, leading to a hit\u2011ratio collapse and a stampede. Restoring the original 1\u2011hour TTL (with jitter) reduces cache churn, improves hit ratio, and lowers Redis ops pressure, addressing the performance degradation.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Increase the default cache TTL from 5\u202fseconds back to 1\u202fhour to mitigate stampedes.",
+                  "before": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+                  "after": "    DEFAULT_TTL_SECONDS = 3600  # Restored default TTL (1 hour) to mitigate stampedes"
+                },
+                {
+                  "file": "service/catalog_cache.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Revert the TTL change introduced in the buggy commit, restoring the original 1\u2011hour TTL with jitter.",
+                  "before": "-    DEFAULT_TTL_SECONDS = 5",
+                  "after": "-    DEFAULT_TTL_SECONDS = 3600"
+                }
+              ],
+              "patch": "--- a/service/app.py\n+++ b/service/app.py\n@@\n-    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL\n+    DEFAULT_TTL_SECONDS = 3600  # Restored default TTL (1 hour) to mitigate stampedes\n--- a/service/catalog_cache.py\n+++ b/service/catalog_cache.py\n@@\n-    DEFAULT_TTL_SECONDS = 5\n+    DEFAULT_TTL_SECONDS = 3600\n",
+              "expected_effect": "Cache hit ratio should rise back toward the normal ~98\u202f% level, Redis ops per second should return to ~2400\u202fops/s, and DB read QPS should drop dramatically, eliminating the stampede.",
+              "risks": [
+                "Longer TTL may cause stale data to be served for up to an hour if underlying catalog changes frequently",
+                "Increased memory usage in Redis due to longer-lived entries"
+              ],
+              "validation_plan": [
+                "Monitor cache hit ratio metric (EV-MET-004) for recovery to >=90\u202f% within 10\u202fminutes after deployment",
+                "Verify Redis ops per second (EV-MET-005) returns to baseline (~2400\u202fops/s)",
+                "Check DB read QPS (EV-MET-002) drops back to normal levels",
+                "Run load test simulating 200\u202fRPS and confirm no spike in DB connections (EV-LOG-002)",
+                "Inspect application logs for absence of cache\u2011miss storms (EV-LOG-001)"
+              ],
+              "rollback_plan": "Revert the TTL values in both service/app.py and service/catalog_cache.py to the previous 5\u2011second setting and redeploy the previous container image.",
+              "evidence_ids": [
+                "EV-LOG-004",
+                "EV-MET-004",
+                "EV-MET-005",
+                "EV-MET-010"
+              ]
+            },
+            {
+              "proposal_id": "FIX-003",
+              "hypothesis_id": "HYP-003",
+              "incident_id": "inc_02_cache_stampede",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Restore cache TTL to one hour to prevent stampedes.",
+              "rationale": "The root cause was a misconfigured short TTL of 5 seconds, causing cache entries to expire immediately and leading to a massive number of concurrent DB queries during traffic spikes. Restoring the TTL to a longer duration (e.g., 3600 seconds) re\u2011establishes cache effectiveness, reducing DB load and preventing stampedes.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Increase default cache TTL from 5 seconds to 3600 seconds to prevent cache stampede.",
+                  "before": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+                  "after": "    DEFAULT_TTL_SECONDS = 3600  # Restored TTL to mitigate stampedes"
+                },
+                {
+                  "file": "service/catalog_cache.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Restore original TTL and comment for cache stampede mitigation.",
+                  "before": "# 1 hour cache with 10% jitter to prevent stampedes\n    DEFAULT_TTL_SECONDS = 3600",
+                  "after": "# Restored TTL with jitter to prevent stampedes\n    DEFAULT_TTL_SECONDS = 3600"
+                }
+              ],
+              "patch": "--- a/service/app.py\n+++ b/service/app.py\n@@ -9,1 +9,1 @@\n-    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL\n+    DEFAULT_TTL_SECONDS = 3600  # Restored TTL to mitigate stampedes\n--- a/service/catalog_cache.py\n+++ b/service/catalog_cache.py\n@@ -5,3 +5,3 @@\n-    # 1 hour cache with 10% jitter to prevent stampedes\n-    DEFAULT_TTL_SECONDS = 3600\n+    # Restored TTL with jitter to prevent stampedes\n+    DEFAULT_TTL_SECONDS = 3600",
+              "expected_effect": "Cache hit ratio should rise above 90%, DB read QPS should return to baseline levels, and request latency should drop back to normal ranges, eliminating the stampede effect.",
+              "risks": [
+                "Longer TTL may cause stale catalog data to be served for up to an hour, potentially delaying price or inventory updates",
+                "If underlying data changes frequently, users might see outdated information"
+              ],
+              "validation_plan": [
+                "Deploy the change to a staging environment and simulate a traffic spike using load testing tools",
+                "Monitor cache hit ratio, DB read QPS, and request latency to ensure they remain within normal thresholds",
+                "Verify that no increase in stale data complaints occurs over a period equal to the TTL",
+                "Run integration tests to confirm application functionality remains intact"
+              ],
+              "rollback_plan": "Revert the TTL changes in both service/app.py and service/catalog_cache.py to the previous 5\u2011second setting and redeploy the previous container image.",
+              "evidence_ids": [
+                "EV-LOG-001",
+                "EV-MET-001",
+                "EV-MET-002",
+                "EV-MET-003"
+              ]
+            },
+            {
+              "proposal_id": "FIX-004",
+              "hypothesis_id": "HYP-004",
+              "incident_id": "inc_02_cache_stampede",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Restore a longer cache TTL to reduce DB load and prevent stampedes.",
+              "rationale": "The short 5\u2011second TTL causes frequent cache misses, leading to a surge of DB queries that saturate the connection pool and cause lock contention; restoring the original 1\u2011hour TTL (with jitter) will keep data cached longer, lowering DB read QPS and eliminating the 503 errors.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Increase cache TTL from 5 seconds to 1 hour.",
+                  "before": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+                  "after": "    DEFAULT_TTL_SECONDS = 3600  # Restored 1\u2011hour TTL to mitigate stampedes"
+                },
+                {
+                  "file": "service/catalog_cache.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Revert TTL change to original 1\u2011hour value with jitter.",
+                  "before": "    # Shortened TTL for faster price sync\n    DEFAULT_TTL_SECONDS = 5",
+                  "after": "    # 1 hour cache with 10% jitter to prevent stampedes\n    DEFAULT_TTL_SECONDS = 3600"
+                }
+              ],
+              "patch": "# PROPOSED\n--- a/service/app.py\n+++ b/service/app.py\n@@\n-    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL\n+    DEFAULT_TTL_SECONDS = 3600  # Restored 1\u2011hour TTL to mitigate stampedes\n--- a/service/catalog_cache.py\n+++ b/service/catalog_cache.py\n@@\n-    # Shortened TTL for faster price sync\n-    DEFAULT_TTL_SECONDS = 5\n+    # 1 hour cache with 10% jitter to prevent stampedes\n+    DEFAULT_TTL_SECONDS = 3600\n",
+              "expected_effect": "DB read QPS drops to baseline levels, connection\u2011pool usage normalizes, and 503 errors disappear.",
+              "risks": [
+                "Longer cache TTL may serve stale data if underlying catalog changes frequently",
+                "Potential increase in memory usage for cached entries",
+                "If TTL is too high, cache eviction may be delayed causing higher memory pressure"
+              ],
+              "validation_plan": [
+                "Deploy the change to a staging environment",
+                "Simulate load with concurrent requests for the same category",
+                "Verify cache hit ratio returns to >90%",
+                "Measure DB read QPS and ensure it returns to normal (~12.5 QPS)",
+                "Confirm error rate drops below 1% and latency returns to baseline (<100ms)"
+              ],
+              "rollback_plan": "Revert the two files to their previous versions using version control, restoring the 5\u2011second TTL.",
+              "evidence_ids": [
+                "EV-LOG-002",
+                "EV-LOG-003",
+                "EV-MET-002",
+                "EV-MET-013"
+              ]
+            }
+          ],
+          "validation_errors": {
+            "FIX-001": [
+              "Proposed change references file 'service/catalog_cache.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_02_cache_stampede."
+            ],
+            "FIX-002": [
+              "Proposed change references file 'service/catalog_cache.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_02_cache_stampede."
+            ],
+            "FIX-003": [
+              "Proposed change references file 'service/catalog_cache.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_02_cache_stampede."
+            ],
+            "FIX-004": [
+              "Proposed change references file 'service/catalog_cache.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_02_cache_stampede."
+            ]
+          },
+          "skipped_hypotheses": []
+        }
+      },
+      "approvals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_02_cache_stampede",
+          "approval_records": [
+            {
+              "proposal_id": "FIX-001",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:29:04.724113+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-002",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:29:04.727146+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-003",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:29:04.729156+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-004",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:29:04.730160+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            }
+          ],
+          "summary": {
+            "total": 4,
+            "approved": 0,
+            "rejected": 4
+          }
+        }
+      }
+    },
+    "summary": {
+      "confirmed_hypotheses": 4,
+      "rejected_hypotheses": 0,
+      "inconclusive_hypotheses": 0,
+      "proposals_generated": 4,
+      "proposals_approved": 0,
+      "proposals_rejected": 4
+    },
+    "error": null
+  }
+}

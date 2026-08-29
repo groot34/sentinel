@@ -1,0 +1,31 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "agent": "code_agent",
+  "summary": "The recent changes add a date\u2011validation block that can raise an exception before the database connection is released. Existing code shows the connection pool acquire method increments the active count without a guaranteed release, and the generate_report function acquires a connection, runs a query, then validates the date after the query but before releasing the connection, creating a path where the connection may remain held.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+        # Date parser can raise ValueError before conn.release()\n+        if not date_filter.startswith(\"2026-\"):\n+            raise ValueError(f\"Unsupported date format: {date_filter}\")",
+      "interpretation": "Adds a validation step that raises ValueError before the explicit conn.release(), introducing a potential leak of the acquired connection when an unsupported date is supplied."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "code",
+      "reference": "service/app.py:8-12",
+      "type": "suspicious_pattern",
+      "excerpt": "    def acquire(self):\n        if self.active >= self.size:\n            raise TimeoutError(\"Connection pool exhausted!\")\n        self.active += 1\n        return self",
+      "interpretation": "Acquires a connection by incrementing the active counter but does not pair this with a guaranteed release, so any early exit after acquire can leave the pool count inflated."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:24-30",
+      "type": "suspicious_pattern",
+      "excerpt": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+      "interpretation": "Acquires a connection, performs a query, then validates the date before releasing; if the date is invalid, the function raises before conn.release(), leaving the connection held."
+    }
+  ]
+}

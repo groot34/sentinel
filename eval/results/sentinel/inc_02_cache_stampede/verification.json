@@ -1,0 +1,307 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "results": [
+    {
+      "hypothesis_id": "HYP-001",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-LOG-001",
+            "EV-MET-004",
+            "EV-MET-008"
+          ],
+          "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "5 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-LOG-001",
+            "EV-MET-004",
+            "EV-MET-008"
+          ],
+          "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "5 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-LOG-001",
+            "EV-MET-004",
+            "EV-MET-008"
+          ],
+          "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "5 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-LOG-001",
+            "EV-MET-004",
+            "EV-MET-008"
+          ],
+          "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "5 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-LOG-001",
+            "EV-MET-004",
+            "EV-MET-008"
+          ],
+          "reference": "git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "5 of 6 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, git_diff.patch:hunk 1; service/app.py:22; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-005",
+            "EV-MET-004",
+            "EV-MET-010",
+            "EV-LOG-004"
+          ],
+          "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-005",
+            "EV-MET-004",
+            "EV-MET-010",
+            "EV-LOG-004"
+          ],
+          "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-005",
+            "EV-MET-004",
+            "EV-MET-010",
+            "EV-LOG-004"
+          ],
+          "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-005",
+            "EV-MET-004",
+            "EV-MET-010",
+            "EV-LOG-004"
+          ],
+          "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-005",
+            "EV-MET-004",
+            "EV-MET-010",
+            "EV-LOG-004"
+          ],
+          "reference": "metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9",
+          "detail": "4 of 4 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9, metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9, metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:9)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-MET-002",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-MET-002",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-MET-002",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-MET-002",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-MET-002",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+          "detail": "4 of 4 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-004",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-MET-002",
+            "EV-MET-013"
+          ],
+          "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-MET-002",
+            "EV-MET-013"
+          ],
+          "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-MET-002",
+            "EV-MET-013"
+          ],
+          "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-MET-002",
+            "EV-MET-013"
+          ],
+          "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+          "detail": "4 of 4 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-MET-002",
+            "EV-MET-013"
+          ],
+          "reference": "logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+          "detail": "4 of 4 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv, logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv, logs/application.log:7; logs/application.log:8; metrics/metrics.csv:row 8; metrics/metrics.csv)",
+      "confidence": 0.95
+    }
+  ]
+}

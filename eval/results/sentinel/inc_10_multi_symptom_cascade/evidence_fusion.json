@@ -1,0 +1,226 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:30Z ERROR [ledger-service] [db-pool] Connection pool saturated: 15/15 connections held by long-running sequential scans",
+      "interpretation": "DB connection pool fully utilized by long\u2011running scans, showing resource contention."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [ledger-service] GET /api/v1/health 500 INTERNAL_SERVER_ERROR - Healthcheck failed to acquire DB connection within 500ms",
+      "interpretation": "Health endpoint could not obtain a DB connection quickly, reflecting pool pressure."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:11",
+      "timestamp": "2026-08-28T14:06:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:30Z FATAL [k8s] Readiness probe failed 3 consecutive times. Kubernetes killing pod ledger-service-67b8d-x9q42",
+      "interpretation": "Kubernetes marked the pod unready and terminated it after repeated probe failures."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:12",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:00Z ERROR [ingress] 502 BAD_GATEWAY: No live upstream backend pods available for ledger-service",
+      "interpretation": "Ingress reported no healthy backend pods, likely a consequence of the pod termination."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:04:45Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:45Z WARN [ledger-service] [db] Query 'SELECT * FROM ledger_entries WHERE account_id = ? ORDER BY entry_date DESC' query time jumped to 1850ms (Seq Scan on 5M rows)",
+      "interpretation": "Database query latency spiked, indicating heavy scanning workload."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 1",
+      "interpretation": "Client observed a timeout and initiated the first retry."
+    },
+    {
+      "evidence_id": "EV-LOG-007",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 2",
+      "interpretation": "A second retry was triggered shortly after the first, showing repeated timeouts."
+    },
+    {
+      "evidence_id": "EV-LOG-008",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:15Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:15Z WARN [ledger-service] [k8s-autoscaler] Worker node 4 reported transient disk pressure event - distractor",
+      "interpretation": "Node reported transient disk pressure, a potential I/O stress indicator."
+    },
+    {
+      "evidence_id": "EV-LOG-009",
+      "source": "logs",
+      "reference": "logs/application.log:10",
+      "timestamp": "2026-08-28T14:06:15Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:15Z ERROR [ledger-service] GET /api/v1/accounts/10293/balance 504 GATEWAY_TIMEOUT",
+      "interpretation": "Client request timed out, likely due to underlying DB latency or pool saturation."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "ledger_query_duration_ms",
+      "value": 10000.0,
+      "type": "spike",
+      "interpretation": "ledger_query_duration_ms spiked to 10000\u202fms, far above its baseline mean of ~3.5\u202fms."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "client_retries_sec",
+      "value": 120.0,
+      "type": "spike",
+      "interpretation": "client_retries_sec jumped to 120\u202fseconds, a dramatic increase from a baseline of 0\u202fs."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "error_rate_pct",
+      "value": 100.0,
+      "type": "spike",
+      "interpretation": "error_rate_pct spiked to 100\u202f%, indicating total failures during the sample."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "metric": "active_db_conns",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "active_db_conns rose to 15, well above its baseline mean of ~2.3 connections."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "pod_readiness_failures",
+      "value": 5.0,
+      "type": "spike",
+      "interpretation": "pod_readiness_failures increased to 5 failures, whereas the baseline is 0."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "error_rate_pct",
+      "value": 100.0,
+      "type": "threshold",
+      "interpretation": "error_rate_pct reached 100\u202f%, exceeding the defined 90\u202f% threshold."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "error_rate_pct",
+      "value": 100.0,
+      "type": "period_change",
+      "interpretation": "error_rate_pct shifted from a baseline mean of 0\u202f% to an average of 47\u202f% in the period, a delta of 47\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:07:00Z",
+      "metric": "pod_readiness_failures~error_rate_pct",
+      "value": 0.997117889419821,
+      "type": "correlation",
+      "interpretation": "pod readiness failures and error rate are almost perfectly positively correlated (Pearson r\u22480.997) over the 7\u2011sample window."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "code",
+      "reference": "service/app.py:9-13",
+      "type": "suspicious_pattern",
+      "excerpt": "    def acquire(self):\n        if self.active_conns >= self.max_conns:\n            raise TimeoutError(\"DB Pool Full\")\n        self.active_conns += 1\n        return self",
+      "interpretation": "The acquire method raises an error when the pool is full and increments active_conns, but there is no explicit release path shown, which may affect connection lifecycle."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+      "interpretation": "The original migration line that drops the index was removed in the diff, indicating a change to the migration script."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+      "interpretation": "A comment line was added before the DROP INDEX statement; the SQL command itself remains unchanged."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "changed_config",
+      "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;\n+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+      "interpretation": "The migration file was edited to include a descriptive comment, which does not modify the operational effect of the DROP INDEX command."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-CODE-004",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-LOG-005",
+    "EV-LOG-006",
+    "EV-LOG-007",
+    "EV-LOG-008",
+    "EV-LOG-009",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007",
+    "EV-MET-008"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

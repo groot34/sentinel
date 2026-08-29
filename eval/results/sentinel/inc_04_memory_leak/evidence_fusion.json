@@ -1,0 +1,153 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:09:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)",
+      "interpretation": "Indicates high memory consumption approaching container limit."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident",
+      "interpretation": "Shows memory pressure became critical, near full usage."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:11:32Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child",
+      "interpretation": "Kernel OOM event triggered, selecting a process to kill."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:11:33Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)",
+      "interpretation": "Container terminated due to OOM kill."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:05:40Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor",
+      "interpretation": "Unrelated warning, likely not linked to memory issue."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "memory_rss_mb",
+      "value": 995.0,
+      "type": "spike",
+      "interpretation": "RSS memory rose to 995\u202fMB, far above the baseline mean of ~85\u202fMB (z\u2011score >\u202f380)."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 520.0,
+      "type": "spike",
+      "interpretation": "GC pause time jumped to 520\u202fms versus a baseline mean of ~4.6\u202fms (z\u2011score >\u202f1300)."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "active_uploads",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "Active uploads increased to 15, more than double the baseline average of ~6.3 (z\u2011score \u2248\u202f7)."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "oom_kills_total",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "One OOM kill was recorded at 14:12\u202fUTC, whereas the prior baseline recorded zero kills."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~garbage_collection_time_ms",
+      "value": 0.9000525358529804,
+      "type": "correlation",
+      "interpretation": "Memory RSS and GC time exhibit a strong positive Pearson correlation (r\u22480.90) over the 7\u2011sample window."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Adds a module\u2011level dict and stores each uploaded file's raw bytes in it, returning the byte length instead of processing the content."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+      "interpretation": "Removes the previous creation of an in\u2011memory BytesIO stream and the call to _extract_text, eliminating the earlier processing path."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Pattern flagged as 'unbounded_collection': the new global dict may grow without bound as each upload stores the full byte payload."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "code",
+      "reference": "service/app.py:5",
+      "type": "suspicious_pattern",
+      "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+      "interpretation": "Declaration of a mutable dict at module scope, a known source of unbounded memory growth if entries are never evicted."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-CODE-004",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-LOG-005",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "metrics_agent",
+  "summary": "Several metrics show abrupt deviations around 14:11\u201114:12\u202fUTC: memory usage, GC time and upload count spike sharply, an OOM kill appears, and memory usage strongly correlates with GC time over the observed window.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "memory_rss_mb",
+      "value": 995.0,
+      "type": "spike",
+      "interpretation": "RSS memory rose to 995\u202fMB, far above the baseline mean of ~85\u202fMB (z\u2011score >\u202f380)."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 520.0,
+      "type": "spike",
+      "interpretation": "GC pause time jumped to 520\u202fms versus a baseline mean of ~4.6\u202fms (z\u2011score >\u202f1300)."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "active_uploads",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "Active uploads increased to 15, more than double the baseline average of ~6.3 (z\u2011score \u2248\u202f7)."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "oom_kills_total",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "One OOM kill was recorded at 14:12\u202fUTC, whereas the prior baseline recorded zero kills."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~garbage_collection_time_ms",
+      "value": 0.9000525358529804,
+      "type": "correlation",
+      "interpretation": "Memory RSS and GC time exhibit a strong positive Pearson correlation (r\u22480.90) over the 7\u2011sample window."
+    }
+  ]
+}

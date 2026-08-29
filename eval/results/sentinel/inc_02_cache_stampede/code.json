@@ -1,0 +1,39 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "agent": "code_agent",
+  "summary": "TTL for cache was reduced from 3600 seconds to 5 seconds in service/catalog_cache.py and reflected in application code and docker-compose configuration, indicating a shift to a much shorter cache lifetime.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-    # 1 hour cache with 10% jitter to prevent stampedes\n-    DEFAULT_TTL_SECONDS = 3600",
+      "interpretation": "Original code set a 1\u2011hour TTL with jitter, intended to mitigate cache stampedes."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    # Shortened TTL for faster price sync\n+    DEFAULT_TTL_SECONDS = 5",
+      "interpretation": "New code replaces the hour\u2011long TTL with a 5\u2011second TTL, drastically shortening cache lifetime."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:22",
+      "type": "suspicious_pattern",
+      "excerpt": "    DEFAULT_TTL_SECONDS = 5  # Misconfigured short TTL",
+      "interpretation": "Application file also defines the TTL as 5 seconds, reinforcing the shortened cache period."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "config",
+      "reference": "docker-compose.yml:9",
+      "type": "suspicious_pattern",
+      "excerpt": "      - CACHE_TTL_SECONDS=5",
+      "interpretation": "Environment configuration propagates the 5\u2011second TTL to container runtime."
+    }
+  ]
+}

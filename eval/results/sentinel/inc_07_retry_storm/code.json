@@ -1,0 +1,55 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "agent": "code_agent",
+  "summary": "The diff raises MAX_RETRIES from 2 to 10 and sets BACKOFF_BASE_SECONDS to 0.0, while the application contains a retry loop that will now execute up to the higher limit without any back\u2011off delay. Corresponding configuration files also expose the same higher retry count and zero back\u2011off values.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-    MAX_RETRIES = 2\n-    BACKOFF_BASE_SECONDS = 0.5",
+      "interpretation": "Shows the original limits: only 2 retries and a 0.5\u2011second back\u2011off, which constrained repeated attempts."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    MAX_RETRIES = 10\n+    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter",
+      "interpretation": "Introduces a higher retry ceiling (10) and removes any delay between attempts, enabling rapid repeated calls."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:22-26",
+      "type": "suspicious_pattern",
+      "excerpt": "        while attempts < self.MAX_RETRIES:\n            attempts += 1\n            resp = self.gateway.charge(amount)\n            if resp.get(\"status\") == 200:\n                return resp",
+      "interpretation": "Loop will now iterate up to the new MAX_RETRIES value, potentially invoking the gateway many times before giving up."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "code",
+      "reference": "service/app.py:14",
+      "type": "suspicious_pattern",
+      "excerpt": "    MAX_RETRIES = 10",
+      "interpretation": "Local constant mirrors the increased retry count introduced in the diff."
+    },
+    {
+      "evidence_id": "EV-CODE-005",
+      "source": "config",
+      "reference": "docker-compose.yml:6",
+      "type": "suspicious_pattern",
+      "excerpt": "      - MAX_RETRIES=10",
+      "interpretation": "Container environment also reflects the higher retry limit, ensuring consistency across deployment."
+    },
+    {
+      "evidence_id": "EV-CODE-006",
+      "source": "config",
+      "reference": "docker-compose.yml:7",
+      "type": "suspicious_pattern",
+      "excerpt": "      - BACKOFF_SECONDS=0.0",
+      "interpretation": "Environment variable removes back\u2011off delay, matching the code change that sets BACKOFF_BASE_SECONDS to zero."
+    }
+  ]
+}

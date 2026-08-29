@@ -1,0 +1,157 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:07:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:30Z ERROR [event-consumer] Consumer lag on topic 'orders.created' crossed critical alert threshold: 45,000 messages",
+      "interpretation": "Shows that consumer lag reached a critical level, indicating backlog accumulation."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:09:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:09:00Z ERROR [event-consumer] [kafka] max.poll.interval.ms (300000ms) exceeded by worker-2 due to blocking partner HTTP calls",
+      "interpretation": "Indicates poll interval timeout, likely caused by slow external HTTP calls."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:09:15Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:09:15Z ERROR [event-consumer] Consumer rebalance storm triggered: worker-2 kicked from consumer group",
+      "interpretation": "Rebalance event following the poll timeout, causing worker-2 to leave the group."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:06:00Z WARN [event-consumer] Event processing time per record increased from 0.8ms to 240.0ms (webhook HTTP latency)",
+      "interpretation": "Shows a sharp increase in processing latency, likely related to the blocking HTTP calls."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:05:12Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:12Z WARN [event-consumer] [kafka-cluster] Broker 2 logged partition balance advisory message - distractor",
+      "interpretation": "Broker advisory about partition balance; may be unrelated but noted for context."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "consumer_lag_records",
+      "value": 140000.0,
+      "type": "spike",
+      "interpretation": "Consumer lag records surged to 140k, far above the baseline mean of 45."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "msg_process_time_ms",
+      "value": 310.0,
+      "type": "spike",
+      "interpretation": "Message processing time spiked to 310\u202fms, well beyond the baseline mean of ~0.93\u202fms."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "partner_webhook_latency_ms",
+      "value": 305.0,
+      "type": "spike",
+      "interpretation": "Partner webhook latency rose to 305\u202fms, indicating a sudden slowdown."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "consumed_records_sec",
+      "value": 8.0,
+      "type": "drop",
+      "interpretation": "Consumed records per second fell to 8, a sharp drop from the baseline mean of 1,230."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "msg_process_time_ms~partner_webhook_latency_ms",
+      "value": 0.9999677903428976,
+      "type": "correlation",
+      "interpretation": "Processing time and webhook latency are almost perfectly positively correlated (r\u22480.99997)."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "consumed_records_sec~partner_webhook_latency_ms",
+      "value": -0.9901028121716932,
+      "type": "correlation",
+      "interpretation": "Consumption rate and webhook latency show a strong negative correlation (r\u2248-0.99)."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "msg_process_time_ms~consumed_records_sec",
+      "value": -0.9898651627486469,
+      "type": "correlation",
+      "interpretation": "Processing time and consumption rate are strongly negatively correlated (r\u2248-0.99)."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+      "interpretation": "Adds a blocking outbound HTTP call that will delay processing until the partner responds or times out."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+      "interpretation": "Pattern matches outbound_http_call, indicating potential impact on consumer latency if the partner endpoint is slow."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-LOG-005",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

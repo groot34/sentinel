@@ -1,0 +1,281 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "results": [
+    {
+      "hypothesis_id": "HYP-001",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-MET-001",
+            "EV-MET-005",
+            "EV-MET-003"
+          ],
+          "reference": "service\\app.py:5",
+          "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-MET-001",
+            "EV-MET-005",
+            "EV-MET-003"
+          ],
+          "reference": "service\\app.py:5",
+          "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-MET-001",
+            "EV-MET-005",
+            "EV-MET-003"
+          ],
+          "reference": "service\\app.py:5",
+          "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-MET-001",
+            "EV-MET-005",
+            "EV-MET-003"
+          ],
+          "reference": "service\\app.py:5",
+          "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-MET-001",
+            "EV-MET-005",
+            "EV-MET-003"
+          ],
+          "reference": "service\\app.py:5",
+          "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-MET-001",
+            "EV-MET-005",
+            "EV-MET-003"
+          ],
+          "reference": "service\\app.py:5",
+          "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+        }
+      ],
+      "reasoning": "All required checks passed: Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.; Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.; Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly. (references: service\\app.py:5, service\\app.py:5, service\\app.py:5)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7",
+          "detail": "6 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7",
+          "detail": "6 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7",
+          "detail": "6 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7",
+          "detail": "6 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7",
+          "detail": "6 of 6 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-003"
+          ],
+          "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7",
+          "detail": "6 of 6 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7, logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7, logs/application.log:6; logs/application.log:7; logs/application.log:8; logs/application.log:9; metrics/metrics.csv:row 7; metrics/metrics.csv:row 7)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-002",
+            "EV-MET-005",
+            "EV-MET-001"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7",
+          "detail": "3 of 3 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-002",
+            "EV-MET-005",
+            "EV-MET-001"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7",
+          "detail": "3 of 3 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-002",
+            "EV-MET-005",
+            "EV-MET-001"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7",
+          "detail": "3 of 3 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "No candidate metric spikes could be ordered.",
+          "result": "INCONCLUSIVE",
+          "evidence": [
+            "EV-MET-002",
+            "EV-MET-005",
+            "EV-MET-001"
+          ],
+          "reference": null,
+          "detail": null
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-002",
+            "EV-MET-005",
+            "EV-MET-001"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7",
+          "detail": "3 of 3 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-002",
+            "EV-MET-005",
+            "EV-MET-001"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7",
+          "detail": "3 of 3 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7, metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7, metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7)",
+      "confidence": 0.88
+    }
+  ]
+}

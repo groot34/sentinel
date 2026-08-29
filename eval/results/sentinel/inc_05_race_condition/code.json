@@ -1,0 +1,31 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "agent": "code_agent",
+  "summary": "The diff replaces an atomic database decrement guarded by a SQL UPDATE with an in\u2011memory check\u2011then\u2011act sequence that lacks any locking or synchronization, introducing a classic check\u2011then\u2011act pattern.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)",
+      "interpretation": "Previously the code relied on a single atomic DB operation, which is typically safe from concurrent modifications."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+      "interpretation": "New code reads the current stock, checks it, and then writes a new value without any concurrency control, which may allow interleaved executions to corrupt stock counts."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)\n+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+      "interpretation": "The change introduces a check\u2011then\u2011act pattern flagged as suspicious because it lacks atomicity and can lead to race conditions under concurrent access."
+    }
+  ]
+}

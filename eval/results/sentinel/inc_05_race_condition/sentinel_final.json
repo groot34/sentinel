@@ -1,0 +1,852 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "baseline_verdict": "CORRECT",
+  "sentinel_verdict": "CORRECT",
+  "baseline_correct": true,
+  "sentinel_correct": true,
+  "sentinel_verified": true,
+  "sentinel_confirmed_hypotheses": 3,
+  "sentinel_fix_proposals": 3,
+  "baseline_latency_seconds": 12.969,
+  "sentinel_latency_seconds": 168.25,
+  "baseline_tokens": 2347,
+  "sentinel_tokens": 0,
+  "baseline_llm_calls": 1,
+  "sentinel_llm_calls": 7,
+  "sentinel_status": "COMPLETED",
+  "sentinel_hypotheses_total": 3,
+  "sentinel_hypotheses_rejected": 0,
+  "sentinel_hypotheses_inconclusive": 0,
+  "notes": "",
+  "_sentinel_root_cause": "The recent in\u2011memory check\u2011then\u2011act implementation (without locking) introduced a race condition that allowed concurrent reservations to oversell SKU\u2011901, producing negative inventory.",
+  "_sentinel_verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+  "_sentinel_error": "",
+  "_orchestrator_result": {
+    "incident_id": "inc_05_race_condition",
+    "pipeline_status": "COMPLETED",
+    "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+    "llm_call_count": 7,
+    "stages": {
+      "logs": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "agent": "logs_agent",
+          "summary": "Multiple error entries indicate inventory count mismatches and an overselling invariant breach shortly after a stock check, preceded by a warning about replication ping delay. The sequence suggests rapid state changes leading to negative stock values.",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:02:05Z ERROR [inventory-service] [audit] Inventory reconciliation mismatch: Total reservations = 18, Initial Stock = 10, Negative Stock = -8!",
+              "interpretation": "Shows a reconciliation error where reservations exceed available stock, resulting in negative stock."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:02:06Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:02:06Z ERROR [inventory-service] Overselling invariant breached for item SKU-901",
+              "interpretation": "Indicates that the system detected an oversell condition for SKU-901."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:3",
+              "timestamp": "2026-08-28T14:02:01Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:02:01Z WARN [inventory-service] [redis-replica] Replication ping delay 12ms observed - distractor",
+              "interpretation": "Notes a brief replication latency, which may affect data freshness."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:02:02Z",
+              "type": "context",
+              "excerpt": "2026-08-28T14:02:02Z INFO [inventory-service] [worker-3] Checked stock for SKU-901: current=10. Approving reservation for user 403.",
+              "interpretation": "Provides the stock level before the reservation that later contributed to the mismatch."
+            }
+          ]
+        }
+      },
+      "metrics": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "agent": "metrics_agent",
+          "summary": "Metrics show a massive spike in concurrent checkout threads at 14:02:05Z, accompanied by spikes in oversold units and reconciliation errors at the same moment, and a simultaneous drop in inventory remaining. Correlation analysis over the 14:00\u201114:03 window reveals an almost perfect positive correlation between oversold units and reconciliation errors, and a strong negative correlation between inventory remaining and both oversold units and reconciliation errors.",
+          "evidence": [
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "concurrent_checkout_threads",
+              "value": 50.0,
+              "type": "spike",
+              "interpretation": "Concurrent checkout threads rose sharply to 50, far above the typical mean of ~1.5."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "oversold_units_total",
+              "value": 8.0,
+              "type": "spike",
+              "interpretation": "Oversold units total spiked to 8, whereas the baseline is normally zero."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "reconciliation_errors",
+              "value": 1.0,
+              "type": "spike",
+              "interpretation": "Reconciliation errors recorded a spike to 1, deviating from a zero baseline."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "inventory_remaining",
+              "value": -8.0,
+              "type": "drop",
+              "interpretation": "Inventory remaining dropped to -8, contrasting with a normal mean of 10."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+              "metric": "oversold_units_total~reconciliation_errors",
+              "value": 0.9999999999999998,
+              "type": "correlation",
+              "interpretation": "Oversold units and reconciliation errors are almost perfectly positively correlated over the window."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+              "metric": "inventory_remaining~oversold_units_total",
+              "value": -0.9963221648111514,
+              "type": "correlation",
+              "interpretation": "Inventory remaining is strongly negatively correlated with oversold units."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+              "metric": "inventory_remaining~reconciliation_errors",
+              "value": -0.9963221648111514,
+              "type": "correlation",
+              "interpretation": "Inventory remaining is strongly negatively correlated with reconciliation errors."
+            }
+          ]
+        }
+      },
+      "code": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "agent": "code_agent",
+          "summary": "The diff replaces an atomic database decrement guarded by a SQL UPDATE with an in\u2011memory check\u2011then\u2011act sequence that lacks any locking or synchronization, introducing a classic check\u2011then\u2011act pattern.",
+          "evidence": [
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "removed_code",
+              "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)",
+              "interpretation": "Previously the code relied on a single atomic DB operation, which is typically safe from concurrent modifications."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+              "interpretation": "New code reads the current stock, checks it, and then writes a new value without any concurrency control, which may allow interleaved executions to corrupt stock counts."
+            },
+            {
+              "evidence_id": "EV-CODE-003",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "suspicious_pattern",
+              "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)\n+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+              "interpretation": "The change introduces a check\u2011then\u2011act pattern flagged as suspicious because it lacks atomicity and can lead to race conditions under concurrent access."
+            }
+          ]
+        }
+      },
+      "evidence_fusion": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:02:05Z ERROR [inventory-service] [audit] Inventory reconciliation mismatch: Total reservations = 18, Initial Stock = 10, Negative Stock = -8!",
+              "interpretation": "Shows a reconciliation error where reservations exceed available stock, resulting in negative stock."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:02:06Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:02:06Z ERROR [inventory-service] Overselling invariant breached for item SKU-901",
+              "interpretation": "Indicates that the system detected an oversell condition for SKU-901."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:3",
+              "timestamp": "2026-08-28T14:02:01Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:02:01Z WARN [inventory-service] [redis-replica] Replication ping delay 12ms observed - distractor",
+              "interpretation": "Notes a brief replication latency, which may affect data freshness."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:02:02Z",
+              "type": "context",
+              "excerpt": "2026-08-28T14:02:02Z INFO [inventory-service] [worker-3] Checked stock for SKU-901: current=10. Approving reservation for user 403.",
+              "interpretation": "Provides the stock level before the reservation that later contributed to the mismatch."
+            },
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "concurrent_checkout_threads",
+              "value": 50.0,
+              "type": "spike",
+              "interpretation": "Concurrent checkout threads rose sharply to 50, far above the typical mean of ~1.5."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "oversold_units_total",
+              "value": 8.0,
+              "type": "spike",
+              "interpretation": "Oversold units total spiked to 8, whereas the baseline is normally zero."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "reconciliation_errors",
+              "value": 1.0,
+              "type": "spike",
+              "interpretation": "Reconciliation errors recorded a spike to 1, deviating from a zero baseline."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 5",
+              "timestamp": "2026-08-28T14:02:05Z",
+              "metric": "inventory_remaining",
+              "value": -8.0,
+              "type": "drop",
+              "interpretation": "Inventory remaining dropped to -8, contrasting with a normal mean of 10."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+              "metric": "oversold_units_total~reconciliation_errors",
+              "value": 0.9999999999999998,
+              "type": "correlation",
+              "interpretation": "Oversold units and reconciliation errors are almost perfectly positively correlated over the window."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+              "metric": "inventory_remaining~oversold_units_total",
+              "value": -0.9963221648111514,
+              "type": "correlation",
+              "interpretation": "Inventory remaining is strongly negatively correlated with oversold units."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+              "metric": "inventory_remaining~reconciliation_errors",
+              "value": -0.9963221648111514,
+              "type": "correlation",
+              "interpretation": "Inventory remaining is strongly negatively correlated with reconciliation errors."
+            },
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "removed_code",
+              "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)",
+              "interpretation": "Previously the code relied on a single atomic DB operation, which is typically safe from concurrent modifications."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+              "interpretation": "New code reads the current stock, checks it, and then writes a new value without any concurrency control, which may allow interleaved executions to corrupt stock counts."
+            },
+            {
+              "evidence_id": "EV-CODE-003",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "suspicious_pattern",
+              "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)\n+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+              "interpretation": "The change introduces a check\u2011then\u2011act pattern flagged as suspicious because it lacks atomicity and can lead to race conditions under concurrent access."
+            }
+          ],
+          "evidence_ids": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-004",
+            "EV-MET-005",
+            "EV-MET-006",
+            "EV-MET-007"
+          ],
+          "sources": {
+            "logs": true,
+            "metrics": true,
+            "code": true
+          }
+        }
+      },
+      "hypotheses": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "hypotheses": [
+            {
+              "hypothesis_id": "HYP-001",
+              "claim": "The recent in\u2011memory check\u2011then\u2011act implementation (without locking) introduced a race condition that allowed concurrent reservations to oversell SKU\u2011901, producing negative inventory.",
+              "evidence_ids": [
+                "EV-CODE-002",
+                "EV-CODE-003",
+                "EV-MET-001",
+                "EV-MET-002",
+                "EV-MET-003"
+              ],
+              "supporting_reasoning": "EV-CODE-002 and EV-CODE-003 show the new code reads stock, checks it, then writes back without any atomic guarantee. EV-MET-001 records a sudden surge to 50 concurrent checkout threads, providing the concurrency needed for interleaved executions. EV-MET-002 and EV-MET-003 document spikes in oversold units and reconciliation errors that coincide with the code change, linking the non\u2011atomic logic to the observed negative stock.",
+              "falsification_criteria": [
+                "If a controlled single\u2011threaded test of the new code never produces a negative stock value, the hypothesis is falsified",
+                "If logs from a replicated environment show that all stock updates are serialized at the database level despite the in\u2011memory logic, the hypothesis is falsified"
+              ],
+              "verification_plan": [
+                "Review the implementation of get_stock, set_stock, and reservation handling to confirm absence of mutexes or DB transactions",
+                "Instrument the reservation path to record timestamps of read\u2011check\u2011write sequences under high concurrency",
+                "Replay the incident window with a load generator using the new code and verify whether negative stock occurs",
+                "Revert the code to the original atomic DB decrement (as in EV-CODE-001) and confirm that oversell disappears"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "claim": "Transient Redis replica replication delays caused workers to read stale stock values, leading to reservations being approved based on outdated inventory and resulting in oversell.",
+              "evidence_ids": [
+                "EV-LOG-003",
+                "EV-MET-001"
+              ],
+              "supporting_reasoning": "EV-LOG-003 notes a 12\u202fms replication ping delay, indicating that replica data may lag behind the primary. EV-MET-001 shows a spike to 50 concurrent checkout threads, increasing the chance that some workers read from a lagging replica during the surge, which could explain the mismatch between reported stock (10) and reservations (18).",
+              "falsification_criteria": [
+                "If the inventory service is confirmed to read exclusively from the primary database during the incident window, the hypothesis is falsified",
+                "If replication lag measurements during the spike remain below the time needed for a reservation transaction, the hypothesis is falsified"
+              ],
+              "verification_plan": [
+                "Determine the data source used by get_stock (primary DB vs Redis replica) during reservation processing",
+                "Measure real\u2011time replication lag of the Redis replica during a simulated load matching EV-MET-001",
+                "Force the service to read only from the primary and repeat the high\u2011concurrency test to see if oversell persists",
+                "Introduce artificial replication delay and observe whether oversell frequency changes"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "claim": "The removal of the atomic database decrement guard eliminated a built\u2011in safety check, allowing stock to be decremented below zero even in the absence of concurrency.",
+              "evidence_ids": [
+                "EV-CODE-001",
+                "EV-CODE-002"
+              ],
+              "supporting_reasoning": "EV-CODE-001 documents the prior safe atomic decrement operation that inherently prevented negative stock. EV-CODE-002 shows that this operation was replaced with an in\u2011memory check\u2011then\u2011act pattern lacking any database\u2011level guard, meaning a single reservation could potentially drive stock negative if the guard logic is flawed or bypassed.",
+              "falsification_criteria": [
+                "If database constraints or triggers still prevent stock from dropping below zero despite the code change, the hypothesis is falsified",
+                "If a single\u2011threaded execution of the new code never produces a negative stock value, the hypothesis is falsified"
+              ],
+              "verification_plan": [
+                "Inspect the database schema for constraints that enforce non\u2011negative stock values",
+                "Execute a single\u2011threaded reservation for SKU\u2011901 using the new code and verify the resulting stock level",
+                "Re\u2011introduce the atomic decrement (as in EV-CODE-001) in a test environment and confirm that negative stock no longer occurs",
+                "Review unit and integration test coverage to ensure the guard logic is exercised"
+              ]
+            }
+          ]
+        }
+      },
+      "verification": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "results": [
+            {
+              "hypothesis_id": "HYP-001",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-MET-001",
+                    "EV-MET-002",
+                    "EV-MET-003"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-MET-001",
+                    "EV-MET-002",
+                    "EV-MET-003"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-MET-001",
+                    "EV-MET-002",
+                    "EV-MET-003"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-MET-001",
+                    "EV-MET-002",
+                    "EV-MET-003"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-MET-001",
+                    "EV-MET-002",
+                    "EV-MET-003"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-006",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-CODE-003",
+                    "EV-MET-001",
+                    "EV-MET-002",
+                    "EV-MET-003"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5, git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5, git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-003",
+                    "EV-MET-001"
+                  ],
+                  "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-003",
+                    "EV-MET-001"
+                  ],
+                  "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-003",
+                    "EV-MET-001"
+                  ],
+                  "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-003",
+                    "EV-MET-001"
+                  ],
+                  "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-003",
+                    "EV-MET-001"
+                  ],
+                  "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-006",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-003",
+                    "EV-MET-001"
+                  ],
+                  "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:3; metrics/metrics.csv:row 5, logs/application.log:3; metrics/metrics.csv:row 5, logs/application.log:3; metrics/metrics.csv:row 5)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-006",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+                  "detail": "2 of 2 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; git_diff.patch:hunk 1, git_diff.patch:hunk 1; git_diff.patch:hunk 1, git_diff.patch:hunk 1; git_diff.patch:hunk 1)",
+              "confidence": 0.95
+            }
+          ]
+        }
+      },
+      "fix_proposals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 3,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "proposals": [
+            {
+              "proposal_id": "FIX-001",
+              "hypothesis_id": "HYP-001",
+              "incident_id": "inc_05_race_condition",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Revert to atomic database decrement for stock reservation to eliminate the race condition.",
+              "rationale": "The confirmed root cause is the non\u2011atomic in\u2011memory check\u2011then\u2011act logic that allows concurrent threads to interleave reads and writes, leading to overselling and negative inventory. Restoring the original atomic database decrement guarantees that stock updates are performed as a single, isolated operation, preventing race conditions under high concurrency.",
+              "changes": [
+                {
+                  "file": "service/inventory_manager.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Replace the non\u2011atomic in\u2011memory check\u2011then\u2011act implementation with the original atomic database decrement to ensure thread\u2011safe stock updates.",
+                  "before": "        # Atomic database decrement with guard\n        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n        return self.db.atomic_decrement(sku, quantity)",
+                  "after": "        # Atomic database decrement with guard\n        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n        return self.db.atomic_decrement(sku, quantity)"
+                }
+              ],
+              "patch": "--- a/service/inventory_manager.py\n+++ b/service/inventory_manager.py\n@@ -10,6 +10,3 @@ class InventoryManager:\n-        # In-memory check-then-act without lock\n-        current = self.get_stock(sku)\n-        if current >= quantity:\n-            self.set_stock(sku, current - quantity)\n-            return True\n-        return False\n+        # Atomic database decrement with guard\n+        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n+        return self.db.atomic_decrement(sku, quantity)\n",
+              "expected_effect": "Concurrent reservations will no longer oversell SKU\u2011901; inventory counts remain non\u2011negative and reconciliation errors disappear.",
+              "risks": [
+                "Reintroduces dependency on the database layer; if the DB becomes unavailable the reservation operation will fail.",
+                "Potential performance impact due to round\u2011trip to the database for each reservation.",
+                "If the DB atomic_decrement method has bugs, they will surface immediately."
+              ],
+              "validation_plan": [
+                "Deploy the change to a staging environment with a load\u2011test simulating 50 concurrent checkout threads.",
+                "Verify that no negative inventory values appear in logs after the test run.",
+                "Check that the metrics for oversold units and reconciliation errors remain at zero.",
+                "Run integration tests to ensure the reservation API still returns success for valid requests."
+              ],
+              "rollback_plan": "Re\u2011apply the original in\u2011memory check\u2011then\u2011act code block (as shown in the diff) and redeploy the previous build if any regression is observed.",
+              "evidence_ids": [
+                "EV-CODE-002",
+                "EV-CODE-003",
+                "EV-MET-001",
+                "EV-MET-002",
+                "EV-MET-003"
+              ]
+            },
+            {
+              "proposal_id": "FIX-002",
+              "hypothesis_id": "HYP-002",
+              "incident_id": "inc_05_race_condition",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Replace the non\u2011atomic in\u2011memory stock decrement with the original atomic database decrement to eliminate race conditions.",
+              "rationale": "The confirmed root cause is a check\u2011then\u2011act pattern that allows concurrent workers to read stale stock from a lagging Redis replica, leading to oversell; restoring the atomic DB decrement ensures the stock update is performed as a single, consistent operation, preventing stale reads from causing incorrect reservations.",
+              "changes": [
+                {
+                  "file": "service/inventory_manager.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Revert to atomic database decrement, removing the unsafe in\u2011memory check\u2011then\u2011act logic.",
+                  "before": "        # In-memory check-then-act without lock\n        current = self.get_stock(sku)\n        if current >= quantity:\n            self.set_stock(sku, current - quantity)\n            return True\n        return False",
+                  "after": "        # Atomic database decrement with guard\n        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n        return self.db.atomic_decrement(sku, quantity)"
+                }
+              ],
+              "patch": "PROPOSED\n--- a/service/inventory_manager.py\n+++ b/service/inventory_manager.py\n@@\n-        # In-memory check-then-act without lock\n-        current = self.get_stock(sku)\n-        if current >= quantity:\n-            self.set_stock(sku, current - quantity)\n-            return True\n-        return False\n+        # Atomic database decrement with guard\n+        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n+        return self.db.atomic_decrement(sku, quantity)\n",
+              "expected_effect": "Concurrent checkout threads will no longer be able to reserve more items than available, eliminating negative stock and oversell incidents.",
+              "risks": [
+                "Reverting to DB\u2011based decrement assumes the database layer is correctly configured and reachable; if the DB is down, reservations will fail.",
+                "Potential performance impact due to added DB round\u2011trip compared to in\u2011memory operation."
+              ],
+              "validation_plan": [
+                "Run a load test with \u226550 concurrent checkout threads and verify that total reservations never exceed initial stock.",
+                "Inspect logs for absence of oversell or negative stock errors after deploying the fix.",
+                "Confirm that Redis replica lag no longer affects reservation outcomes by checking stock values before and after reservations.",
+                "Execute unit tests that mock the db.atomic_decrement method to ensure it is called exactly once per reservation."
+              ],
+              "rollback_plan": "If regressions are observed, revert the inventory_manager.py file to the previous buggy implementation by applying the original in\u2011memory check\u2011then\u2011act code block, restoring the prior behavior.",
+              "evidence_ids": [
+                "EV-LOG-003",
+                "EV-MET-001"
+              ]
+            },
+            {
+              "proposal_id": "FIX-003",
+              "hypothesis_id": "HYP-003",
+              "incident_id": "inc_05_race_condition",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Restore atomic database decrement with guard to prevent negative stock under concurrency.",
+              "rationale": "Reinstating the original atomic DB decrement ensures the stock update is performed as a single, isolated operation, eliminating the race condition introduced by the in\u2011memory check\u2011then\u2011act pattern that allowed concurrent reservations to drive stock below zero.",
+              "changes": [
+                {
+                  "file": "service/inventory_manager.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Replace non\u2011atomic check\u2011then\u2011act logic with atomic DB decrement guard.",
+                  "before": "        # In-memory check-then-act without lock\n        current = self.get_stock(sku)\n        if current >= quantity:\n            self.set_stock(sku, current - quantity)\n            return True\n        return False",
+                  "after": "        # Atomic database decrement with guard\n        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n        return self.db.atomic_decrement(sku, quantity)"
+                }
+              ],
+              "patch": "--- a/service/inventory_manager.py\n+++ b/service/inventory_manager.py\n@@ -10,6 +10,4 @@ class InventoryManager:\n-        # In-memory check-then-act without lock\n-        current = self.get_stock(sku)\n-        if current >= quantity:\n-            self.set_stock(sku, current - quantity)\n-            return True\n-        return False\n+        # Atomic database decrement with guard\n+        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n+        return self.db.atomic_decrement(sku, quantity)",
+              "expected_effect": "Stock levels remain non\u2011negative under high concurrency; overselling invariant is maintained and reconciliation errors disappear.",
+              "risks": [
+                "If the database layer raises an exception, the reservation may fail and need retry handling.",
+                "Reintroducing DB dependency may affect latency compared to in\u2011memory operation."
+              ],
+              "validation_plan": [
+                "Run a load test with 50 concurrent checkout threads and verify that inventory never drops below zero.",
+                "Check application logs for absence of overselling error messages (e.g., EV-LOG-001, EV-LOG-002).",
+                "Confirm metrics show zero oversold units and reconciliation errors after the fix."
+              ],
+              "rollback_plan": "Re\u2011apply the original in\u2011memory check\u2011then\u2011act code block from the before snippet, redeploy the previous version, and monitor for recurrence of negative stock.",
+              "evidence_ids": [
+                "EV-CODE-001",
+                "EV-CODE-002"
+              ]
+            }
+          ],
+          "validation_errors": {
+            "FIX-001": [
+              "Proposed change references file 'service/inventory_manager.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_05_race_condition."
+            ],
+            "FIX-002": [
+              "Proposed change references file 'service/inventory_manager.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_05_race_condition."
+            ],
+            "FIX-003": [
+              "Proposed change references file 'service/inventory_manager.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_05_race_condition."
+            ]
+          },
+          "skipped_hypotheses": []
+        }
+      },
+      "approvals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_05_race_condition",
+          "approval_records": [
+            {
+              "proposal_id": "FIX-001",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:38:00.147759+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-002",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:38:00.149759+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-003",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:38:00.151287+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            }
+          ],
+          "summary": {
+            "total": 3,
+            "approved": 0,
+            "rejected": 3
+          }
+        }
+      }
+    },
+    "summary": {
+      "confirmed_hypotheses": 3,
+      "rejected_hypotheses": 0,
+      "inconclusive_hypotheses": 0,
+      "proposals_generated": 3,
+      "proposals_approved": 0,
+      "proposals_rejected": 3
+    },
+    "error": null
+  }
+}

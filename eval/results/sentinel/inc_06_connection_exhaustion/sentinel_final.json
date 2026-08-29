@@ -1,0 +1,894 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "baseline_verdict": "CORRECT",
+  "sentinel_verdict": "CORRECT",
+  "baseline_correct": true,
+  "sentinel_correct": true,
+  "sentinel_verified": true,
+  "sentinel_confirmed_hypotheses": 3,
+  "sentinel_fix_proposals": 3,
+  "baseline_latency_seconds": 16.328,
+  "sentinel_latency_seconds": 178.89,
+  "baseline_tokens": 2434,
+  "sentinel_tokens": 0,
+  "baseline_llm_calls": 1,
+  "sentinel_llm_calls": 7,
+  "sentinel_status": "COMPLETED",
+  "sentinel_hypotheses_total": 3,
+  "sentinel_hypotheses_rejected": 0,
+  "sentinel_hypotheses_inconclusive": 0,
+  "notes": "",
+  "_sentinel_root_cause": "Invalid date filters cause unhandled ValueError exceptions that prevent connection release, leaking pool connections and leading to exhaustion.",
+  "_sentinel_verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+  "_sentinel_error": "",
+  "_orchestrator_result": {
+    "incident_id": "inc_06_connection_exhaustion",
+    "pipeline_status": "COMPLETED",
+    "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+    "llm_call_count": 7,
+    "stages": {
+      "logs": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "agent": "logs_agent",
+          "summary": "The log stream contains a series of warnings about malformed date filters, then a rapid shift to errors indicating the reporting service's connection pool reached its configured limit (10/10) and subsequent requests timed out, producing 500 responses due to QueuePool exhaustion.",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:5",
+              "timestamp": "2026-08-28T14:05:00Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:05:00Z WARN [reporting-service] Invalid date filter provided by user 109: '2026-99-99' -> raising ValueError",
+              "interpretation": "Observational: user supplied an impossible date, service logged a warning and raised ValueError."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:05:01Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:05:01Z WARN [reporting-service] Invalid date filter provided by user 110: 'INVALID_DATE' -> raising ValueError",
+              "interpretation": "Observational: another malformed date input, similar warning recorded shortly after the previous one."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:06:00Z ERROR [reporting-service] Active pool connections: 10/10. Available: 0.",
+              "interpretation": "Observational: connection pool reached its maximum size, no free connections available at this moment."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:06:30Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:06:30Z ERROR [reporting-service] GET /api/v1/reports 500 INTERNAL_SERVER_ERROR - TimeoutError: QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00",
+              "interpretation": "Observational: a request failed with 500 due to the pool limit being hit and a timeout while waiting for a connection."
+            }
+          ]
+        }
+      },
+      "metrics": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "agent": "metrics_agent",
+          "summary": "Metrics show a sharp increase in active connections to 10 (baseline ~1.7) concurrent with a drop of idle connections to 0 (baseline ~8.3) and spikes in pool timeout errors (24) and invalid request count (10). Correlation analysis over the 14:00\u201114:08 window shows a near\u2011perfect negative correlation between active and idle connections (r\u2248\u20111) and strong positive correlation between active connections and invalid requests (r\u22480.98), with idle connections inversely correlated with invalid requests.",
+          "evidence": [
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 6",
+              "timestamp": "2026-08-28T14:05:30Z",
+              "metric": "active_connections",
+              "value": 10.0,
+              "type": "spike",
+              "interpretation": "Active connections spiked far above the recent baseline, indicating a sudden surge in usage."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 6",
+              "timestamp": "2026-08-28T14:05:30Z",
+              "metric": "idle_connections",
+              "value": 0.0,
+              "type": "drop",
+              "interpretation": "Idle connections dropped to zero, the opposite of their typical level, suggesting resources were fully consumed."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "pool_timeout_errors",
+              "value": 24.0,
+              "type": "spike",
+              "interpretation": "Pool timeout errors rose sharply, reflecting many requests failing to acquire a connection."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 7",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "metric": "invalid_request_count",
+              "value": 10.0,
+              "type": "spike",
+              "interpretation": "Invalid request count increased markedly, coinciding with the connection surge."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "active_connections~idle_connections",
+              "value": -0.9999999999999999,
+              "type": "correlation",
+              "interpretation": "Active and idle connections are almost perfectly negatively correlated over the window."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "active_connections~invalid_request_count",
+              "value": 0.984473894675649,
+              "type": "correlation",
+              "interpretation": "Active connections and invalid requests show a strong positive correlation."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "idle_connections~invalid_request_count",
+              "value": -0.984473894675649,
+              "type": "correlation",
+              "interpretation": "Idle connections and invalid requests are strongly inversely correlated."
+            }
+          ]
+        }
+      },
+      "code": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "agent": "code_agent",
+          "summary": "The recent changes add a date\u2011validation block that can raise an exception before the database connection is released. Existing code shows the connection pool acquire method increments the active count without a guaranteed release, and the generate_report function acquires a connection, runs a query, then validates the date after the query but before releasing the connection, creating a path where the connection may remain held.",
+          "evidence": [
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+        # Date parser can raise ValueError before conn.release()\n+        if not date_filter.startswith(\"2026-\"):\n+            raise ValueError(f\"Unsupported date format: {date_filter}\")",
+              "interpretation": "Adds a validation step that raises ValueError before the explicit conn.release(), introducing a potential leak of the acquired connection when an unsupported date is supplied."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "code",
+              "reference": "service/app.py:8-12",
+              "type": "suspicious_pattern",
+              "excerpt": "    def acquire(self):\n        if self.active >= self.size:\n            raise TimeoutError(\"Connection pool exhausted!\")\n        self.active += 1\n        return self",
+              "interpretation": "Acquires a connection by incrementing the active counter but does not pair this with a guaranteed release, so any early exit after acquire can leave the pool count inflated."
+            },
+            {
+              "evidence_id": "EV-CODE-003",
+              "source": "code",
+              "reference": "service/app.py:24-30",
+              "type": "suspicious_pattern",
+              "excerpt": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+              "interpretation": "Acquires a connection, performs a query, then validates the date before releasing; if the date is invalid, the function raises before conn.release(), leaving the connection held."
+            }
+          ]
+        }
+      },
+      "evidence_fusion": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:5",
+              "timestamp": "2026-08-28T14:05:00Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:05:00Z WARN [reporting-service] Invalid date filter provided by user 109: '2026-99-99' -> raising ValueError",
+              "interpretation": "Observational: user supplied an impossible date, service logged a warning and raised ValueError."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:05:01Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:05:01Z WARN [reporting-service] Invalid date filter provided by user 110: 'INVALID_DATE' -> raising ValueError",
+              "interpretation": "Observational: another malformed date input, similar warning recorded shortly after the previous one."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:06:00Z ERROR [reporting-service] Active pool connections: 10/10. Available: 0.",
+              "interpretation": "Observational: connection pool reached its maximum size, no free connections available at this moment."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:06:30Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:06:30Z ERROR [reporting-service] GET /api/v1/reports 500 INTERNAL_SERVER_ERROR - TimeoutError: QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00",
+              "interpretation": "Observational: a request failed with 500 due to the pool limit being hit and a timeout while waiting for a connection."
+            },
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 6",
+              "timestamp": "2026-08-28T14:05:30Z",
+              "metric": "active_connections",
+              "value": 10.0,
+              "type": "spike",
+              "interpretation": "Active connections spiked far above the recent baseline, indicating a sudden surge in usage."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 6",
+              "timestamp": "2026-08-28T14:05:30Z",
+              "metric": "idle_connections",
+              "value": 0.0,
+              "type": "drop",
+              "interpretation": "Idle connections dropped to zero, the opposite of their typical level, suggesting resources were fully consumed."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:08:00Z",
+              "metric": "pool_timeout_errors",
+              "value": 24.0,
+              "type": "spike",
+              "interpretation": "Pool timeout errors rose sharply, reflecting many requests failing to acquire a connection."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 7",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "metric": "invalid_request_count",
+              "value": 10.0,
+              "type": "spike",
+              "interpretation": "Invalid request count increased markedly, coinciding with the connection surge."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "active_connections~idle_connections",
+              "value": -0.9999999999999999,
+              "type": "correlation",
+              "interpretation": "Active and idle connections are almost perfectly negatively correlated over the window."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "active_connections~invalid_request_count",
+              "value": 0.984473894675649,
+              "type": "correlation",
+              "interpretation": "Active connections and invalid requests show a strong positive correlation."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+              "metric": "idle_connections~invalid_request_count",
+              "value": -0.984473894675649,
+              "type": "correlation",
+              "interpretation": "Idle connections and invalid requests are strongly inversely correlated."
+            },
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+        # Date parser can raise ValueError before conn.release()\n+        if not date_filter.startswith(\"2026-\"):\n+            raise ValueError(f\"Unsupported date format: {date_filter}\")",
+              "interpretation": "Adds a validation step that raises ValueError before the explicit conn.release(), introducing a potential leak of the acquired connection when an unsupported date is supplied."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "code",
+              "reference": "service/app.py:8-12",
+              "type": "suspicious_pattern",
+              "excerpt": "    def acquire(self):\n        if self.active >= self.size:\n            raise TimeoutError(\"Connection pool exhausted!\")\n        self.active += 1\n        return self",
+              "interpretation": "Acquires a connection by incrementing the active counter but does not pair this with a guaranteed release, so any early exit after acquire can leave the pool count inflated."
+            },
+            {
+              "evidence_id": "EV-CODE-003",
+              "source": "code",
+              "reference": "service/app.py:24-30",
+              "type": "suspicious_pattern",
+              "excerpt": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+              "interpretation": "Acquires a connection, performs a query, then validates the date before releasing; if the date is invalid, the function raises before conn.release(), leaving the connection held."
+            }
+          ],
+          "evidence_ids": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-004",
+            "EV-MET-005",
+            "EV-MET-006",
+            "EV-MET-007"
+          ],
+          "sources": {
+            "logs": true,
+            "metrics": true,
+            "code": true
+          }
+        }
+      },
+      "hypotheses": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "hypotheses": [
+            {
+              "hypothesis_id": "HYP-001",
+              "claim": "Invalid date filters cause unhandled ValueError exceptions that prevent connection release, leaking pool connections and leading to exhaustion.",
+              "evidence_ids": [
+                "EV-LOG-001",
+                "EV-LOG-002",
+                "EV-CODE-001",
+                "EV-CODE-003",
+                "EV-MET-006",
+                "EV-MET-004"
+              ],
+              "supporting_reasoning": "The logs record warnings for malformed dates and subsequent ValueError raises. The code adds a validation step that raises before conn.release(), and the generate_report function acquires a connection before validating the date, so an exception aborts the release. Metrics show a strong positive correlation between invalid request count and active connections, indicating that each bad request may retain a connection.",
+              "falsification_criteria": [
+                "No increase in active connection count after reproducing an invalid date request",
+                "Connection release is logged even when ValueError is raised"
+              ],
+              "verification_plan": [
+                "Instrument the reporting-service to log pool.active count at request start and end",
+                "Send a request with an invalid date filter (e.g., \"2026-99-99\")",
+                "Observe whether active count remains elevated after the request completes",
+                "Inspect the exception handling path to confirm conn.release() is executed in a finally block"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "claim": "The connection pool's acquire method increments the active counter without a guaranteed release, causing leaks across all code paths and eventual pool exhaustion.",
+              "evidence_ids": [
+                "EV-CODE-002",
+                "EV-LOG-003",
+                "EV-LOG-004",
+                "EV-MET-001",
+                "EV-MET-002"
+              ],
+              "supporting_reasoning": "The acquire implementation raises a TimeoutError when the pool is full but never ensures a matching release, and no finally clause is present. Logs show the pool hitting its maximum size and subsequent timeout errors. Metrics record a spike in active connections and a drop of idle connections to zero, consistent with connections being retained.",
+              "falsification_criteria": [
+                "Adding a guaranteed release (e.g., using a context manager) eliminates pool exhaustion under the same load",
+                "Instrumentation shows active count decreasing appropriately for every acquire call"
+              ],
+              "verification_plan": [
+                "Add logging to both acquire and release methods to record each invocation",
+                "Run a typical workload without invalid date inputs",
+                "Verify that active count never exceeds the configured pool size",
+                "Introduce a context\u2011manager wrapper that guarantees release and confirm that errors disappear"
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "claim": "A sudden surge in legitimate request traffic exceeded the pool's capacity, causing connection exhaustion independent of invalid inputs.",
+              "evidence_ids": [
+                "EV-MET-001",
+                "EV-MET-003",
+                "EV-MET-005",
+                "EV-LOG-003",
+                "EV-LOG-004"
+              ],
+              "supporting_reasoning": "Metrics show a sharp spike in active connections and pool timeout errors, while idle connections dropped to zero, indicating high usage. The negative correlation between active and idle connections supports a scenario where demand outstripped supply. Logs confirm the pool reached its limit and requests timed out, without requiring malformed inputs.",
+              "falsification_criteria": [
+                "Request rate metrics for the incident window remain at baseline levels",
+                "Increasing the pool size eliminates the errors without any code changes"
+              ],
+              "verification_plan": [
+                "Extract HTTP request count per minute for the incident timeframe and compare to normal periods",
+                "Temporarily raise the pool size (e.g., from 10 to 20) and monitor for disappearance of timeout errors",
+                "Correlate timestamps of request spikes with connection\u2011exhaustion log entries",
+                "Confirm that invalid request count does not drive the active\u2011connection spike"
+              ]
+            }
+          ]
+        }
+      },
+      "verification": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "results": [
+            {
+              "hypothesis_id": "HYP-001",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-LOG-002",
+                    "EV-CODE-001",
+                    "EV-CODE-003",
+                    "EV-MET-006",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7",
+                  "detail": "6 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-LOG-002",
+                    "EV-CODE-001",
+                    "EV-CODE-003",
+                    "EV-MET-006",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7",
+                  "detail": "6 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-LOG-002",
+                    "EV-CODE-001",
+                    "EV-CODE-003",
+                    "EV-MET-006",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7",
+                  "detail": "6 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-LOG-002",
+                    "EV-CODE-001",
+                    "EV-CODE-003",
+                    "EV-MET-006",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7",
+                  "detail": "6 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-LOG-002",
+                    "EV-CODE-001",
+                    "EV-CODE-003",
+                    "EV-MET-006",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7",
+                  "detail": "6 of 6 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-006",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-001",
+                    "EV-LOG-002",
+                    "EV-CODE-001",
+                    "EV-CODE-003",
+                    "EV-MET-006",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7",
+                  "detail": "6 of 6 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7, logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7, logs/application.log:5; logs/application.log:6; git_diff.patch:hunk 1; service/app.py:24-30; metrics/metrics.csv; metrics/metrics.csv:row 7)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-LOG-003",
+                    "EV-LOG-004",
+                    "EV-MET-001",
+                    "EV-MET-002"
+                  ],
+                  "reference": "service\\app.py",
+                  "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"generate_report\", \"lineno\": 24, \"acquire_lines\": [25]}]}}]"
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-LOG-003",
+                    "EV-LOG-004",
+                    "EV-MET-001",
+                    "EV-MET-002"
+                  ],
+                  "reference": "service\\app.py",
+                  "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"generate_report\", \"lineno\": 24, \"acquire_lines\": [25]}]}}]"
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-LOG-003",
+                    "EV-LOG-004",
+                    "EV-MET-001",
+                    "EV-MET-002"
+                  ],
+                  "reference": "service\\app.py",
+                  "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"generate_report\", \"lineno\": 24, \"acquire_lines\": [25]}]}}]"
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-LOG-003",
+                    "EV-LOG-004",
+                    "EV-MET-001",
+                    "EV-MET-002"
+                  ],
+                  "reference": "service\\app.py",
+                  "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"generate_report\", \"lineno\": 24, \"acquire_lines\": [25]}]}}]"
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-LOG-003",
+                    "EV-LOG-004",
+                    "EV-MET-001",
+                    "EV-MET-002"
+                  ],
+                  "reference": "service\\app.py",
+                  "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"generate_report\", \"lineno\": 24, \"acquire_lines\": [25]}]}}]"
+                },
+                {
+                  "check_id": "CHK-006",
+                  "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-002",
+                    "EV-LOG-003",
+                    "EV-LOG-004",
+                    "EV-MET-001",
+                    "EV-MET-002"
+                  ],
+                  "reference": "service\\app.py",
+                  "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"generate_report\", \"lineno\": 24, \"acquire_lines\": [25]}]}}]"
+                }
+              ],
+              "reasoning": "All required checks passed: Source file contains acquire() without release() call (AST name-count heuristic).; Source file contains acquire() without release() call (AST name-count heuristic).; Source file contains acquire() without release() call (AST name-count heuristic). (references: service\\app.py, service\\app.py, service\\app.py)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-001",
+                    "EV-MET-003",
+                    "EV-MET-005",
+                    "EV-LOG-003",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-001",
+                    "EV-MET-003",
+                    "EV-MET-005",
+                    "EV-LOG-003",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-001",
+                    "EV-MET-003",
+                    "EV-MET-005",
+                    "EV-LOG-003",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-001",
+                    "EV-MET-003",
+                    "EV-MET-005",
+                    "EV-LOG-003",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-001",
+                    "EV-MET-003",
+                    "EV-MET-005",
+                    "EV-LOG-003",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-006",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-MET-001",
+                    "EV-MET-003",
+                    "EV-MET-005",
+                    "EV-LOG-003",
+                    "EV-LOG-004"
+                  ],
+                  "reference": "metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8, metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8, metrics/metrics.csv:row 6; metrics/metrics.csv:row 8; metrics/metrics.csv; logs/application.log:7; logs/application.log:8)",
+              "confidence": 0.95
+            }
+          ]
+        }
+      },
+      "fix_proposals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 3,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "proposals": [
+            {
+              "proposal_id": "FIX-001",
+              "hypothesis_id": "HYP-001",
+              "incident_id": "inc_06_connection_exhaustion",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Validate date filter before acquiring a connection to ensure connections are always released.",
+              "rationale": "The bug occurs because the date validation raises before conn.release(), leaking the connection; moving validation before acquisition guarantees the connection is released even when an invalid date triggers an exception.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Validate date before acquiring a connection and release connection after query.",
+                  "before": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+                  "after": "    def generate_report(self, date_filter: str):\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        conn.release()\n        return rows"
+                }
+              ],
+              "patch": "PROPOSED\n--- a/service/app.py\n+++ b/service/app.py\n@@\n-    def generate_report(self, date_filter: str):\n-        conn = self.pool.acquire()\n-        rows = conn.query(\"SELECT * FROM metrics\")\n-        if not date_filter.startswith(\"2026-\"):\n-            raise ValueError(f\"Unsupported date format: {date_filter}\")\n-        conn.release()\n-        return rows\n+    def generate_report(self, date_filter: str):\n+        if not date_filter.startswith(\"2026-\"):\n+            raise ValueError(f\"Unsupported date format: {date_filter}\")\n+        conn = self.pool.acquire()\n+        rows = conn.query(\"SELECT * FROM metrics\")\n+        conn.release()\n+        return rows",
+              "expected_effect": "Connection pool will no longer leak on invalid date inputs, preventing exhaustion and related 500 errors.",
+              "risks": [
+                "If future valid date formats differ from the hard\u2011coded \"2026-\" prefix they will be rejected, requiring updates to validation logic.",
+                "Changing the order of operations could expose hidden side\u2011effects if query execution ever depends on date validation (currently it does not)."
+              ],
+              "validation_plan": [
+                "Run unit test calling generate_report with an invalid date and assert that a ValueError is raised and MockPool.active remains unchanged.",
+                "Execute a load test sending a high volume of requests with invalid dates and verify that MockPool.active never exceeds its initial value.",
+                "Run integration test with a valid date to confirm normal report generation and that connections are correctly released."
+              ],
+              "rollback_plan": "Revert service/app.py to the original implementation (restore the previous generate_report method) and redeploy the previous version.",
+              "evidence_ids": [
+                "EV-CODE-001",
+                "EV-CODE-003",
+                "EV-LOG-001",
+                "EV-LOG-002",
+                "EV-MET-004",
+                "EV-MET-006"
+              ]
+            },
+            {
+              "proposal_id": "FIX-002",
+              "hypothesis_id": "HYP-002",
+              "incident_id": "inc_06_connection_exhaustion",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Add a try/finally block in generate_report to guarantee pool.release() is called even on errors.",
+              "rationale": "The acquire method increments the active counter but the current generate_report exits via ValueError before calling release, leaving connections leaked; wrapping the usage in a try/finally ensures release is always executed, preventing pool exhaustion.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Guarantee release of the connection even when an exception occurs during report generation.",
+                  "before": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+                  "after": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        try:\n            rows = conn.query(\"SELECT * FROM metrics\")\n            if not date_filter.startswith(\"2026-\"):\n                raise ValueError(f\"Unsupported date format: {date_filter}\")\n        finally:\n            conn.release()\n        return rows"
+                }
+              ],
+              "patch": "PROPOSED PATCH\n--- a/service/app.py\n+++ b/service/app.py\n@@\n-    def generate_report(self, date_filter: str):\n-        conn = self.pool.acquire()\n-        rows = conn.query(\"SELECT * FROM metrics\")\n-        if not date_filter.startswith(\"2026-\"):\n-            raise ValueError(f\"Unsupported date format: {date_filter}\")\n-        conn.release()\n-        return rows\n+    def generate_report(self, date_filter: str):\n+        conn = self.pool.acquire()\n+        try:\n+            rows = conn.query(\"SELECT * FROM metrics\")\n+            if not date_filter.startswith(\"2026-\"):\n+                raise ValueError(f\"Unsupported date format: {date_filter}\")\n+        finally:\n+            conn.release()\n+        return rows\n",
+              "expected_effect": "Active connection count will no longer increase on failed report generation, eliminating leaks and preventing pool exhaustion under error conditions.",
+              "risks": [
+                "If an unexpected exception occurs after release, the finally block still runs but may mask original error handling (unlikely).",
+                "Potential minor performance overhead from try/finally, negligible."
+              ],
+              "validation_plan": [
+                "Run unit test calling generate_report with an invalid date and assert that a ValueError is raised and MockPool.active remains unchanged.",
+                "Run a stress test issuing many generate_report calls with mixed valid/invalid dates and verify that active never exceeds pool size and no TimeoutError is raised.",
+                "Inspect logs after test to confirm no \"Connection pool exhausted\" errors appear."
+              ],
+              "rollback_plan": "Revert service/app.py to its original generate_report implementation as captured in the before snippet, and redeploy the previous version.",
+              "evidence_ids": [
+                "EV-CODE-002",
+                "EV-LOG-003",
+                "EV-LOG-004",
+                "EV-MET-001",
+                "EV-MET-002"
+              ]
+            },
+            {
+              "proposal_id": "FIX-003",
+              "hypothesis_id": "HYP-003",
+              "incident_id": "inc_06_connection_exhaustion",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Ensure the connection is always released by validating input before acquisition and using a try/finally block.",
+              "rationale": "The root cause was that a ValueError raised during date validation prevented conn.release() from executing, leaking connections and exhausting the pool under high traffic. By moving validation before acquiring a connection and guaranteeing release with a finally clause, the pool count remains accurate regardless of errors.",
+              "changes": [
+                {
+                  "file": "service/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Rewrite generate_report to validate date before acquiring a connection and guarantee release with finally.",
+                  "before": "    def generate_report(self, date_filter: str):\n        conn = self.pool.acquire()\n        rows = conn.query(\"SELECT * FROM metrics\")\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn.release()\n        return rows",
+                  "after": "    def generate_report(self, date_filter: str):\n        if not date_filter.startswith(\"2026-\"):\n            raise ValueError(f\"Unsupported date format: {date_filter}\")\n        conn = self.pool.acquire()\n        try:\n            rows = conn.query(\"SELECT * FROM metrics\")\n        finally:\n            conn.release()\n        return rows"
+                }
+              ],
+              "patch": "PROPOSED PATCH\n--- a/service/app.py\n+++ b/service/app.py\n@@\n-    def generate_report(self, date_filter: str):\n-        conn = self.pool.acquire()\n-        rows = conn.query(\"SELECT * FROM metrics\")\n-        if not date_filter.startswith(\"2026-\"):\n-            raise ValueError(f\"Unsupported date format: {date_filter}\")\n-        conn.release()\n-        return rows\n+    def generate_report(self, date_filter: str):\n+        if not date_filter.startswith(\"2026-\"):\n+            raise ValueError(f\"Unsupported date format: {date_filter}\")\n+        conn = self.pool.acquire()\n+        try:\n+            rows = conn.query(\"SELECT * FROM metrics\")\n+        finally:\n+            conn.release()\n+        return rows\n",
+              "expected_effect": "Connections are always released, preventing leaks; the pool will no longer be exhausted solely due to validation errors, improving stability under traffic spikes.",
+              "risks": [
+                "If future code adds early returns after acquire, they must also be covered by try/finally; moving validation before acquisition may reject invalid dates earlier but behavior remains consistent."
+              ],
+              "validation_plan": [
+                "Run a unit test calling generate_report with an invalid date and assert MockPool.active returns to 0 after exception.",
+                "Execute a load test with many concurrent valid requests and verify active connections never exceed pool size.",
+                "Monitor metrics for connection timeout errors after deployment to confirm reduction."
+              ],
+              "rollback_plan": "Revert service/app.py to the original generate_report implementation as captured in version control.",
+              "evidence_ids": [
+                "EV-LOG-003",
+                "EV-LOG-004",
+                "EV-MET-001",
+                "EV-MET-003",
+                "EV-MET-005"
+              ]
+            }
+          ],
+          "validation_errors": {},
+          "skipped_hypotheses": []
+        }
+      },
+      "approvals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_06_connection_exhaustion",
+          "approval_records": [
+            {
+              "proposal_id": "FIX-001",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:40:59.042422+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-002",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:40:59.044422+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-003",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:40:59.046392+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            }
+          ],
+          "summary": {
+            "total": 3,
+            "approved": 0,
+            "rejected": 3
+          }
+        }
+      }
+    },
+    "summary": {
+      "confirmed_hypotheses": 3,
+      "rejected_hypotheses": 0,
+      "inconclusive_hypotheses": 0,
+      "proposals_generated": 3,
+      "proposals_approved": 0,
+      "proposals_rejected": 3
+    },
+    "error": null
+  }
+}

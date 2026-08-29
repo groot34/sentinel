@@ -1,0 +1,77 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "agent": "metrics_agent",
+  "summary": "At 2026-08-28T14:12:00Z consumer_lag_records spiked to 140,000 records while msg_process_time_ms and partner_webhook_latency_ms both showed large spikes, and consumed_records_sec dropped sharply. Correlation analysis over the 14:00\u201114:12 window shows a very strong positive link between msg_process_time_ms and partner_webhook_latency_ms and strong negative links between those latencies and the consumption rate.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "consumer_lag_records",
+      "value": 140000.0,
+      "type": "spike",
+      "interpretation": "Consumer lag records surged to 140k, far above the baseline mean of 45."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "msg_process_time_ms",
+      "value": 310.0,
+      "type": "spike",
+      "interpretation": "Message processing time spiked to 310\u202fms, well beyond the baseline mean of ~0.93\u202fms."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "partner_webhook_latency_ms",
+      "value": 305.0,
+      "type": "spike",
+      "interpretation": "Partner webhook latency rose to 305\u202fms, indicating a sudden slowdown."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "consumed_records_sec",
+      "value": 8.0,
+      "type": "drop",
+      "interpretation": "Consumed records per second fell to 8, a sharp drop from the baseline mean of 1,230."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "msg_process_time_ms~partner_webhook_latency_ms",
+      "value": 0.9999677903428976,
+      "type": "correlation",
+      "interpretation": "Processing time and webhook latency are almost perfectly positively correlated (r\u22480.99997)."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "consumed_records_sec~partner_webhook_latency_ms",
+      "value": -0.9901028121716932,
+      "type": "correlation",
+      "interpretation": "Consumption rate and webhook latency show a strong negative correlation (r\u2248-0.99)."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "msg_process_time_ms~consumed_records_sec",
+      "value": -0.9898651627486469,
+      "type": "correlation",
+      "interpretation": "Processing time and consumption rate are strongly negatively correlated (r\u2248-0.99)."
+    }
+  ]
+}

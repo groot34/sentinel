@@ -1,0 +1,71 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The newly introduced global AUDIT_TRACE_REGISTRY dict that stores raw bytes of each uploaded file causes unbounded memory growth, leading to the OOM kill.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-MET-001",
+        "EV-MET-005",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "Code changes add a module\u2011level mutable dict and retain every upload's full byte payload without eviction. Metrics show RSS memory spiking to ~995\u202fMB (EV-MET-001) and a strong positive correlation between memory and GC time (EV-MET-005). The number of concurrent uploads doubled (EV-MET-003), providing the data that populates the dict, which explains the rapid memory consumption observed in the logs (EV-LOG-001/002).",
+      "falsification_criteria": [
+        "Memory usage does not increase when uploads are performed after the dict is cleared or the code is reverted to the version without the dict",
+        "The size of AUDIT_TRACE_REGISTRY remains constant (or empty) during a high\u2011load test while memory still reaches OOM levels"
+      ],
+      "verification_plan": [
+        "Instrument the service to expose the current length and total byte size of AUDIT_TRACE_REGISTRY during a load test",
+        "Run a synthetic upload workload matching the observed spike (\u224815 concurrent uploads) and record memory usage and dict size",
+        "Revert the code to remove the global dict and repeat the same workload; verify that memory stays near baseline",
+        "Add an eviction/clear routine to the dict, trigger it during the test, and confirm that memory usage drops accordingly"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "A sudden increase in concurrent upload requests saturated the container\u2019s memory limit, causing the OOM kill independent of code changes.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-LOG-002",
+        "EV-LOG-003",
+        "EV-LOG-004",
+        "EV-MET-001",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "Logs record memory usage climbing to 85\u202f% of the 1\u202fGB container limit, then critical pressure at 990\u202fMB, followed by a kernel OOM kill (EV-LOG-001\u2011004). Metrics confirm RSS rose to ~995\u202fMB (EV-MET-001) and active uploads jumped to 15 (EV-MET-003), indicating the workload itself could exhaust memory even without the new dict.",
+      "falsification_criteria": [
+        "Running the same upload volume on the previous code version does not cause memory to approach the container limit",
+        "Reducing the number of concurrent uploads below the observed spike prevents memory from reaching OOM thresholds"
+      ],
+      "verification_plan": [
+        "Deploy the prior version of the service (without the global dict) in an identical container configuration",
+        "Generate controlled upload traffic matching the 15\u2011upload spike and monitor container memory",
+        "Gradually increase/decrease concurrent uploads to identify the threshold at which memory pressure becomes critical",
+        "Confirm that OOM events only occur when the upload concurrency exceeds the identified threshold"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The GC pause time explosion indicates a pathological garbage\u2011collection behavior that prevented memory reclamation, contributing to the OOM condition.",
+      "evidence_ids": [
+        "EV-MET-002",
+        "EV-MET-005",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "GC pause time jumped from a baseline of ~4.6\u202fms to 520\u202fms (EV-MET-002) exactly when RSS memory spiked (EV-MET-001). A very high Pearson correlation (r\u22480.90) between RSS and GC time (EV-MET-005) suggests that as memory grew, GC struggled, likely retaining large objects (e.g., the stored byte payloads). This GC inefficiency could have accelerated the OOM event.",
+      "falsification_criteria": [
+        "Enabling detailed GC logs shows short pause times despite high memory usage after the dict is removed",
+        "Forcing a full GC during the high\u2011memory period successfully reclaims a large portion of RSS, indicating GC was not the bottleneck"
+      ],
+      "verification_plan": [
+        "Enable Python GC debugging flags in the service and capture pause durations under load with the current code",
+        "Perform the same load with the global dict removed and compare GC pause statistics",
+        "Trigger an explicit full garbage collection (gc.collect()) during the high\u2011memory phase and measure reclaimed memory",
+        "Analyze heap profiles to identify object types that dominate memory before and after the dict removal"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,197 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:09:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)",
+      "interpretation": "Indicates high memory consumption approaching container limit."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident",
+      "interpretation": "Shows memory pressure became critical, near full usage."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:11:32Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child",
+      "interpretation": "Kernel OOM event triggered, selecting a process to kill."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:11:33Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)",
+      "interpretation": "Container terminated due to OOM kill."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:05:40Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor",
+      "interpretation": "Unrelated warning, likely not linked to memory issue."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 520.0,
+      "type": "spike",
+      "interpretation": "GC time spikes far above its baseline (mean\u202f\u2248\u202f4.6\u202fms), indicating unusually long collection cycles at this moment."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "memory_rss_mb",
+      "value": 995.0,
+      "type": "spike",
+      "interpretation": "RSS memory jumps to ~995\u202fMB, many standard deviations above its typical ~85\u202fMB level."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "active_uploads",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "Active uploads more than double the recent average, suggesting a burst of upload activity."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "oom_kills_total",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "An out\u2011of\u2011memory kill occurs immediately after the spike period."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 0.0,
+      "type": "drop",
+      "interpretation": "GC time drops to zero, a sharp reversal from the previous spike."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "active_uploads",
+      "value": 0.0,
+      "type": "drop",
+      "interpretation": "Active uploads fall to zero, indicating the upload burst ended."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb",
+      "value": 80.0,
+      "type": "drop",
+      "interpretation": "RSS memory decreases to near baseline after the earlier spike."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~garbage_collection_time_ms",
+      "value": 0.9000525358529804,
+      "type": "correlation",
+      "interpretation": "Strong positive correlation (r\u22480.90) between memory usage and GC time over the observed window."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~active_uploads",
+      "value": 0.8464146954076838,
+      "type": "correlation",
+      "interpretation": "High positive correlation (r\u22480.85) between memory usage and active upload count."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "code",
+      "reference": "service/app.py:5",
+      "type": "suspicious_pattern",
+      "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+      "interpretation": "Defines a module\u2011level mutable dict that persists for the lifetime of the process, which may accumulate entries over time."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Adds a global registry and stores the full file_bytes for each upload_id, returning only the length; this creates a new persistent reference to the uploaded data."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+      "interpretation": "Removes the previous in\u2011memory stream processing that likely released the data after extraction, replacing it with persistent storage."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Pattern detection flags the added global mutable collection as an unbounded collection, indicating a risk of uncontrolled memory growth if entries are not cleaned up."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-CODE-004",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-LOG-005",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007",
+    "EV-MET-008",
+    "EV-MET-009"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

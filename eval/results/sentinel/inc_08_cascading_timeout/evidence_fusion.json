@@ -1,0 +1,217 @@
+{
+  "incident_id": "inc_08_cascading_timeout",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:00Z ERROR [checkout-service] Thread starvation: Incoming checkout requests rejected with 503 Server Busy",
+      "interpretation": "Indicates that all worker threads are blocked, leading to request rejections."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:06:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:30Z ERROR [checkout-service] Upstream API gateway returned 504 GATEWAY_TIMEOUT on /api/v1/checkout",
+      "interpretation": "Shows a downstream timeout from the API gateway, likely caused by delayed upstream calls."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:06:00Z WARN [checkout-service] Worker thread pool saturation: 30/30 threads blocked waiting on tax service response",
+      "interpretation": "Thread pool fully occupied waiting for the tax service, a bottleneck point."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [checkout-service] External tax service latency degraded to 25,000ms",
+      "interpretation": "Tax service response time spiked to 25\u202fs, far exceeding normal latency."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:3",
+      "timestamp": "2026-08-28T14:04:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:04:00Z INFO [checkout-service] Deploy commit 9a0b1c: Integrated external tax calculation provider with 60s default timeout",
+      "interpretation": "Deployment introduced a new tax provider with a 60\u202fs timeout setting."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:25Z",
+      "type": "context",
+      "excerpt": "2026-08-28T14:04:25Z INFO [checkout-service] [tls] Ingress TLS cert check completed (valid for 89 days) - distractor",
+      "interpretation": "TLS check unrelated to the observed performance issue."
+    },
+    {
+      "evidence_id": "EV-LOG-007",
+      "source": "logs",
+      "reference": "logs/application.log:2",
+      "timestamp": "2026-08-28T14:02:00Z",
+      "type": "context",
+      "excerpt": "2026-08-28T14:02:00Z INFO [checkout-service] Average checkout response time: 65ms",
+      "interpretation": "Baseline response time before the latency degradation began."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "external_tax_latency_ms",
+      "value": 30000.0,
+      "type": "spike",
+      "interpretation": "Latency for external tax service spiked to 30\u202f000\u202fms, far above the baseline mean of 46.5\u202fms (z\u224819969)."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "p95_checkout_latency_ms",
+      "value": 30000.0,
+      "type": "spike",
+      "interpretation": "95th\u2011percentile checkout latency spiked to 30\u202f000\u202fms, orders of magnitude above the typical 66.5\u202fms baseline (z\u224819956)."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_504_pct",
+      "value": 92.0,
+      "type": "spike",
+      "interpretation": "Gateway 504 error percentage surged to 92\u202f%, whereas baseline is essentially 0\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_504_pct",
+      "value": 92.0,
+      "type": "threshold",
+      "interpretation": "Error rate exceeds the defined alert threshold of 90\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "blocked_worker_threads",
+      "value": 30.0,
+      "type": "spike",
+      "interpretation": "Count of blocked worker threads rose to 30, well above the baseline mean of 2."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_504_pct",
+      "value": 92.0,
+      "type": "period_change",
+      "interpretation": "Gateway 504% shifted from a baseline mean of 0\u202f% to a period mean of 41.25\u202f%, a delta of 41.25\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "blocked_worker_threads~p95_checkout_latency_ms",
+      "value": 0.9918607924458439,
+      "type": "correlation",
+      "interpretation": "Very strong positive correlation (r\u22480.99) between blocked threads and checkout latency over the 8\u2011minute window."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "external_tax_latency_ms~blocked_worker_threads",
+      "value": 0.9725449695631029,
+      "type": "correlation",
+      "interpretation": "High correlation (r\u22480.97) linking external tax latency with blocked worker threads."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "p95_checkout_latency_ms~gateway_504_pct",
+      "value": 0.9456398265289149,
+      "type": "correlation",
+      "interpretation": "Strong correlation (r\u22480.95) between checkout latency spikes and gateway 504 error rate."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    # Raised timeout, circuit breaker disabled\n+    TIMEOUT_SECONDS = 60.0",
+      "interpretation": "Added code raises the timeout constant to 60.0 seconds and notes that the circuit breaker is now disabled."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-    # Circuit breaker enabled, fast timeout\n-    TIMEOUT_SECONDS = 2.0",
+      "interpretation": "Removed code shows the previous fast timeout of 2.0 seconds and an enabled circuit breaker."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "config",
+      "reference": "docker-compose.yml:8",
+      "type": "suspicious_pattern",
+      "excerpt": "      - TAX_SERVICE_TIMEOUT=60",
+      "interpretation": "Docker\u2011compose sets the TAX_SERVICE_TIMEOUT environment variable to 60 seconds, matching the new code constant."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "code",
+      "reference": "service/app.py:12",
+      "type": "suspicious_pattern",
+      "excerpt": "    TIMEOUT_SECONDS = 60.0",
+      "interpretation": "Another module defines TIMEOUT_SECONDS as 60.0, reinforcing the longer timeout across the codebase."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-CODE-004",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-LOG-005",
+    "EV-LOG-006",
+    "EV-LOG-007",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007",
+    "EV-MET-008",
+    "EV-MET-009"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

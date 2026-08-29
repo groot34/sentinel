@@ -1,0 +1,133 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "baseline_verdict": "CORRECT",
+  "sentinel_verdict": "CORRECT",
+  "baseline_correct": true,
+  "sentinel_correct": true,
+  "sentinel_verified": true,
+  "sentinel_confirmed_hypotheses": 1,
+  "sentinel_fix_proposals": 1,
+  "baseline_latency_seconds": 15.0,
+  "sentinel_latency_seconds": 0.0,
+  "baseline_tokens": 2600,
+  "sentinel_tokens": 0,
+  "baseline_llm_calls": 1,
+  "sentinel_llm_calls": 5,
+  "sentinel_status": "COMPLETED",
+  "sentinel_hypotheses_total": 2,
+  "sentinel_hypotheses_rejected": 1,
+  "sentinel_hypotheses_inconclusive": 0,
+  "notes": "",
+  "_sentinel_root_cause": "N+1 query in loop for items",
+  "_sentinel_verdict_explanation": "Identified all core causal mechanisms (1/1 criteria groups matched).",
+  "_sentinel_error": "",
+  "_orchestrator_result": {
+    "incident_id": "inc_01_n_plus_one_query",
+    "pipeline_status": "COMPLETED",
+    "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+    "llm_call_count": 5,
+    "stages": {
+      "logs": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "evidence": []
+        }
+      },
+      "metrics": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "evidence": []
+        }
+      },
+      "code": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "evidence": []
+        }
+      },
+      "evidence_fusion": {
+        "status": "SUCCEEDED",
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "evidence": []
+        }
+      },
+      "hypotheses": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "hypotheses": [
+            {
+              "hypothesis_id": "HYP-001",
+              "claim": "N+1 query in loop for items",
+              "evidence_ids": [
+                "EV-LOG-001"
+              ],
+              "supporting_reasoning": "N+1 query in loop for items",
+              "falsification_criteria": [
+                "x"
+              ],
+              "verification_plan": [
+                "check"
+              ]
+            }
+          ]
+        }
+      },
+      "verification": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "results": [
+            {
+              "hypothesis_id": "HYP-001",
+              "verdict": "CONFIRMED",
+              "checks": [],
+              "reasoning": "N+1 query in loop for items",
+              "confidence": 0.9
+            }
+          ]
+        }
+      },
+      "fix_proposals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "proposals": [],
+          "validation_errors": {},
+          "skipped_hypotheses": []
+        }
+      },
+      "approvals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_01_n_plus_one_query",
+          "approval_records": [],
+          "summary": {
+            "total": 0,
+            "approved": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "summary": {
+      "confirmed_hypotheses": 1,
+      "rejected_hypotheses": 1,
+      "inconclusive_hypotheses": 0,
+      "proposals_generated": 1,
+      "proposals_approved": 0,
+      "proposals_rejected": 0
+    }
+  }
+}

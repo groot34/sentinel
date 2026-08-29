@@ -1,0 +1,63 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "agent": "code_agent",
+  "summary": "The change raises the maximum retry attempts from 2 to 10 and removes the back\u2011off delay, both in code and in container configuration. A retry loop exists in the application logic that will now potentially execute many rapid retries without pause, matching the new constant values observed in source files and the docker\u2011compose settings.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    MAX_RETRIES = 10\n+    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter",
+      "interpretation": "Shows the new constants that increase retry attempts and eliminate back\u2011off, enabling faster repeated calls."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-    MAX_RETRIES = 2\n-    BACKOFF_BASE_SECONDS = 0.5",
+      "interpretation": "Removes the previous lower retry limit and modest back\u2011off, indicating a deliberate shift toward more aggressive retry behavior."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:22-26",
+      "type": "suspicious_pattern",
+      "excerpt": "        while attempts < self.MAX_RETRIES:\n            attempts += 1\n            resp = self.gateway.charge(amount)\n            if resp.get(\"status\") == 200:\n                return resp",
+      "interpretation": "Implements a retry loop that will now iterate up to the increased MAX_RETRIES value."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "code",
+      "reference": "service/app.py:15",
+      "type": "suspicious_pattern",
+      "excerpt": "    BACKOFF_BASE_SECONDS = 0.0",
+      "interpretation": "Defines zero back\u2011off in the application, meaning retries will occur without delay."
+    },
+    {
+      "evidence_id": "EV-CODE-005",
+      "source": "code",
+      "reference": "service/app.py:14",
+      "type": "suspicious_pattern",
+      "excerpt": "    MAX_RETRIES = 10",
+      "interpretation": "Sets the in\u2011process retry limit to ten, matching the diff change."
+    },
+    {
+      "evidence_id": "EV-CODE-006",
+      "source": "config",
+      "reference": "docker-compose.yml:6",
+      "type": "suspicious_pattern",
+      "excerpt": "      - MAX_RETRIES=10",
+      "interpretation": "Environment variable propagates the higher retry count to the container runtime."
+    },
+    {
+      "evidence_id": "EV-CODE-007",
+      "source": "config",
+      "reference": "docker-compose.yml:7",
+      "type": "suspicious_pattern",
+      "excerpt": "      - BACKOFF_SECONDS=0.0",
+      "interpretation": "Environment variable removes back\u2011off delay at the container level, aligning with the code constants."
+    }
+  ]
+}

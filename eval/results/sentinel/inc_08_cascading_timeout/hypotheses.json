@@ -1,0 +1,76 @@
+{
+  "incident_id": "inc_08_cascading_timeout",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The recent deployment introduced a 60\u2011second tax service timeout and disabled the circuit breaker, causing checkout requests to wait excessively for tax responses, which saturated the worker thread pool and triggered cascading 503 and 504 errors.",
+      "evidence_ids": [
+        "EV-LOG-005",
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-LOG-004",
+        "EV-MET-001",
+        "EV-MET-005",
+        "EV-MET-008"
+      ],
+      "supporting_reasoning": "Log EV-LOG-005 records the deployment of a new tax provider with a 60\u202fs timeout. Code evidence EV-CODE-001 shows the timeout constant set to 60\u202fs and the circuit breaker disabled, while EV-CODE-002 documents the previous fast 2\u202fs timeout with an enabled breaker. The environment variable EV-CODE-003 and duplicate constant EV-CODE-004 reinforce the 60\u202fs setting. Concurrently, EV-LOG-004 and EV-MET-001 report tax service latency spiking to ~25\u201130\u202fs. This latency caused all 30 worker threads to block (EV-LOG-003, EV-MET-005) and the strong correlation between tax latency and blocked threads (EV-MET-008) explains the observed thread starvation (EV-LOG-001) and downstream 504/503 errors.",
+      "falsification_criteria": [
+        "Runtime configuration shows the circuit breaker enabled or the timeout constant differs from 60\u202fs",
+        "Tax service latency during the incident window remains below 5\u202fs",
+        "Blocked thread count does not exceed baseline levels"
+      ],
+      "verification_plan": [
+        "Query the running service configuration for the circuit\u2011breaker flag and record its state",
+        "Inspect the compiled binary or in\u2011memory value of TIMEOUT_SECONDS in the checkout service",
+        "Replay a checkout request against a mock tax service that responds in 30\u202fs and measure thread pool usage",
+        "Compare thread\u2011pool saturation metrics before and after the deployment commit"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "An external tax service latency spike to ~25\u201130\u202fseconds, independent of code changes, blocked all worker threads, leading to 504 gateway timeouts and 503 service\u2011busy responses.",
+      "evidence_ids": [
+        "EV-LOG-004",
+        "EV-MET-001",
+        "EV-MET-008",
+        "EV-LOG-003",
+        "EV-MET-005",
+        "EV-MET-007"
+      ],
+      "supporting_reasoning": "EV-LOG-004 and EV-MET-001 document a sudden degradation of tax service response time to 25\u201130\u202fs. EV-LOG-003 and EV-MET-005 show the worker thread pool becoming fully occupied waiting on the tax service. Correlation metrics EV-MET-008 (tax latency \u2194 blocked threads) and EV-MET-007 (blocked threads \u2194 checkout latency) demonstrate that the latency spike directly caused thread saturation, which in turn produced the 504 errors (EV-LOG-002) and 503 rejections (EV-LOG-001).",
+      "falsification_criteria": [
+        "External tax service logs for the incident period show normal latency (<5\u202fs)",
+        "No increase in blocked thread count is observed during the latency spike"
+      ],
+      "verification_plan": [
+        "Obtain the tax service\u2019s request\u2011latency logs for the 14:00\u201115:00 window and compute the 95th percentile",
+        "Cross\u2011reference checkout service thread\u2011pool metrics with tax\u2011service latency timestamps",
+        "Run a controlled test where the tax service is forced to respond within 2\u202fs and verify that thread blockage disappears"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The API gateway\u2019s timeout threshold is lower than the observed tax service latency, causing it to return 504 GATEWAY_TIMEOUT errors that cascade into checkout service thread starvation and 503 errors.",
+      "evidence_ids": [
+        "EV-LOG-002",
+        "EV-MET-003",
+        "EV-MET-004",
+        "EV-MET-006",
+        "EV-MET-009",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "EV-LOG-002 records a 504 error from the upstream API gateway at 14:06:30. Metrics EV-MET-003, EV-MET-004 and EV-MET-006 show a surge in 504 error rate exceeding alert thresholds. EV-MET-009 links checkout latency spikes to the 504 error rate. The underlying cause is the tax service latency spike (EV-MET-001) exceeding the gateway\u2019s timeout, prompting the gateway to abort the request, which then forces the checkout service to wait on a failed upstream call, filling its thread pool and producing 503 errors (EV-LOG-001).",
+      "falsification_criteria": [
+        "Gateway timeout configuration is verified to be greater than the maximum observed tax latency"
+      ],
+      "verification_plan": [
+        "Retrieve the API gateway configuration and record the request timeout value",
+        "Compare the gateway timeout against the peak tax service latency from EV-MET-001",
+        "Inject a synthetic request with tax latency just below the gateway timeout and confirm no 504 error is generated",
+        "Monitor thread\u2011pool usage while the gateway timeout is temporarily increased to verify reduction in blocked threads"
+      ]
+    }
+  ]
+}

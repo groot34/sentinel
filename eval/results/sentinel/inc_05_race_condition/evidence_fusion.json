@@ -1,0 +1,156 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:02:05Z ERROR [inventory-service] [audit] Inventory reconciliation mismatch: Total reservations = 18, Initial Stock = 10, Negative Stock = -8!",
+      "interpretation": "Shows a reconciliation error where reservations exceed available stock, resulting in negative stock."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:02:06Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:02:06Z ERROR [inventory-service] Overselling invariant breached for item SKU-901",
+      "interpretation": "Indicates that the system detected an oversell condition for SKU-901."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:3",
+      "timestamp": "2026-08-28T14:02:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:02:01Z WARN [inventory-service] [redis-replica] Replication ping delay 12ms observed - distractor",
+      "interpretation": "Notes a brief replication latency, which may affect data freshness."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:02:02Z",
+      "type": "context",
+      "excerpt": "2026-08-28T14:02:02Z INFO [inventory-service] [worker-3] Checked stock for SKU-901: current=10. Approving reservation for user 403.",
+      "interpretation": "Provides the stock level before the reservation that later contributed to the mismatch."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "concurrent_checkout_threads",
+      "value": 50.0,
+      "type": "spike",
+      "interpretation": "Concurrent checkout threads rose sharply to 50, far above the typical mean of ~1.5."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "oversold_units_total",
+      "value": 8.0,
+      "type": "spike",
+      "interpretation": "Oversold units total spiked to 8, whereas the baseline is normally zero."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "reconciliation_errors",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "Reconciliation errors recorded a spike to 1, deviating from a zero baseline."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "inventory_remaining",
+      "value": -8.0,
+      "type": "drop",
+      "interpretation": "Inventory remaining dropped to -8, contrasting with a normal mean of 10."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+      "metric": "oversold_units_total~reconciliation_errors",
+      "value": 0.9999999999999998,
+      "type": "correlation",
+      "interpretation": "Oversold units and reconciliation errors are almost perfectly positively correlated over the window."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+      "metric": "inventory_remaining~oversold_units_total",
+      "value": -0.9963221648111514,
+      "type": "correlation",
+      "interpretation": "Inventory remaining is strongly negatively correlated with oversold units."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+      "metric": "inventory_remaining~reconciliation_errors",
+      "value": -0.9963221648111514,
+      "type": "correlation",
+      "interpretation": "Inventory remaining is strongly negatively correlated with reconciliation errors."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)",
+      "interpretation": "Previously the code relied on a single atomic DB operation, which is typically safe from concurrent modifications."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+      "interpretation": "New code reads the current stock, checks it, and then writes a new value without any concurrency control, which may allow interleaved executions to corrupt stock counts."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        # Atomic database decrement with guard\n-        # UPDATE inventory SET stock = stock - :qty WHERE sku = :qty\n-        return self.db.atomic_decrement(sku, quantity)\n+        # In-memory check-then-act without lock\n+        current = self.get_stock(sku)\n+        if current >= quantity:\n+            self.set_stock(sku, current - quantity)\n+            return True\n+        return False",
+      "interpretation": "The change introduces a check\u2011then\u2011act pattern flagged as suspicious because it lacks atomicity and can lead to race conditions under concurrent access."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

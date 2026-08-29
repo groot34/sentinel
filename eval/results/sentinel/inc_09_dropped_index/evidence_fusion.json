@@ -1,0 +1,178 @@
+{
+  "incident_id": "inc_09_dropped_index",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [search-service] Database disk read I/O saturated at 100% (full table scans on 2,000,000 rows)",
+      "interpretation": "Indicates that the database storage subsystem was fully utilized, likely contributing to slower query execution."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:00Z ERROR [search-service] GET /api/v1/search?tenant_id=t_42&status=active latency spiked to 2400ms (p99=6800ms)",
+      "interpretation": "Shows a marked latency spike for search requests, matching the period of I/O saturation."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:20Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:04:20Z WARN [search-service] [elasticsearch] ES cluster health YELLOW: unassigned replica shard on dev node - distractor",
+      "interpretation": "Elasticsearch cluster health degraded to yellow, indicating reduced redundancy that may affect query routing."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [search-service] [db] Query execution plan changed: Seq Scan on items (cost=0.00..45210.00 rows=500000)",
+      "interpretation": "The optimizer chose a full sequential scan, which can increase load on the storage layer."
+    },
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "p95_search_latency_ms",
+      "value": 3500.0,
+      "type": "spike",
+      "interpretation": "Latency spike to 3500\u202fms, far above baseline (~4.35\u202fms)."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "db_disk_read_mb_sec",
+      "value": 310.0,
+      "type": "spike",
+      "interpretation": "Disk read rate spike to 310\u202fMB/s, far above baseline (~1.35\u202fMB/s)."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "db_cpu_pct",
+      "value": 99.5,
+      "type": "spike",
+      "interpretation": "CPU usage spike to 99.5%, near full utilization."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "db_cpu_pct",
+      "value": 99.5,
+      "type": "threshold",
+      "interpretation": "CPU usage exceeds the defined 90% threshold."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "db_cpu_pct",
+      "value": 99.5,
+      "type": "period_change",
+      "interpretation": "Mean CPU pct increased by 57.6 points compared to baseline period."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "db_seq_scans_per_sec",
+      "value": 140.0,
+      "type": "spike",
+      "interpretation": "Sequential scans per second rose to 140, baseline was 0."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "db_seq_scans_per_sec~db_disk_read_mb_sec",
+      "value": 0.9983126747233649,
+      "type": "correlation",
+      "interpretation": "Almost perfect positive correlation (r\u22480.998) between seq scans and disk read rate over the 8\u2011minute window."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "p95_search_latency_ms~db_seq_scans_per_sec",
+      "value": 0.9800489958491045,
+      "type": "correlation",
+      "interpretation": "Strong positive correlation (r\u22480.98) between latency and sequential scans."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "db_disk_read_mb_sec~db_cpu_pct",
+      "value": 0.9793060475690416,
+      "type": "correlation",
+      "interpretation": "Strong positive correlation (r\u22480.98) between disk read rate and CPU usage."
+    },
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-CREATE INDEX idx_tenant_status_name ON items(tenant_id, status, name);",
+      "interpretation": "Removal of the index creation suggests the index will no longer exist after migration."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+-- Dropped previous index creation",
+      "interpretation": "A comment was added in place of the index, documenting the change."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-CREATE INDEX idx_tenant_status_name ON items(tenant_id, status, name);\n+-- Dropped previous index creation",
+      "interpretation": "Pattern matches a known index_creation_removed pattern, highlighting the intentional removal of the index."
+    }
+  ],
+  "evidence_ids": [
+    "EV-CODE-001",
+    "EV-CODE-002",
+    "EV-CODE-003",
+    "EV-LOG-001",
+    "EV-LOG-002",
+    "EV-LOG-003",
+    "EV-LOG-004",
+    "EV-MET-001",
+    "EV-MET-002",
+    "EV-MET-003",
+    "EV-MET-004",
+    "EV-MET-005",
+    "EV-MET-006",
+    "EV-MET-007",
+    "EV-MET-008",
+    "EV-MET-009"
+  ],
+  "sources": {
+    "logs": true,
+    "metrics": true,
+    "code": true
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "agent": "logs_agent",
+  "summary": "A series of immediate retries followed a transient 503 response, causing a rapid increase in request volume (10x) and culminating in downstream gateway overload and error responses (429/503).",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [payment-client] Downstream gateway returned single transient 503 SERVICE_UNAVAILABLE",
+      "interpretation": "Initial transient failure from downstream gateway, observed as a 503 warning."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 1/10 for charge_id=ch_991...",
+      "interpretation": "First immediate retry attempt after the 503 warning."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 2/10 for charge_id=ch_991...",
+      "interpretation": "Second immediate retry attempt, indicating rapid retry loop."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 3/10 for charge_id=ch_991...",
+      "interpretation": "Third immediate retry, further evidence of a retry storm."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:05:05Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:05Z ERROR [payment-client] Outbound request rate amplified 10x (from 50 req/s to 500 req/s)",
+      "interpretation": "Observed 10x amplification of outbound request rate, indicating a burst of traffic likely driven by retries."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:10",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:30Z ERROR [payment-client] Downstream payment gateway collapsed under retry stampede (HTTP 429 & 503 cascade)",
+      "interpretation": "Downstream gateway failure due to overload from the retry storm, resulting in cascade of 429 and 503 errors."
+    }
+  ]
+}

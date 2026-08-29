@@ -1,0 +1,87 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "A misconfigured 5\u2011second cache TTL caused rapid expirations, leading to a cache stampede and downstream DB overload.",
+      "evidence_ids": [
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-LOG-001",
+        "EV-MET-004",
+        "EV-MET-008"
+      ],
+      "supporting_reasoning": "The code diff and config show the default TTL was changed from 1 hour to 5 seconds. Log EV-LOG-001 records 32 concurrent requests missing the same key shortly after the change, and metrics EV-MET-004 and EV-MET-008 document a dramatic drop in cache hit ratio, consistent with frequent cache invalidations.",
+      "falsification_criteria": [
+        "Observed effective CACHE_TTL_SECONDS >= 60 seconds during the incident window"
+      ],
+      "verification_plan": [
+        "Query the running container environment for CACHE_TTL_SECONDS",
+        "Inspect the compiled DEFAULT_TTL_SECONDS constant in the deployed binary",
+        "Correlate TTL value timestamps with cache miss timestamps in logs",
+        "Run a controlled load test with a correct TTL and verify miss rate does not spike"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "Redis performance degradation (ops per second drop) reduced cache availability, causing the hit\u2011ratio collapse and stampede.",
+      "evidence_ids": [
+        "EV-MET-005",
+        "EV-MET-004",
+        "EV-MET-010",
+        "EV-LOG-004"
+      ],
+      "supporting_reasoning": "Metrics EV-MET-005 show Redis ops fell to 410\u202fops/s, far below the normal ~2397\u202fops/s. Simultaneously EV-MET-004 records hit ratio falling to 9.5\u202f%. Correlation EV-MET-010 indicates a strong negative relationship between DB reads and Redis ops, suggesting Redis bottleneck drove DB load.",
+      "falsification_criteria": [
+        "Redis ops per second remained at or above baseline (~2000\u202fops/s) throughout the incident"
+      ],
+      "verification_plan": [
+        "Retrieve Redis INFO output for ops per second during the incident window",
+        "Compare ops per second to historical baseline",
+        "Check Redis error logs for timeouts or evictions",
+        "Restart Redis and observe whether hit ratio recovers"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "A sudden traffic surge generated an abnormal number of concurrent requests, overwhelming the cache and causing a stampede irrespective of TTL settings.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-MET-002",
+        "EV-MET-001",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "Log EV-LOG-001 notes 32 concurrent requests missing the same key. Metrics EV-MET-002 show DB read QPS jumped to 1600 (baseline ~12.5), EV-MET-001 records p95 latency rising to 5000\u202fms, and EV-MET-003 shows error rate spiking to 68.5\u202f%, all indicative of a traffic spike driving load.",
+      "falsification_criteria": [
+        "Request rate during the window stayed within normal range (<50\u202fRPS)"
+      ],
+      "verification_plan": [
+        "Extract per\u2011second request counts from ingress/access logs",
+        "Plot traffic volume against baseline averages",
+        "Align traffic spikes with cache\u2011miss timestamps",
+        "Validate that no external load\u2011test was triggered"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-004",
+      "claim": "Database lock contention and connection\u2011pool saturation caused the 503 errors and high latency, with cache effects being secondary.",
+      "evidence_ids": [
+        "EV-LOG-002",
+        "EV-LOG-003",
+        "EV-MET-002",
+        "EV-MET-013"
+      ],
+      "supporting_reasoning": "Log EV-LOG-002 reports a connection\u2011pool spike of 50 heavy queries; EV-LOG-003 shows 503 responses due to DB lock timeout. Metrics EV-MET-002 confirm DB reads surged, and EV-MET-013 shows a strong positive correlation between DB reads and latency, pointing to DB bottleneck.",
+      "falsification_criteria": [
+        "Postgres logs show no lock timeouts or elevated lock wait times during the incident"
+      ],
+      "verification_plan": [
+        "Query pg_stat_activity for lock wait times in the incident window",
+        "Search Postgres logs for lock timeout messages",
+        "Examine connection\u2011pool metrics for usage peaks",
+        "Run a representative query with EXPLAIN ANALYZE to assess contention"
+      ]
+    }
+  ]
+}

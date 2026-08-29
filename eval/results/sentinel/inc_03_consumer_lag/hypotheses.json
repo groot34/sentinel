@@ -1,0 +1,66 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The recent synchronous partner webhook call introduced in the consumer code (EV-CODE-001, EV-CODE-002) caused high HTTP latency, which inflated record processing time, exceeded max.poll.interval.ms, and triggered consumer lag spikes.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-LOG-004",
+        "EV-LOG-002",
+        "EV-MET-002",
+        "EV-MET-003",
+        "EV-MET-005"
+      ],
+      "supporting_reasoning": "Code diff adds a blocking HTTP POST with a 10\u202fs timeout. Logs show processing latency jumped to 240\u202fms (EV-LOG-004) and poll interval exceeded (EV-LOG-002). Metrics record a processing\u2011time spike to 310\u202fms (EV-MET-002) and webhook latency spike to 305\u202fms (EV-MET-003). Correlation between processing time and webhook latency is near\u2011perfect (EV-MET-005), linking the new call to the slowdown that caused lag (EV-LOG-001, EV-MET-001).",
+      "falsification_criteria": [
+        "If the partner webhook latency remains below 50\u202fms while consumer lag stays above the critical threshold, the hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Instrument the consumer to log webhook response times per request.",
+        "Temporarily disable the synchronous webhook call and measure processing time and lag metrics.",
+        "Compare poll interval violations before and after disabling the call.",
+        "Confirm that lag returns to baseline when webhook latency is low."
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "A poll timeout (max.poll.interval.ms) on worker\u20112 caused a rebalance storm, removing the worker from the consumer group and leading to a sudden drop in consumption rate and lag accumulation.",
+      "evidence_ids": [
+        "EV-LOG-002",
+        "EV-LOG-003",
+        "EV-LOG-001",
+        "EV-MET-001",
+        "EV-MET-004"
+      ],
+      "supporting_reasoning": "Logs record a poll interval exceedance (EV-LOG-002) followed by a rebalance storm that kicked worker\u20112 out (EV-LOG-003). Subsequent logs show critical lag (EV-LOG-001). Metrics show lag records surged to 140k (EV-MET-001) while consumed records per second fell to 8 (EV-MET-004), consistent with a consumer being removed from the group.",
+      "falsification_criteria": [
+        "If no poll timeout events are observed in the Kafka client metrics during the lag period, this hypothesis is falsified."
+      ],
+      "verification_plan": [
+        "Query the Kafka client metrics for max.poll.interval.ms violations during the incident window.",
+        "Inspect the consumer group state to verify whether worker\u20112 was removed and later rejoined.",
+        "Correlate timestamps of poll timeout, rebalance, and consumption\u2011rate drop."
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "A broker\u2011side partition balance advisory (EV-LOG-005) led to uneven partition assignment, causing one consumer to be overloaded and generating the observed lag.",
+      "evidence_ids": [
+        "EV-LOG-005",
+        "EV-MET-001",
+        "EV-MET-004"
+      ],
+      "supporting_reasoning": "The broker logged a partition balance advisory (EV-LOG-005) shortly before lag metrics spiked (EV-MET-001) and consumption rate collapsed (EV-MET-004). An uneven partition distribution could overload a consumer, producing backlog and lag.",
+      "falsification_criteria": [
+        "If partition assignment logs show balanced distribution across consumers during the lag period, this hypothesis is disproved."
+      ],
+      "verification_plan": [
+        "Retrieve the partition assignment snapshot for the consumer group at the time of the lag.",
+        "Check broker logs for any subsequent rebalancing actions that corrected partition imbalance.",
+        "Verify that consumption rates per partition are uniform after the advisory."
+      ]
+    }
+  ]
+}

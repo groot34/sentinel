@@ -1,0 +1,93 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The service failure cascade was triggered by DB connection\u2011pool saturation caused by long\u2011running sequential scans on the ledger_entries table.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-LOG-002",
+        "EV-LOG-005",
+        "EV-MET-001",
+        "EV-MET-004",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "Log EV-LOG-001 reports the pool at its maximum (15/15) due to long\u2011running scans; EV-LOG-002 shows the health endpoint timing out while acquiring a connection; EV-LOG-005 records a query taking 1850\u202fms with a sequential scan on 5\u202fM rows. Metrics EV-MET-001 and EV-MET-004 confirm a spike in query latency and active DB connections, while EV-MET-003 shows a 100\u202f% error rate, all consistent with a saturated pool caused by heavy scans.",
+      "falsification_criteria": [
+        "Active DB connections remain at baseline (~2) throughout the incident window",
+        "Query latency for ledger_entries stays within normal range (~3\u20115\u202fms)"
+      ],
+      "verification_plan": [
+        "Query the DB connection\u2011pool statistics for the incident timeframe to confirm connection count",
+        "Extract the execution plan of the ledger_entries query to verify presence of sequential scans",
+        "Correlate timestamps of high query latency with spikes in active connections",
+        "Re\u2011run the workload with the index present (if available) and observe whether the pool stays unsaturated"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "A recently removed index on ledger_entries caused full table scans, inflating query latency and exhausting the DB connection pool.",
+      "evidence_ids": [
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-LOG-005",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "Code diff evidence (EV-CODE-002\u2011004) shows the DROP INDEX statement was applied, removing idx_ledger_account_entry_date. Log EV-LOG-005 explicitly notes a sequential scan on 5\u202fM rows, and metric EV-MET-001 records query duration spiking to 10\u202f000\u202fms, indicating the missing index forced costly scans that pressured the pool.",
+      "falsification_criteria": [
+        "The index idx_ledger_account_entry_date is present in the live database schema during the incident",
+        "EXPLAIN of the problematic query shows index usage rather than a sequential scan"
+      ],
+      "verification_plan": [
+        "Connect to the production DB and list indexes on ledger_entries to confirm the index\u2019s existence",
+        "Run EXPLAIN ANALYZE on the SELECT query to observe the scan type",
+        "Review migration history to verify that the DROP INDEX migration was applied",
+        "Create the index in a staging environment and measure query latency under comparable load"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The connection\u2011pool implementation leaks connections because the acquire method increments active connections without a corresponding release, leading to pool exhaustion.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-MET-004",
+        "EV-LOG-001",
+        "EV-LOG-002"
+      ],
+      "supporting_reasoning": "EV-CODE-001 shows acquire() increments active_conns but no release path is visible. Metric EV-MET-004 records active connections rising to 15 (far above baseline). Log EV-LOG-001 confirms the pool is fully utilized, and EV-LOG-002 shows health checks timing out while waiting for a connection, all consistent with leaked connections preventing reuse.",
+      "falsification_criteria": [
+        "Codebase contains a reliable release/decrement mechanism that is exercised during normal operation",
+        "Active connection count drops back to baseline after request completion"
+      ],
+      "verification_plan": [
+        "Search the full codebase for any release() or context\u2011manager that decrements active_conns",
+        "Instrument the acquire and release calls to emit counters and observe net change during a load test",
+        "Add temporary logging around active_conns decrement and verify it occurs",
+        "Run a controlled load test and confirm that active_conns does not monotonically increase"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-004",
+      "claim": "Kubernetes readiness\u2011probe failures were a downstream symptom of the DB\u2011pool outage, causing pod termination and subsequent ingress 502 errors.",
+      "evidence_ids": [
+        "EV-LOG-003",
+        "EV-LOG-004",
+        "EV-MET-005",
+        "EV-MET-008",
+        "EV-MET-003"
+      ],
+      "supporting_reasoning": "Log EV-LOG-003 records three consecutive readiness\u2011probe failures leading to pod kill; EV-LOG-004 shows the ingress returning 502 due to no healthy backends. Metrics EV-MET-005 note five pod readiness failures, and EV-MET-008 demonstrates a near\u2011perfect correlation (r\u22480.997) between readiness failures and error rate, which spiked to 100\u202f% (EV-MET-003). This pattern suggests the probe, which checks the health endpoint, failed because the service could not obtain DB connections.",
+      "falsification_criteria": [
+        "Readiness probes succeed while DB connection metrics indicate saturation",
+        "Ingress 502 errors persist after a new pod becomes ready"
+      ],
+      "verification_plan": [
+        "Inspect the readiness\u2011probe definition to confirm it queries the /api/v1/health endpoint",
+        "Align probe failure timestamps with DB connection\u2011pool and error\u2011rate metrics to verify temporal overlap",
+        "Deploy a replacement pod while artificially keeping DB latency low and observe if the probe still fails",
+        "Check ingress logs after a new pod reaches Ready state to see whether 502 errors cease"
+      ]
+    }
+  ]
+}

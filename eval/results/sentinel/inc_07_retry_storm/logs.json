@@ -1,0 +1,61 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "agent": "logs_agent",
+  "summary": "Observed a transient 503 SERVICE_UNAVAILABLE from the downstream gateway followed by rapid immediate retries (1/10 to 3/10) and a sudden 10x outbound request rate increase, culminating in a downstream payment gateway collapse with HTTP 429/503 responses, indicating a retry\u2011storm pattern.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:10",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:30Z ERROR [payment-client] Downstream payment gateway collapsed under retry stampede (HTTP 429 & 503 cascade)",
+      "interpretation": "Shows the endpoint failure after the retry surge, confirming a stampede effect."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:9",
+      "timestamp": "2026-08-28T14:05:05Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:05:05Z ERROR [payment-client] Outbound request rate amplified 10x (from 50 req/s to 500 req/s)",
+      "interpretation": "Indicates a burst in request volume coinciding with retries."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [payment-client] Downstream gateway returned single transient 503 SERVICE_UNAVAILABLE",
+      "interpretation": "Initial transient failure that triggered retry logic."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 1/10 for charge_id=ch_991...",
+      "interpretation": "First immediate retry attempt after the 503."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 2/10 for charge_id=ch_991...",
+      "interpretation": "Second immediate retry, showing rapid succession."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [payment-client] Immediate retry 3/10 for charge_id=ch_991...",
+      "interpretation": "Third immediate retry, contributing to the observed burst."
+    }
+  ]
+}

@@ -1,0 +1,831 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "baseline_verdict": "CORRECT",
+  "sentinel_verdict": "CORRECT",
+  "baseline_correct": true,
+  "sentinel_correct": true,
+  "sentinel_verified": true,
+  "sentinel_confirmed_hypotheses": 3,
+  "sentinel_fix_proposals": 3,
+  "baseline_latency_seconds": 16.171,
+  "sentinel_latency_seconds": 178.156,
+  "baseline_tokens": 2671,
+  "sentinel_tokens": 0,
+  "baseline_llm_calls": 1,
+  "sentinel_llm_calls": 7,
+  "sentinel_status": "COMPLETED",
+  "sentinel_hypotheses_total": 3,
+  "sentinel_hypotheses_rejected": 0,
+  "sentinel_hypotheses_inconclusive": 0,
+  "notes": "",
+  "_sentinel_root_cause": "A poll timeout (max.poll.interval.ms) on worker\u20112 caused a rebalance storm, removing the worker from the consumer group and leading to a sudden drop in consumption rate and lag accumulation.",
+  "_sentinel_verdict_explanation": "Identified all core causal mechanisms (2/2 criteria groups matched).",
+  "_sentinel_error": "",
+  "_orchestrator_result": {
+    "incident_id": "inc_03_consumer_lag",
+    "pipeline_status": "COMPLETED",
+    "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+    "llm_call_count": 7,
+    "stages": {
+      "logs": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "agent": "logs_agent",
+          "summary": "Observed rising processing latency, consumer lag crossing critical threshold, poll interval timeout, and a rebalance storm affecting worker-2, with ancillary broker advisory warnings.",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:07:30Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:07:30Z ERROR [event-consumer] Consumer lag on topic 'orders.created' crossed critical alert threshold: 45,000 messages",
+              "interpretation": "Shows that consumer lag reached a critical level, indicating backlog accumulation."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:09:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:09:00Z ERROR [event-consumer] [kafka] max.poll.interval.ms (300000ms) exceeded by worker-2 due to blocking partner HTTP calls",
+              "interpretation": "Indicates poll interval timeout, likely caused by slow external HTTP calls."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:09:15Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:09:15Z ERROR [event-consumer] Consumer rebalance storm triggered: worker-2 kicked from consumer group",
+              "interpretation": "Rebalance event following the poll timeout, causing worker-2 to leave the group."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:5",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:06:00Z WARN [event-consumer] Event processing time per record increased from 0.8ms to 240.0ms (webhook HTTP latency)",
+              "interpretation": "Shows a sharp increase in processing latency, likely related to the blocking HTTP calls."
+            },
+            {
+              "evidence_id": "EV-LOG-005",
+              "source": "logs",
+              "reference": "logs/application.log:4",
+              "timestamp": "2026-08-28T14:05:12Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:05:12Z WARN [event-consumer] [kafka-cluster] Broker 2 logged partition balance advisory message - distractor",
+              "interpretation": "Broker advisory about partition balance; may be unrelated but noted for context."
+            }
+          ]
+        }
+      },
+      "metrics": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "agent": "metrics_agent",
+          "summary": "At 2026-08-28T14:12:00Z consumer_lag_records spiked to 140,000 records while msg_process_time_ms and partner_webhook_latency_ms both showed large spikes, and consumed_records_sec dropped sharply. Correlation analysis over the 14:00\u201114:12 window shows a very strong positive link between msg_process_time_ms and partner_webhook_latency_ms and strong negative links between those latencies and the consumption rate.",
+          "evidence": [
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "consumer_lag_records",
+              "value": 140000.0,
+              "type": "spike",
+              "interpretation": "Consumer lag records surged to 140k, far above the baseline mean of 45."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "msg_process_time_ms",
+              "value": 310.0,
+              "type": "spike",
+              "interpretation": "Message processing time spiked to 310\u202fms, well beyond the baseline mean of ~0.93\u202fms."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "partner_webhook_latency_ms",
+              "value": 305.0,
+              "type": "spike",
+              "interpretation": "Partner webhook latency rose to 305\u202fms, indicating a sudden slowdown."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "consumed_records_sec",
+              "value": 8.0,
+              "type": "drop",
+              "interpretation": "Consumed records per second fell to 8, a sharp drop from the baseline mean of 1,230."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+              "metric": "msg_process_time_ms~partner_webhook_latency_ms",
+              "value": 0.9999677903428976,
+              "type": "correlation",
+              "interpretation": "Processing time and webhook latency are almost perfectly positively correlated (r\u22480.99997)."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+              "metric": "consumed_records_sec~partner_webhook_latency_ms",
+              "value": -0.9901028121716932,
+              "type": "correlation",
+              "interpretation": "Consumption rate and webhook latency show a strong negative correlation (r\u2248-0.99)."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+              "metric": "msg_process_time_ms~consumed_records_sec",
+              "value": -0.9898651627486469,
+              "type": "correlation",
+              "interpretation": "Processing time and consumption rate are strongly negatively correlated (r\u2248-0.99)."
+            }
+          ]
+        }
+      },
+      "code": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "agent": "code_agent",
+          "summary": "A synchronous HTTP POST to an external partner webhook was added in event_handler, returning the partner response status code.",
+          "evidence": [
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+              "interpretation": "Adds a blocking outbound HTTP call that will delay processing until the partner responds or times out."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "suspicious_pattern",
+              "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+              "interpretation": "Pattern matches outbound_http_call, indicating potential impact on consumer latency if the partner endpoint is slow."
+            }
+          ]
+        }
+      },
+      "evidence_fusion": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "evidence": [
+            {
+              "evidence_id": "EV-LOG-001",
+              "source": "logs",
+              "reference": "logs/application.log:6",
+              "timestamp": "2026-08-28T14:07:30Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:07:30Z ERROR [event-consumer] Consumer lag on topic 'orders.created' crossed critical alert threshold: 45,000 messages",
+              "interpretation": "Shows that consumer lag reached a critical level, indicating backlog accumulation."
+            },
+            {
+              "evidence_id": "EV-LOG-002",
+              "source": "logs",
+              "reference": "logs/application.log:7",
+              "timestamp": "2026-08-28T14:09:00Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:09:00Z ERROR [event-consumer] [kafka] max.poll.interval.ms (300000ms) exceeded by worker-2 due to blocking partner HTTP calls",
+              "interpretation": "Indicates poll interval timeout, likely caused by slow external HTTP calls."
+            },
+            {
+              "evidence_id": "EV-LOG-003",
+              "source": "logs",
+              "reference": "logs/application.log:8",
+              "timestamp": "2026-08-28T14:09:15Z",
+              "type": "error",
+              "excerpt": "2026-08-28T14:09:15Z ERROR [event-consumer] Consumer rebalance storm triggered: worker-2 kicked from consumer group",
+              "interpretation": "Rebalance event following the poll timeout, causing worker-2 to leave the group."
+            },
+            {
+              "evidence_id": "EV-LOG-004",
+              "source": "logs",
+              "reference": "logs/application.log:5",
+              "timestamp": "2026-08-28T14:06:00Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:06:00Z WARN [event-consumer] Event processing time per record increased from 0.8ms to 240.0ms (webhook HTTP latency)",
+              "interpretation": "Shows a sharp increase in processing latency, likely related to the blocking HTTP calls."
+            },
+            {
+              "evidence_id": "EV-LOG-005",
+              "source": "logs",
+              "reference": "logs/application.log:4",
+              "timestamp": "2026-08-28T14:05:12Z",
+              "type": "warning",
+              "excerpt": "2026-08-28T14:05:12Z WARN [event-consumer] [kafka-cluster] Broker 2 logged partition balance advisory message - distractor",
+              "interpretation": "Broker advisory about partition balance; may be unrelated but noted for context."
+            },
+            {
+              "evidence_id": "EV-MET-001",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "consumer_lag_records",
+              "value": 140000.0,
+              "type": "spike",
+              "interpretation": "Consumer lag records surged to 140k, far above the baseline mean of 45."
+            },
+            {
+              "evidence_id": "EV-MET-002",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "msg_process_time_ms",
+              "value": 310.0,
+              "type": "spike",
+              "interpretation": "Message processing time spiked to 310\u202fms, well beyond the baseline mean of ~0.93\u202fms."
+            },
+            {
+              "evidence_id": "EV-MET-003",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "partner_webhook_latency_ms",
+              "value": 305.0,
+              "type": "spike",
+              "interpretation": "Partner webhook latency rose to 305\u202fms, indicating a sudden slowdown."
+            },
+            {
+              "evidence_id": "EV-MET-004",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv:row 8",
+              "timestamp": "2026-08-28T14:12:00Z",
+              "metric": "consumed_records_sec",
+              "value": 8.0,
+              "type": "drop",
+              "interpretation": "Consumed records per second fell to 8, a sharp drop from the baseline mean of 1,230."
+            },
+            {
+              "evidence_id": "EV-MET-005",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+              "metric": "msg_process_time_ms~partner_webhook_latency_ms",
+              "value": 0.9999677903428976,
+              "type": "correlation",
+              "interpretation": "Processing time and webhook latency are almost perfectly positively correlated (r\u22480.99997)."
+            },
+            {
+              "evidence_id": "EV-MET-006",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+              "metric": "consumed_records_sec~partner_webhook_latency_ms",
+              "value": -0.9901028121716932,
+              "type": "correlation",
+              "interpretation": "Consumption rate and webhook latency show a strong negative correlation (r\u2248-0.99)."
+            },
+            {
+              "evidence_id": "EV-MET-007",
+              "source": "metrics",
+              "reference": "metrics/metrics.csv",
+              "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+              "metric": "msg_process_time_ms~consumed_records_sec",
+              "value": -0.9898651627486469,
+              "type": "correlation",
+              "interpretation": "Processing time and consumption rate are strongly negatively correlated (r\u2248-0.99)."
+            },
+            {
+              "evidence_id": "EV-CODE-001",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "added_code",
+              "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+              "interpretation": "Adds a blocking outbound HTTP call that will delay processing until the partner responds or times out."
+            },
+            {
+              "evidence_id": "EV-CODE-002",
+              "source": "git_diff",
+              "reference": "git_diff.patch:hunk 1",
+              "type": "suspicious_pattern",
+              "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+              "interpretation": "Pattern matches outbound_http_call, indicating potential impact on consumer latency if the partner endpoint is slow."
+            }
+          ],
+          "evidence_ids": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-LOG-001",
+            "EV-LOG-002",
+            "EV-LOG-003",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-004",
+            "EV-MET-005",
+            "EV-MET-006",
+            "EV-MET-007"
+          ],
+          "sources": {
+            "logs": true,
+            "metrics": true,
+            "code": true
+          }
+        }
+      },
+      "hypotheses": {
+        "status": "SUCCEEDED",
+        "llm_calls": 1,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "hypotheses": [
+            {
+              "hypothesis_id": "HYP-001",
+              "claim": "The recent synchronous partner webhook call introduced in the consumer code (EV-CODE-001, EV-CODE-002) caused high HTTP latency, which inflated record processing time, exceeded max.poll.interval.ms, and triggered consumer lag spikes.",
+              "evidence_ids": [
+                "EV-CODE-001",
+                "EV-CODE-002",
+                "EV-LOG-004",
+                "EV-LOG-002",
+                "EV-MET-002",
+                "EV-MET-003",
+                "EV-MET-005"
+              ],
+              "supporting_reasoning": "Code diff adds a blocking HTTP POST with a 10\u202fs timeout. Logs show processing latency jumped to 240\u202fms (EV-LOG-004) and poll interval exceeded (EV-LOG-002). Metrics record a processing\u2011time spike to 310\u202fms (EV-MET-002) and webhook latency spike to 305\u202fms (EV-MET-003). Correlation between processing time and webhook latency is near\u2011perfect (EV-MET-005), linking the new call to the slowdown that caused lag (EV-LOG-001, EV-MET-001).",
+              "falsification_criteria": [
+                "If the partner webhook latency remains below 50\u202fms while consumer lag stays above the critical threshold, the hypothesis is disproved."
+              ],
+              "verification_plan": [
+                "Instrument the consumer to log webhook response times per request.",
+                "Temporarily disable the synchronous webhook call and measure processing time and lag metrics.",
+                "Compare poll interval violations before and after disabling the call.",
+                "Confirm that lag returns to baseline when webhook latency is low."
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "claim": "A poll timeout (max.poll.interval.ms) on worker\u20112 caused a rebalance storm, removing the worker from the consumer group and leading to a sudden drop in consumption rate and lag accumulation.",
+              "evidence_ids": [
+                "EV-LOG-002",
+                "EV-LOG-003",
+                "EV-LOG-001",
+                "EV-MET-001",
+                "EV-MET-004"
+              ],
+              "supporting_reasoning": "Logs record a poll interval exceedance (EV-LOG-002) followed by a rebalance storm that kicked worker\u20112 out (EV-LOG-003). Subsequent logs show critical lag (EV-LOG-001). Metrics show lag records surged to 140k (EV-MET-001) while consumed records per second fell to 8 (EV-MET-004), consistent with a consumer being removed from the group.",
+              "falsification_criteria": [
+                "If no poll timeout events are observed in the Kafka client metrics during the lag period, this hypothesis is falsified."
+              ],
+              "verification_plan": [
+                "Query the Kafka client metrics for max.poll.interval.ms violations during the incident window.",
+                "Inspect the consumer group state to verify whether worker\u20112 was removed and later rejoined.",
+                "Correlate timestamps of poll timeout, rebalance, and consumption\u2011rate drop."
+              ]
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "claim": "A broker\u2011side partition balance advisory (EV-LOG-005) led to uneven partition assignment, causing one consumer to be overloaded and generating the observed lag.",
+              "evidence_ids": [
+                "EV-LOG-005",
+                "EV-MET-001",
+                "EV-MET-004"
+              ],
+              "supporting_reasoning": "The broker logged a partition balance advisory (EV-LOG-005) shortly before lag metrics spiked (EV-MET-001) and consumption rate collapsed (EV-MET-004). An uneven partition distribution could overload a consumer, producing backlog and lag.",
+              "falsification_criteria": [
+                "If partition assignment logs show balanced distribution across consumers during the lag period, this hypothesis is disproved."
+              ],
+              "verification_plan": [
+                "Retrieve the partition assignment snapshot for the consumer group at the time of the lag.",
+                "Check broker logs for any subsequent rebalancing actions that corrected partition imbalance.",
+                "Verify that consumption rates per partition are uniform after the advisory."
+              ]
+            }
+          ]
+        }
+      },
+      "verification": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "results": [
+            {
+              "hypothesis_id": "HYP-001",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002",
+                    "EV-LOG-004",
+                    "EV-LOG-002",
+                    "EV-MET-002",
+                    "EV-MET-003",
+                    "EV-MET-005"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "7 of 7 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002",
+                    "EV-LOG-004",
+                    "EV-LOG-002",
+                    "EV-MET-002",
+                    "EV-MET-003",
+                    "EV-MET-005"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "7 of 7 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "No candidate metric spikes could be ordered.",
+                  "result": "INCONCLUSIVE",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002",
+                    "EV-LOG-004",
+                    "EV-LOG-002",
+                    "EV-MET-002",
+                    "EV-MET-003",
+                    "EV-MET-005"
+                  ],
+                  "reference": null,
+                  "detail": null
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002",
+                    "EV-LOG-004",
+                    "EV-LOG-002",
+                    "EV-MET-002",
+                    "EV-MET-003",
+                    "EV-MET-005"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "7 of 7 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-005",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-CODE-001",
+                    "EV-CODE-002",
+                    "EV-LOG-004",
+                    "EV-LOG-002",
+                    "EV-MET-002",
+                    "EV-MET-003",
+                    "EV-MET-005"
+                  ],
+                  "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv",
+                  "detail": "7 of 7 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv, git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv, git_diff.patch:hunk 1; git_diff.patch:hunk 1; logs/application.log:5; logs/application.log:7; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8; metrics/metrics.csv)",
+              "confidence": 0.86
+            },
+            {
+              "hypothesis_id": "HYP-002",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-LOG-001",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-LOG-001",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-LOG-001",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-002",
+                    "EV-LOG-003",
+                    "EV-LOG-001",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "5 of 5 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:7; logs/application.log:8; logs/application.log:6; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8)",
+              "confidence": 0.95
+            },
+            {
+              "hypothesis_id": "HYP-003",
+              "verdict": "CONFIRMED",
+              "checks": [
+                {
+                  "check_id": "CHK-001",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-005",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "3 of 3 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-002",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-005",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "3 of 3 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-003",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-005",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "3 of 3 referenced evidence items grounded."
+                },
+                {
+                  "check_id": "CHK-004",
+                  "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                  "result": "PASS",
+                  "evidence": [
+                    "EV-LOG-005",
+                    "EV-MET-001",
+                    "EV-MET-004"
+                  ],
+                  "reference": "logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8",
+                  "detail": "3 of 3 referenced evidence items grounded."
+                }
+              ],
+              "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8, logs/application.log:4; metrics/metrics.csv:row 8; metrics/metrics.csv:row 8)",
+              "confidence": 0.95
+            }
+          ]
+        }
+      },
+      "fix_proposals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 3,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "proposals": [
+            {
+              "proposal_id": "FIX-001",
+              "hypothesis_id": "HYP-001",
+              "incident_id": "inc_03_consumer_lag",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Remove the blocking partner webhook call from OrderEventHandler.handle_record to prevent poll timeout and consumer lag spikes.",
+              "rationale": "The synchronous HTTP POST introduced in handle_record blocks the consumer thread for up to 10\u202fseconds, causing processing latency to exceed max.poll.interval.ms and triggering lag; removing this call eliminates the blocking operation and restores fast record processing.",
+              "changes": [
+                {
+                  "file": "service/event_handler.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Replace the synchronous webhook call with a non\u2011blocking response to keep processing fast.",
+                  "before": "        # Synchronously notify external partner webhook\n        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n        return partner_resp.status_code",
+                  "after": "        return 202"
+                }
+              ],
+              "patch": "--- a/service/event_handler.py\n+++ b/service/event_handler.py\n@@ -12,4 +12,3 @@ class OrderEventHandler:\n-        # Synchronously notify external partner webhook\n-        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n-        return partner_resp.status_code\n+        return 202\n",
+              "expected_effect": "Record processing time returns to sub\u2011millisecond levels, max.poll.interval.ms is no longer exceeded, and consumer lag metrics return to baseline values.",
+              "risks": [
+                "Partner system will no longer receive immediate webhook notifications, potentially delaying downstream processes",
+                "If other parts of the system rely on the return status code, they may need adjustment"
+              ],
+              "validation_plan": [
+                "Deploy the proposed change to a staging environment",
+                "Run a load test simulating typical event volume and measure processing time per record (expect <5\u202fms)",
+                "Monitor max.poll.interval.ms logs to confirm no timeout warnings appear",
+                "Observe consumer lag metrics for a sustained period to ensure they remain below alert thresholds",
+                "Verify that partner notifications are still delivered via the existing asynchronous pipeline or alternative mechanism"
+              ],
+              "rollback_plan": "Revert service/event_handler.py to its previous version containing the synchronous webhook call and redeploy the service.",
+              "evidence_ids": [
+                "EV-CODE-001",
+                "EV-CODE-002",
+                "EV-LOG-002",
+                "EV-LOG-004",
+                "EV-MET-002",
+                "EV-MET-003",
+                "EV-MET-005"
+              ]
+            },
+            {
+              "proposal_id": "FIX-002",
+              "hypothesis_id": "HYP-002",
+              "incident_id": "inc_03_consumer_lag",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Make the external webhook call optional and non\u2011blocking to prevent poll timeout and rebalance storms.",
+              "rationale": "The synchronous HTTP call to the partner webhook blocks the consumer thread, causing poll intervals to exceed max.poll.interval.ms, which triggers a rebalance storm and removes the worker from the consumer group, leading to lag accumulation. By making the call optional and returning immediately when async mode is used, the consumer can continue polling within the configured interval, eliminating the root cause.",
+              "changes": [
+                {
+                  "file": "service/event_handler.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Replace blocking webhook call with optional async handling to avoid poll timeout.",
+                  "before": "    def handle_record(self, event):\n        self.store_analytics(event)\n        # Synchronously notify external partner webhook\n        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n        return partner_resp.status_code",
+                  "after": "    def handle_record(self, event, is_async: bool = False):\n        self.store_analytics(event)\n        if not is_async:\n            resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n            return resp.status_code\n        return 202"
+                }
+              ],
+              "patch": "PROPOSED PATCH\ndiff --git a/service/event_handler.py b/service/event_handler.py\nindex c5d6e7f..a8b9c0d 100644\n--- a/service/event_handler.py\n+++ b/service/event_handler.py\n@@ -12,4 +12,7 @@ class OrderEventHandler:\n-    def handle_record(self, event):\n-        self.store_analytics(event)\n-        # Synchronously notify external partner webhook\n-        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n-        return partner_resp.status_code\n+    def handle_record(self, event, is_async: bool = False):\n+        self.store_analytics(event)\n+        if not is_async:\n+            resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+            return resp.status_code\n+        return 202",
+              "expected_effect": "Consumer poll intervals remain within max.poll.interval.ms, preventing rebalance storms and reducing consumer lag.",
+              "risks": [
+                "Asynchronous handling may delay detection of webhook failures, requiring additional monitoring",
+                "Potential change in downstream processing semantics if callers expect synchronous confirmation"
+              ],
+              "validation_plan": [
+                "Deploy the updated code to a staging environment with the partner webhook artificially slowed to >300\u202fs latency",
+                "Monitor max.poll.interval.ms metric to ensure no exceedances during the test period",
+                "Verify that consumer lag remains stable and does not spike",
+                "Confirm that events are still delivered to the partner (e.g., by checking partner mock logs)",
+                "Run existing unit and integration tests for the event handler"
+              ],
+              "rollback_plan": "Revert service/event_handler.py to its previous version using version control (git checkout <previous_commit> service/event_handler.py) and redeploy the prior artifact.",
+              "evidence_ids": [
+                "EV-LOG-001",
+                "EV-LOG-002",
+                "EV-LOG-003",
+                "EV-MET-001",
+                "EV-MET-004"
+              ]
+            },
+            {
+              "proposal_id": "FIX-003",
+              "hypothesis_id": "HYP-003",
+              "incident_id": "inc_03_consumer_lag",
+              "status": "PROPOSED",
+              "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+              "summary": "Make consumer handling asynchronous to avoid blocking HTTP call causing lag.",
+              "rationale": "The confirmed root cause is a synchronous webhook call introduced in the consumer handler, which blocks the consumer thread and leads to excessive lag; converting the call to optional asynchronous handling removes the blocking path and restores consumption throughput.",
+              "changes": [
+                {
+                  "file": "service/event_handler.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "description": "Replace synchronous webhook call with optional asynchronous handling.",
+                  "before": "def handle_record(self, event):\n    self.store_analytics(event)\n    # Synchronously notify external partner webhook\n    partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n    return partner_resp.status_code",
+                  "after": "def handle_record(self, event, is_async: bool = False):\n    self.store_analytics(event)\n    if not is_async:\n        resp = self.http_client.post(\"https://partner-gateway.internal/events\", json_data=event, timeout=10.0)\n        return resp.status_code\n    return 202"
+                }
+              ],
+              "patch": "PROPOSED PATCH\n--- a/service/event_handler.py\n+++ b/service/event_handler.py\n@@\n-    def handle_record(self, event):\n-        self.store_analytics(event)\n-        # Synchronously notify external partner webhook\n-        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n-        return partner_resp.status_code\n+    def handle_record(self, event, is_async: bool = False):\n+        self.store_analytics(event)\n+        if not is_async:\n+            resp = self.http_client.post(\"https://partner-gateway.internal/events\", json_data=event, timeout=10.0)\n+            return resp.status_code\n+        return 202",
+              "expected_effect": "Consumer lag will drop to baseline levels and consumption rate will recover, eliminating backlog.",
+              "risks": [
+                "If is_async is set to True, downstream partner may not receive events synchronously, potentially causing data loss if not handled elsewhere.",
+                "Method signature change may break existing callers that expect the original handle_record signature."
+              ],
+              "validation_plan": [
+                "Deploy the updated service to a staging environment.",
+                "Run load tests simulating high webhook latency while processing records.",
+                "Monitor consumer lag and consumption rate metrics to ensure they return to baseline values.",
+                "Verify that partner webhook receives events (check partner logs or mock endpoint)."
+              ],
+              "rollback_plan": "Revert service/event_handler.py to its previous version from version control and redeploy the prior build.",
+              "evidence_ids": [
+                "EV-LOG-005",
+                "EV-MET-001",
+                "EV-MET-004"
+              ]
+            }
+          ],
+          "validation_errors": {
+            "FIX-001": [
+              "Proposed change references file 'service/event_handler.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_03_consumer_lag."
+            ],
+            "FIX-002": [
+              "Proposed change references file 'service/event_handler.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_03_consumer_lag."
+            ],
+            "FIX-003": [
+              "Proposed change references file 'service/event_handler.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_03_consumer_lag."
+            ]
+          },
+          "skipped_hypotheses": []
+        }
+      },
+      "approvals": {
+        "status": "SUCCEEDED",
+        "llm_calls": 0,
+        "output": {
+          "incident_id": "inc_03_consumer_lag",
+          "approval_records": [
+            {
+              "proposal_id": "FIX-001",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:32:02.877428+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-002",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:32:02.883117+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            },
+            {
+              "proposal_id": "FIX-003",
+              "status": "REJECTED",
+              "decision": "rejected",
+              "approved_by": "human",
+              "timestamp": "2026-08-29T11:32:02.885115+00:00",
+              "notes": "No input provided \u2014 defaulting to rejected."
+            }
+          ],
+          "summary": {
+            "total": 3,
+            "approved": 0,
+            "rejected": 3
+          }
+        }
+      }
+    },
+    "summary": {
+      "confirmed_hypotheses": 3,
+      "rejected_hypotheses": 0,
+      "inconclusive_hypotheses": 0,
+      "proposals_generated": 3,
+      "proposals_approved": 0,
+      "proposals_rejected": 3
+    },
+    "error": null
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "incident_id": "inc_08_cascading_timeout",
+  "agent": "logs_agent",
+  "summary": "Log lines show a rapid degradation of the external tax service latency, causing the checkout service thread pool to saturate, upstream gateway 504 responses, and ultimately 503 Server Busy rejections. A recent deployment introduced a 60\u202fs default timeout for the tax provider.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:07:00Z ERROR [checkout-service] Thread starvation: Incoming checkout requests rejected with 503 Server Busy",
+      "interpretation": "Indicates that all worker threads are blocked, leading to request rejections."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:06:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:30Z ERROR [checkout-service] Upstream API gateway returned 504 GATEWAY_TIMEOUT on /api/v1/checkout",
+      "interpretation": "Shows a downstream timeout from the API gateway, likely caused by delayed upstream calls."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:06:00Z WARN [checkout-service] Worker thread pool saturation: 30/30 threads blocked waiting on tax service response",
+      "interpretation": "Thread pool fully occupied waiting for the tax service, a bottleneck point."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [checkout-service] External tax service latency degraded to 25,000ms",
+      "interpretation": "Tax service response time spiked to 25\u202fs, far exceeding normal latency."
+    },
+    {
+      "evidence_id": "EV-LOG-005",
+      "source": "logs",
+      "reference": "logs/application.log:3",
+      "timestamp": "2026-08-28T14:04:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:04:00Z INFO [checkout-service] Deploy commit 9a0b1c: Integrated external tax calculation provider with 60s default timeout",
+      "interpretation": "Deployment introduced a new tax provider with a 60\u202fs timeout setting."
+    },
+    {
+      "evidence_id": "EV-LOG-006",
+      "source": "logs",
+      "reference": "logs/application.log:4",
+      "timestamp": "2026-08-28T14:04:25Z",
+      "type": "context",
+      "excerpt": "2026-08-28T14:04:25Z INFO [checkout-service] [tls] Ingress TLS cert check completed (valid for 89 days) - distractor",
+      "interpretation": "TLS check unrelated to the observed performance issue."
+    },
+    {
+      "evidence_id": "EV-LOG-007",
+      "source": "logs",
+      "reference": "logs/application.log:2",
+      "timestamp": "2026-08-28T14:02:00Z",
+      "type": "context",
+      "excerpt": "2026-08-28T14:02:00Z INFO [checkout-service] Average checkout response time: 65ms",
+      "interpretation": "Baseline response time before the latency degradation began."
+    }
+  ]
+}

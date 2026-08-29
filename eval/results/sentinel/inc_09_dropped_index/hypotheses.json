@@ -1,0 +1,70 @@
+{
+  "incident_id": "inc_09_dropped_index",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The removal of index idx_tenant_status_name caused the search queries to fall back to full sequential scans, which saturated disk I/O and produced the observed latency spikes.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-003",
+        "EV-LOG-004",
+        "EV-MET-006",
+        "EV-MET-007",
+        "EV-MET-008"
+      ],
+      "supporting_reasoning": "Code evidence shows the index was deliberately dropped (EV-CODE-001, EV-CODE-003). The warning log (EV-LOG-004) records a query plan change to a sequential scan. Metrics confirm a surge in sequential scans (EV-MET-006) and strong correlations between sequential scans, disk read rate (EV-MET-007) and latency (EV-MET-008), matching the timing of I/O saturation (EV-LOG-001) and latency spikes (EV-LOG-002).",
+      "falsification_criteria": [
+        "A post\u2011mortem schema inspection reveals that idx_tenant_status_name still exists after the deployment",
+        "Sequential scan count does not increase during the incident window"
+      ],
+      "verification_plan": [
+        "Inspect the database schema for the presence of idx_tenant_status_name",
+        "Run EXPLAIN on a representative search query to verify the execution plan uses a sequential scan",
+        "Correlate the timestamped sequential scan metric (EV-MET-006) with the I/O saturation log (EV-LOG-001)",
+        "Confirm that the index removal commit (EV-CODE-001) was applied to the production database"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "An unexpected surge in overall CPU usage triggered the query optimizer to choose less efficient sequential scans, leading to disk I/O saturation and latency degradation.",
+      "evidence_ids": [
+        "EV-MET-003",
+        "EV-MET-004",
+        "EV-MET-005",
+        "EV-LOG-001",
+        "EV-LOG-002"
+      ],
+      "supporting_reasoning": "Metrics show CPU usage spiked to 99.5% (EV-MET-003) and exceeded the 90% threshold (EV-MET-004), with a 57.6\u2011point increase over baseline (EV-MET-005). High CPU can pressure the optimizer to favor cheaper planning paths, potentially resulting in sequential scans that overload the storage subsystem, as reflected by the I/O saturation log (EV-LOG-001) and latency spike (EV-LOG-002).",
+      "falsification_criteria": [
+        "CPU usage remains below 80% throughout the incident period",
+        "No change in optimizer behavior is observed when CPU load is artificially increased"
+      ],
+      "verification_plan": [
+        "Review CPU utilization traces for the exact time window of the incident",
+        "Examine optimizer configuration and logs to see if high CPU triggered plan changes",
+        "Re\u2011run the same query under controlled CPU load to observe plan selection",
+        "Check whether the sequential scan metric (EV-MET-006) rises only when CPU spikes"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "The yellow health status of the Elasticsearch cluster reduced query routing efficiency, contributing to increased latency independent of the database index removal.",
+      "evidence_ids": [
+        "EV-LOG-003",
+        "EV-LOG-002",
+        "EV-MET-001"
+      ],
+      "supporting_reasoning": "A warning log indicates the ES cluster entered YELLOW state with an unassigned replica shard (EV-LOG-003), which can degrade redundancy and routing. Concurrently, the application reported a latency spike (EV-LOG-002) and metrics record a latency increase to 3500\u202fms (EV-MET-001). This suggests the search service latency may be partially driven by ES cluster health rather than solely by DB I/O issues.",
+      "falsification_criteria": [
+        "Elasticsearch cluster health remains GREEN during the latency spike",
+        "Latency returns to baseline while the cluster stays in YELLOW"
+      ],
+      "verification_plan": [
+        "Query the Elasticsearch cluster health API for the incident timeframe",
+        "Correlate cluster health changes with application latency metrics",
+        "Perform a controlled test by forcing a replica to be unassigned and measuring latency impact",
+        "Check whether database I/O metrics (disk read rate) remain stable while ES health degrades"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,245 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "results": [
+    {
+      "hypothesis_id": "HYP-001",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+          "detail": "5 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+          "detail": "5 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+          "detail": "5 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+          "detail": "5 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+          "detail": "5 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-MET-001",
+            "EV-MET-002",
+            "EV-MET-003"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5",
+          "detail": "5 of 5 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5, git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5, git_diff.patch:hunk 1; git_diff.patch:hunk 1; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5; metrics/metrics.csv:row 5)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-003",
+            "EV-MET-001"
+          ],
+          "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-003",
+            "EV-MET-001"
+          ],
+          "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-003",
+            "EV-MET-001"
+          ],
+          "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-003",
+            "EV-MET-001"
+          ],
+          "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-003",
+            "EV-MET-001"
+          ],
+          "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-003",
+            "EV-MET-001"
+          ],
+          "reference": "logs/application.log:3; metrics/metrics.csv:row 5",
+          "detail": "2 of 2 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:3; metrics/metrics.csv:row 5, logs/application.log:3; metrics/metrics.csv:row 5, logs/application.log:3; metrics/metrics.csv:row 5)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+          "detail": "2 of 2 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002"
+          ],
+          "reference": "git_diff.patch:hunk 1; git_diff.patch:hunk 1",
+          "detail": "2 of 2 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: git_diff.patch:hunk 1; git_diff.patch:hunk 1, git_diff.patch:hunk 1; git_diff.patch:hunk 1, git_diff.patch:hunk 1; git_diff.patch:hunk 1)",
+      "confidence": 0.95
+    }
+  ]
+}

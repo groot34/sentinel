@@ -1,0 +1,23 @@
+{
+  "incident_id": "inc_03_consumer_lag",
+  "agent": "code_agent",
+  "summary": "A synchronous HTTP POST to an external partner webhook was added in event_handler, returning the partner response status code.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+      "interpretation": "Adds a blocking outbound HTTP call that will delay processing until the partner responds or times out."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "+        # Synchronously notify external partner webhook\n+        partner_resp = self.http_client.post(\"https://partner-gateway.internal/events\", json=event.payload, timeout=10.0)\n+        return partner_resp.status_code",
+      "interpretation": "Pattern matches outbound_http_call, indicating potential impact on consumer latency if the partner endpoint is slow."
+    }
+  ]
+}

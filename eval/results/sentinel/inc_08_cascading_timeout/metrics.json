@@ -1,0 +1,97 @@
+{
+  "incident_id": "inc_08_cascading_timeout",
+  "agent": "metrics_agent",
+  "summary": "Multiple metrics show extreme spikes and strong positive relationships during the 14:00\u201114:08 window: external tax latency and checkout latency both jumped to 30\u202f000\u202fms, gateway 504 error rate rose to 92\u202f%, and blocked worker threads increased to 30. Correlation analysis reveals very high Pearson r values (>0.9) linking these metrics, indicating they moved together in this period.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "external_tax_latency_ms",
+      "value": 30000.0,
+      "type": "spike",
+      "interpretation": "Latency for external tax service spiked to 30\u202f000\u202fms, far above the baseline mean of 46.5\u202fms (z\u224819969)."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "p95_checkout_latency_ms",
+      "value": 30000.0,
+      "type": "spike",
+      "interpretation": "95th\u2011percentile checkout latency spiked to 30\u202f000\u202fms, orders of magnitude above the typical 66.5\u202fms baseline (z\u224819956)."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_504_pct",
+      "value": 92.0,
+      "type": "spike",
+      "interpretation": "Gateway 504 error percentage surged to 92\u202f%, whereas baseline is essentially 0\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_504_pct",
+      "value": 92.0,
+      "type": "threshold",
+      "interpretation": "Error rate exceeds the defined alert threshold of 90\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "blocked_worker_threads",
+      "value": 30.0,
+      "type": "spike",
+      "interpretation": "Count of blocked worker threads rose to 30, well above the baseline mean of 2."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "gateway_504_pct",
+      "value": 92.0,
+      "type": "period_change",
+      "interpretation": "Gateway 504% shifted from a baseline mean of 0\u202f% to a period mean of 41.25\u202f%, a delta of 41.25\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "blocked_worker_threads~p95_checkout_latency_ms",
+      "value": 0.9918607924458439,
+      "type": "correlation",
+      "interpretation": "Very strong positive correlation (r\u22480.99) between blocked threads and checkout latency over the 8\u2011minute window."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "external_tax_latency_ms~blocked_worker_threads",
+      "value": 0.9725449695631029,
+      "type": "correlation",
+      "interpretation": "High correlation (r\u22480.97) linking external tax latency with blocked worker threads."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "p95_checkout_latency_ms~gateway_504_pct",
+      "value": 0.9456398265289149,
+      "type": "correlation",
+      "interpretation": "Strong correlation (r\u22480.95) between checkout latency spikes and gateway 504 error rate."
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "incident_id": "inc_02_cache_stampede",
+  "agent": "metrics_agent",
+  "summary": "At 14:08\u202fZ the system shows extreme spikes in latency, DB reads and error rate, concurrent drops in cache hit ratio and Redis ops, and strong correlations among these metrics, indicating a rapid degradation episode.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "p95_latency_ms",
+      "value": 5000.0,
+      "type": "spike",
+      "interpretation": "p95 latency rose to 5000\u202fms, far exceeding the normal mean (~8.5\u202fms) and indicating a severe slowdown."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "db_read_qps",
+      "value": 1600.0,
+      "type": "spike",
+      "interpretation": "Database read QPS jumped to 1600, orders of magnitude above the baseline (~12.5\u202fQPS)."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "error_rate_pct",
+      "value": 68.5,
+      "type": "spike",
+      "interpretation": "Error rate spiked to 68.5\u202f%, whereas the prior period showed essentially zero errors."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "cache_hit_ratio_pct",
+      "value": 9.5,
+      "type": "drop",
+      "interpretation": "Cache hit ratio fell dramatically to 9.5\u202f% from a typical ~98\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "redis_ops_per_sec",
+      "value": 410.0,
+      "type": "drop",
+      "interpretation": "Redis operations per second dropped to 410, well below the normal ~2397\u202fops/s."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 4",
+      "timestamp": "2026-08-28T14:04:00Z",
+      "metric": "cache_hit_ratio_pct",
+      "value": 98.0,
+      "type": "threshold",
+      "interpretation": "Cache hit ratio at 14:04\u202fZ met the >=90\u202f% threshold, confirming healthy cache performance before the incident."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "error_rate_pct",
+      "value": 68.5,
+      "type": "period_change",
+      "interpretation": "Error rate increased from a baseline mean of 0\u202f% to 68.5\u202f% (\u0394\u202f+32.5\u202f%)."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "cache_hit_ratio_pct",
+      "value": 9.5,
+      "type": "period_change",
+      "interpretation": "Cache hit ratio fell from a baseline mean of 98.23\u202f% to 9.5\u202f% (\u0394\u202f\u201188.7\u202f%)."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "p95_latency_ms~error_rate_pct",
+      "value": 0.9972396891579437,
+      "type": "correlation",
+      "interpretation": "Latency and error rate are almost perfectly positively correlated (r\u22480.997) over the 8\u2011minute window."
+    },
+    {
+      "evidence_id": "EV-MET-010",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "db_read_qps~redis_ops_per_sec",
+      "value": -0.9927244511923505,
+      "type": "correlation",
+      "interpretation": "DB reads and Redis ops are strongly negatively correlated (r\u2248\u20110.993), suggesting inverse behavior during the incident."
+    },
+    {
+      "evidence_id": "EV-MET-011",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "cache_hit_ratio_pct~redis_ops_per_sec",
+      "value": 0.9922895840223348,
+      "type": "correlation",
+      "interpretation": "Cache hit ratio and Redis ops move together positively (r\u22480.992)."
+    },
+    {
+      "evidence_id": "EV-MET-012",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "cache_hit_ratio_pct~db_read_qps",
+      "value": -0.9724605932585875,
+      "type": "correlation",
+      "interpretation": "Cache hit ratio and DB reads are strongly negatively correlated (r\u2248\u20110.972)."
+    },
+    {
+      "evidence_id": "EV-MET-013",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "db_read_qps~p95_latency_ms",
+      "value": 0.9488109910523861,
+      "type": "correlation",
+      "interpretation": "DB reads and latency are highly positively correlated (r\u22480.949)."
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "metrics_agent",
+  "summary": "Metrics show a sharp increase in garbage collection time (520\u202fms) and RSS memory (995\u202fMB) at 14:11, together with a rise in active uploads (15). One OOM kill is recorded at 14:12, after which garbage collection time and active uploads drop to zero and memory usage falls to near baseline. Correlation analysis reveals strong positive relationships between memory usage and garbage collection time (r\u22480.90) and between memory usage and active uploads (r\u22480.85).",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 520.0,
+      "type": "spike",
+      "interpretation": "GC time spikes far above its baseline (mean\u202f\u2248\u202f4.6\u202fms), indicating unusually long collection cycles at this moment."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "memory_rss_mb",
+      "value": 995.0,
+      "type": "spike",
+      "interpretation": "RSS memory jumps to ~995\u202fMB, many standard deviations above its typical ~85\u202fMB level."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "active_uploads",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "Active uploads more than double the recent average, suggesting a burst of upload activity."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "oom_kills_total",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "An out\u2011of\u2011memory kill occurs immediately after the spike period."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "garbage_collection_time_ms",
+      "value": 0.0,
+      "type": "drop",
+      "interpretation": "GC time drops to zero, a sharp reversal from the previous spike."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "active_uploads",
+      "value": 0.0,
+      "type": "drop",
+      "interpretation": "Active uploads fall to zero, indicating the upload burst ended."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb",
+      "value": 80.0,
+      "type": "drop",
+      "interpretation": "RSS memory decreases to near baseline after the earlier spike."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~garbage_collection_time_ms",
+      "value": 0.9000525358529804,
+      "type": "correlation",
+      "interpretation": "Strong positive correlation (r\u22480.90) between memory usage and GC time over the observed window."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+      "metric": "memory_rss_mb~active_uploads",
+      "value": 0.8464146954076838,
+      "type": "correlation",
+      "interpretation": "High positive correlation (r\u22480.85) between memory usage and active upload count."
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "incident_id": "inc_05_race_condition",
+  "agent": "metrics_agent",
+  "summary": "Metrics show a massive spike in concurrent checkout threads at 14:02:05Z, accompanied by spikes in oversold units and reconciliation errors at the same moment, and a simultaneous drop in inventory remaining. Correlation analysis over the 14:00\u201114:03 window reveals an almost perfect positive correlation between oversold units and reconciliation errors, and a strong negative correlation between inventory remaining and both oversold units and reconciliation errors.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "concurrent_checkout_threads",
+      "value": 50.0,
+      "type": "spike",
+      "interpretation": "Concurrent checkout threads rose sharply to 50, far above the typical mean of ~1.5."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "oversold_units_total",
+      "value": 8.0,
+      "type": "spike",
+      "interpretation": "Oversold units total spiked to 8, whereas the baseline is normally zero."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "reconciliation_errors",
+      "value": 1.0,
+      "type": "spike",
+      "interpretation": "Reconciliation errors recorded a spike to 1, deviating from a zero baseline."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:02:05Z",
+      "metric": "inventory_remaining",
+      "value": -8.0,
+      "type": "drop",
+      "interpretation": "Inventory remaining dropped to -8, contrasting with a normal mean of 10."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+      "metric": "oversold_units_total~reconciliation_errors",
+      "value": 0.9999999999999998,
+      "type": "correlation",
+      "interpretation": "Oversold units and reconciliation errors are almost perfectly positively correlated over the window."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+      "metric": "inventory_remaining~oversold_units_total",
+      "value": -0.9963221648111514,
+      "type": "correlation",
+      "interpretation": "Inventory remaining is strongly negatively correlated with oversold units."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:03:00Z",
+      "metric": "inventory_remaining~reconciliation_errors",
+      "value": -0.9963221648111514,
+      "type": "correlation",
+      "interpretation": "Inventory remaining is strongly negatively correlated with reconciliation errors."
+    }
+  ]
+}

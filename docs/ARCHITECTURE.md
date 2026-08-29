@@ -165,7 +165,71 @@ Code Evidence ─────┘           │
                                │
                                ▼
                  CONFIRMED / REJECTED / INCONCLUSIVE  ←  per HYP-NNN
+                               │
+                               ▼
+                 Fix Proposal Agent (N Groq; one per CONFIRMED hypothesis)
+                               │
+                               ▼
+                 Proposal Validation (agents/fix_tools.py; 0 Groq)
+                               │
+                               ▼
+                 Human Approval Gate (PROPOSED → APPROVED | REJECTED)
+                       default / non-interactive → REJECTED
 ```
+
+### Final Evaluation pipeline (Milestone 10 — IMPLEMENTED)
+
+```
+10 canonical incident bundles ─────────────────────────────────────┐
+                                                                   │
+                                                                   ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    eval.run_sentinel_eval.py                        │
+│ ┌────────────────── for each incident ──────────────────────────┐ │
+│ │  1. load_sentinel_final() → reuse cache?                       │ │
+│ │     YES → skip directly to evaluator.                          │ │
+│ │     NO  → IncidentOrchestrator: Logs→Metrics→Code→Fusion→     │ │
+│ │             Hypothesis→Verification→FixProposal→Approval      │ │
+│ │             8 stages; caches each stage output under          │ │
+│ │             eval/results/sentinel/<incident_id>/               │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+│                                                                     │
+│ ┌────────── evaluator (only now reads ground_truth.md) ──────────┐ │
+│ │  CorrectnessEvaluator.evaluate_diagnosis(...)                  │ │
+│ │  → sentinel_verdict ∈ {CORRECT, INCORRECT, REVIEW, FAILURE}    │ │
+│ │  → sentinel_verdict_explanation                                │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+│                                                                     │
+│ Write per-incident → eval/results/sentinel/<id>/sentinel_final.json │
+│ After all 10: write final_comparison.csv + final_summary.json       │
+└────────────────────────────────────────────────────────────────────┘
+                                                                   │
+Post-hoc integrity pass (scripts/_normalize_final_benchmark.py):    │
+  • locks baseline aggregate numbers to baseline_summary.json       │
+    (the authoritative commit-e999b2a numbers) instead of           │
+    recomputing from an incomplete CSV rows commit.                 │
+  • verifies denominator = 10 for both systems; failures are       │
+    never removed from the denominator.                             │
+  • cross-checks CSV rows ↔ per-incident records ↔ summary.        │
+  • adds integrity block documenting provenance + instrumentation   │
+    gaps (Sentinel stage token counts not exposed).                 │
+                                                                   ▼
+                  final_comparison.csv + final_summary.json
+```
+
+### Evaluation Isolation Contracts (Milestone 10)
+
+| Component | reads ground_truth.md? | reads baseline CSV/summary? | direct LLM calls? |
+|---|:---:|:---:|:---:|
+| Orchestrator runtime | **NO** (AST-tested in `test_orchestrator_never_reads_ground_truth`) | **NO** | 0 |
+| Logs / Metrics / Code agents | **NO** | **NO** | 1 each |
+| Hypothesis Engine | **NO** | **NO** | 1 |
+| Verification Agent | **NO** | **NO** | 0 |
+| Fix Proposal Agent | **NO** | **NO** | N per CONFIRMED hypothesis |
+| Approval Gate | **NO** | **NO** | 0 |
+| Sentinel evaluation runner (runtime portion) | **NO** (AST-tested in `test_run_sentinel_eval_never_reads_ground_truth`) | **NO** (AST-tested in `test_run_sentinel_eval_never_reads_baseline_results`) | 0 |
+| `CorrectnessEvaluator` (**post-run only**) | YES | NO | 0 |
+| Normalizer (**post-run only**) | NO | YES (for locked baseline numbers) | 0 |
 
 ### Key Architectural Guardrails
 1. **Zero Secret Leakage**: `_sanitize_message` strips Groq/OpenAI pattern tokens from all exceptions, error logs, and stack traces.

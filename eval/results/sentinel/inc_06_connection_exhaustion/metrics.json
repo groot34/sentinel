@@ -1,0 +1,77 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "agent": "metrics_agent",
+  "summary": "Metrics show a sharp increase in active connections to 10 (baseline ~1.7) concurrent with a drop of idle connections to 0 (baseline ~8.3) and spikes in pool timeout errors (24) and invalid request count (10). Correlation analysis over the 14:00\u201114:08 window shows a near\u2011perfect negative correlation between active and idle connections (r\u2248\u20111) and strong positive correlation between active connections and invalid requests (r\u22480.98), with idle connections inversely correlated with invalid requests.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "metric": "active_connections",
+      "value": 10.0,
+      "type": "spike",
+      "interpretation": "Active connections spiked far above the recent baseline, indicating a sudden surge in usage."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "metric": "idle_connections",
+      "value": 0.0,
+      "type": "drop",
+      "interpretation": "Idle connections dropped to zero, the opposite of their typical level, suggesting resources were fully consumed."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:08:00Z",
+      "metric": "pool_timeout_errors",
+      "value": 24.0,
+      "type": "spike",
+      "interpretation": "Pool timeout errors rose sharply, reflecting many requests failing to acquire a connection."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "metric": "invalid_request_count",
+      "value": 10.0,
+      "type": "spike",
+      "interpretation": "Invalid request count increased markedly, coinciding with the connection surge."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "active_connections~idle_connections",
+      "value": -0.9999999999999999,
+      "type": "correlation",
+      "interpretation": "Active and idle connections are almost perfectly negatively correlated over the window."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "active_connections~invalid_request_count",
+      "value": 0.984473894675649,
+      "type": "correlation",
+      "interpretation": "Active connections and invalid requests show a strong positive correlation."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:08:00Z",
+      "metric": "idle_connections~invalid_request_count",
+      "value": -0.984473894675649,
+      "type": "correlation",
+      "interpretation": "Idle connections and invalid requests are strongly inversely correlated."
+    }
+  ]
+}

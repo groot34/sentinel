@@ -1,0 +1,372 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "results": [
+    {
+      "hypothesis_id": "HYP-001",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-007",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-CODE-001",
+            "EV-CODE-002",
+            "EV-CODE-003",
+            "EV-CODE-004",
+            "EV-CODE-005",
+            "EV-CODE-006",
+            "EV-LOG-004",
+            "EV-LOG-005",
+            "EV-LOG-006",
+            "EV-LOG-002",
+            "EV-MET-001"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        }
+      ],
+      "reasoning": "All required checks passed: Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST). (references: service\\app.py:22, service\\app.py:22, service\\app.py:22)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-007",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-LOG-001",
+            "EV-LOG-003",
+            "EV-LOG-002",
+            "EV-MET-002",
+            "EV-MET-003",
+            "EV-MET-007"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        }
+      ],
+      "reasoning": "All required checks passed: Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST). (references: service\\app.py:22, service\\app.py:22, service\\app.py:22)",
+      "confidence": 0.95
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "verdict": "CONFIRMED",
+      "checks": [
+        {
+          "check_id": "CHK-001",
+          "description": "Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": "service\\app.py:22",
+          "detail": "zero backoff: [{'lineno': 16, 'line': 'BACKOFF_BASE_SECONDS = 0.0'}] | retry loops: ['service\\\\app.py:22']"
+        },
+        {
+          "check_id": "CHK-002",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+          "detail": "4 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-003",
+          "description": "No candidate metric spikes could be ordered.",
+          "result": "INCONCLUSIVE",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": null,
+          "detail": null
+        },
+        {
+          "check_id": "CHK-004",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+          "detail": "4 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-005",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+          "detail": "4 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-006",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+          "detail": "4 of 5 referenced evidence items grounded."
+        },
+        {
+          "check_id": "CHK-007",
+          "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+          "result": "PASS",
+          "evidence": [
+            "EV-MET-004",
+            "EV-MET-001",
+            "EV-MET-007",
+            "EV-CODE-002",
+            "EV-CODE-006"
+          ],
+          "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1",
+          "detail": "4 of 5 referenced evidence items grounded."
+        }
+      ],
+      "reasoning": "All required checks passed: Aggressive retry configuration detected (high MAX_RETRIES or zero backoff or retry loop AST).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: service\\app.py:22, metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1, metrics/metrics.csv:row 7; metrics/metrics.csv:row 6; metrics/metrics.csv; git_diff.patch:hunk 1)",
+      "confidence": 0.89
+    }
+  ]
+}

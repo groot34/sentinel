@@ -1,0 +1,73 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "claim": "The recent code change that increased MAX_RETRIES to 10 and set BACKOFF_BASE_SECONDS to 0.0 caused the rapid retry storm and the ten\u2011fold outbound request amplification.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-CODE-005"
+      ],
+      "supporting_reasoning": "The diff (EV-CODE-001, EV-CODE-002) shows MAX_RETRIES was raised from 2 to 10 and back\u2011off removed. The retry loop implementation (EV-CODE-003\u2011EV-CODE-005) will now execute up to ten immediate attempts. Logs record three immediate retries within the same second (EV-LOG-002\u2011EV-LOG-004) and an error indicating a 10\u00d7 request rate increase (EV-LOG-005). Metrics confirm a massive spike in outbound calls (EV-MET-001). Together, the configuration change directly enables the observed storm.",
+      "falsification_criteria": [
+        "Runtime inspection shows MAX_RETRIES still set to 2 at the time of the incident",
+        "Observed back\u2011off interval in logs is greater than zero",
+        "No more than two retry attempts are recorded for any charge_id"
+      ],
+      "verification_plan": [
+        "Check the deployed container image timestamp to confirm the version containing EV-CODE-001\u2011EV-CODE-005 was running at 14:05 UTC",
+        "Query the application\u2019s in\u2011process configuration for MAX_RETRIES and BACKOFF_BASE_SECONDS via a health endpoint or debug dump",
+        "Count the number of retry attempts per charge_id in the full log file for the incident window",
+        "Re\u2011run a charge request against a test instance with MAX_RETRIES set to 2 and BACKOFF_BASE_SECONDS to 0.5\u202fs and verify that request rate does not spike"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "claim": "An independent failure of the downstream payment gateway (initial 503) triggered the client\u2019s retries, and the gateway\u2019s inability to handle the retry load caused the cascade of 429 and 503 errors, independent of the client\u2019s retry configuration.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-LOG-006",
+        "EV-MET-002",
+        "EV-MET-003",
+        "EV-MET-007"
+      ],
+      "supporting_reasoning": "The first warning (EV-LOG-001) reports a downstream 503, indicating the gateway was already unavailable. Subsequent error (EV-LOG-006) describes the gateway collapsing under a retry stampede. Metrics show a sharp rise in 503 (EV-MET-002) and 429 (EV-MET-003) percentages, and a strong positive correlation between outbound calls and 429 errors (EV-MET-007), suggesting the gateway\u2019s state drove the error surge rather than client logic alone.",
+      "falsification_criteria": [
+        "Downstream gateway logs for the interval show no internal errors or overload conditions",
+        "Other services calling the same gateway did not experience a spike in 429/503 errors",
+        "The gateway\u2019s error rate remained at baseline while the client\u2019s request volume spiked"
+      ],
+      "verification_plan": [
+        "Obtain the downstream gateway\u2019s log files for 14:04\u201114:06 UTC and search for internal error entries",
+        "Compare error percentages for the gateway across all client services during the same window",
+        "Cross\u2011reference the gateway\u2019s health metrics (CPU, queue length) to see if overload occurred",
+        "If possible, replay a single request to the gateway with the client\u2019s original retry settings and observe whether the gateway returns 503 without subsequent 429 cascade"
+      ]
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "claim": "Setting BACKOFF_BASE_SECONDS to zero created an immediate\u2011retry loop that amplified request traffic tenfold, producing a retry storm regardless of the maximum retry count.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-LOG-005",
+        "EV-MET-001",
+        "EV-MET-007"
+      ],
+      "supporting_reasoning": "EV-CODE-001 explicitly sets BACKOFF_BASE_SECONDS to 0.0, meaning retries occur without delay. EV-LOG-005 records a ten\u2011times increase in outbound request rate, matching the metric spike in EV-MET-001. The strong correlation between outbound calls and error percentages (EV-MET-007) indicates that the lack of back\u2011off directly drove the traffic amplification.",
+      "falsification_criteria": [
+        "Measured inter\u2011retry intervals in the logs are consistently greater than zero seconds",
+        "Disabling back\u2011off in a controlled test does not change the request rate",
+        "The request amplification persists even when MAX_RETRIES is limited to a low value"
+      ],
+      "verification_plan": [
+        "Instrument the retry function to log timestamps before each retry and compute actual intervals",
+        "Run a controlled experiment with BACKOFF_BASE_SECONDS set to a non\u2011zero value (e.g., 0.5\u202fs) and compare request rates",
+        "Limit MAX_RETRIES to 2 in a test environment while keeping back\u2011off at zero and observe if the ten\u2011fold spike still occurs",
+        "Analyze the time series of outbound call counts to confirm that spikes align with zero\u2011back\u2011off periods"
+      ]
+    }
+  ]
+}

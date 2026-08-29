@@ -1,0 +1,31 @@
+{
+  "incident_id": "inc_09_dropped_index",
+  "agent": "code_agent",
+  "summary": "The migration file migrations/004_partition_items_table.sql had a CREATE INDEX statement removed and replaced with a comment indicating the index was dropped.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-CREATE INDEX idx_tenant_status_name ON items(tenant_id, status, name);",
+      "interpretation": "Removal of the index creation suggests the index will no longer exist after migration."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+-- Dropped previous index creation",
+      "interpretation": "A comment was added in place of the index, documenting the change."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-CREATE INDEX idx_tenant_status_name ON items(tenant_id, status, name);\n+-- Dropped previous index creation",
+      "interpretation": "Pattern matches a known index_creation_removed pattern, highlighting the intentional removal of the index."
+    }
+  ]
+}

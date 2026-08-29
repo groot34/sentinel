@@ -1,0 +1,43 @@
+{
+  "incident_id": "inc_06_connection_exhaustion",
+  "agent": "logs_agent",
+  "summary": "The log stream contains a series of warnings about malformed date filters, then a rapid shift to errors indicating the reporting service's connection pool reached its configured limit (10/10) and subsequent requests timed out, producing 500 responses due to QueuePool exhaustion.",
+  "evidence": [
+    {
+      "evidence_id": "EV-LOG-001",
+      "source": "logs",
+      "reference": "logs/application.log:5",
+      "timestamp": "2026-08-28T14:05:00Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:00Z WARN [reporting-service] Invalid date filter provided by user 109: '2026-99-99' -> raising ValueError",
+      "interpretation": "Observational: user supplied an impossible date, service logged a warning and raised ValueError."
+    },
+    {
+      "evidence_id": "EV-LOG-002",
+      "source": "logs",
+      "reference": "logs/application.log:6",
+      "timestamp": "2026-08-28T14:05:01Z",
+      "type": "warning",
+      "excerpt": "2026-08-28T14:05:01Z WARN [reporting-service] Invalid date filter provided by user 110: 'INVALID_DATE' -> raising ValueError",
+      "interpretation": "Observational: another malformed date input, similar warning recorded shortly after the previous one."
+    },
+    {
+      "evidence_id": "EV-LOG-003",
+      "source": "logs",
+      "reference": "logs/application.log:7",
+      "timestamp": "2026-08-28T14:06:00Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:00Z ERROR [reporting-service] Active pool connections: 10/10. Available: 0.",
+      "interpretation": "Observational: connection pool reached its maximum size, no free connections available at this moment."
+    },
+    {
+      "evidence_id": "EV-LOG-004",
+      "source": "logs",
+      "reference": "logs/application.log:8",
+      "timestamp": "2026-08-28T14:06:30Z",
+      "type": "error",
+      "excerpt": "2026-08-28T14:06:30Z ERROR [reporting-service] GET /api/v1/reports 500 INTERNAL_SERVER_ERROR - TimeoutError: QueuePool limit of size 10 overflow 0 reached, connection timed out, timeout 30.00",
+      "interpretation": "Observational: a request failed with 500 due to the pool limit being hit and a timeout while waiting for a connection."
+    }
+  ]
+}

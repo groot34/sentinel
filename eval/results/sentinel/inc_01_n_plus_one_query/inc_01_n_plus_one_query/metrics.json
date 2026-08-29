@@ -1,0 +1,157 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "agent": "metrics_agent",
+  "summary": "Multiple metrics show extreme deviations around 14:10\u201114:15\u202fUTC: latency, DB CPU, query load per request, error rate and active connections spike sharply, request rate first spikes then drops, and several metrics exhibit very strong correlations, indicating a period of intense database stress and degraded service.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 9",
+      "timestamp": "2026-08-28T14:12:00Z",
+      "metric": "latency_p95_ms",
+      "value": 10000.0,
+      "type": "spike",
+      "interpretation": "p95 latency jumps to 10\u202fseconds, far above the ~13.5\u202fms baseline, indicating severe latency degradation."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:10:00Z",
+      "metric": "db_queries_per_req",
+      "value": 250.0,
+      "type": "spike",
+      "interpretation": "Queries per request spikes to 250, far above the ~1.07 baseline, suggesting an unusually heavy query load per request."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "db_cpu_percent",
+      "value": 99.1,
+      "type": "spike",
+      "interpretation": "Database CPU usage reaches 99.1%, near saturation compared to the ~8.6% baseline."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 10",
+      "timestamp": "2026-08-28T14:15:00Z",
+      "metric": "error_rate_pct",
+      "value": 78.1,
+      "type": "spike",
+      "interpretation": "Error rate rises to 78.1%, whereas the baseline is 0%."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 7",
+      "timestamp": "2026-08-28T14:10:00Z",
+      "metric": "active_db_connections",
+      "value": 20.0,
+      "type": "spike",
+      "interpretation": "Active DB connections increase to 20, well above the ~2.33 baseline."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 5",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "req_per_sec",
+      "value": 52.1,
+      "type": "spike",
+      "interpretation": "Requests per second rise to 52.1, modestly above the ~46.4 baseline."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 10",
+      "timestamp": "2026-08-28T14:15:00Z",
+      "metric": "req_per_sec",
+      "value": 35.0,
+      "type": "drop",
+      "interpretation": "Requests per second drop to 35, below the baseline, indicating reduced traffic or throttling."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 10",
+      "timestamp": "2026-08-28T14:15:00Z",
+      "metric": "db_cpu_percent",
+      "value": 99.0,
+      "type": "threshold",
+      "interpretation": "Database CPU exceeds the 90% threshold."
+    },
+    {
+      "evidence_id": "EV-MET-009",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:11:00Z",
+      "metric": "db_cpu_percent",
+      "value": 99.1,
+      "type": "period_change",
+      "interpretation": "DB CPU mean jumps from 8.6% to 84.35% in this window."
+    },
+    {
+      "evidence_id": "EV-MET-010",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 10",
+      "timestamp": "2026-08-28T14:15:00Z",
+      "metric": "error_rate_pct",
+      "value": 78.1,
+      "type": "period_change",
+      "interpretation": "Error rate mean rises from 0% to 34.17% in this period."
+    },
+    {
+      "evidence_id": "EV-MET-011",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+      "metric": "active_db_connections~db_cpu_percent",
+      "value": 0.996675266278448,
+      "type": "correlation",
+      "interpretation": "Active DB connections and DB CPU percent are almost perfectly positively correlated (r\u22480.997)."
+    },
+    {
+      "evidence_id": "EV-MET-012",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+      "metric": "db_queries_per_req~db_cpu_percent",
+      "value": 0.9733594034700669,
+      "type": "correlation",
+      "interpretation": "DB queries per request and DB CPU percent show a strong positive correlation (r\u22480.973)."
+    },
+    {
+      "evidence_id": "EV-MET-013",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+      "metric": "latency_p95_ms~error_rate_pct",
+      "value": 0.9555315012990383,
+      "type": "correlation",
+      "interpretation": "High latency and error rate are strongly positively correlated (r\u22480.956)."
+    },
+    {
+      "evidence_id": "EV-MET-014",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+      "metric": "db_queries_per_req~active_db_connections",
+      "value": 0.9539356054761096,
+      "type": "correlation",
+      "interpretation": "DB queries per request and active connections are strongly positively correlated (r\u22480.954)."
+    },
+    {
+      "evidence_id": "EV-MET-015",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:15:00Z",
+      "metric": "error_rate_pct~req_per_sec",
+      "value": -0.9061195516635708,
+      "type": "correlation",
+      "interpretation": "Error rate and request rate are strongly negatively correlated (r\u2248-0.906)."
+    }
+  ]
+}
