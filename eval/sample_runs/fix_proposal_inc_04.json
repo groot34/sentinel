@@ -1,0 +1,127 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "proposals": [
+    {
+      "proposal_id": "FIX-001",
+      "hypothesis_id": "HYP-001",
+      "incident_id": "inc_04_memory_leak",
+      "status": "PROPOSED",
+      "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+      "summary": "Remove the unbounded global AUDIT_TRACE_REGISTRY and restore streaming processing to eliminate memory growth.",
+      "rationale": "The memory leak is caused by the class\u2011level dictionary AUDIT_TRACE_REGISTRY that retains every uploaded file's raw bytes, causing unbounded memory usage. By eliminating this global mutable collection and processing uploads via a temporary BytesIO stream, the process no longer holds onto large byte objects, preventing RSS growth and OOM kills.",
+      "changes": [
+        {
+          "file": "service/app.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Eliminate the global AUDIT_TRACE_REGISTRY and modify process_upload to use a BytesIO stream instead of storing raw bytes, removing the clear_registry method.",
+          "before": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)\n\n    def clear_registry(self):\n        self.AUDIT_TRACE_REGISTRY.clear()",
+          "after": "    # Removed AUDIT_TRACE_REGISTRY to prevent unbounded memory growth.\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        stream = io.BytesIO(file_bytes)\n        return self._extract_text(stream)"
+        }
+      ],
+      "patch": "PROPOSED PATCH\n--- a/service/app.py\n+++ b/service/app.py\n@@ -4,12 +4,7 @@\n class DocumentProcessor:\n-    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n-\n-    def clear_registry(self):\n-        self.AUDIT_TRACE_REGISTRY.clear()\n+    # Removed AUDIT_TRACE_REGISTRY to prevent unbounded memory growth.\n+\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        stream = io.BytesIO(file_bytes)\n+        return self._extract_text(stream)\n",
+      "expected_effect": "Memory usage will remain stable regardless of upload volume, eliminating the RSS spikes and preventing OOM termination.",
+      "risks": [
+        "If the private method _extract_text is not implemented or behaves differently, upload processing may fail or return incorrect results.",
+        "Removal of clear_registry may affect external code that expects to clear audit data for testing or debugging.",
+        "Changing the API may require updates to callers that relied on the previous return value (length of bytes)."
+      ],
+      "validation_plan": [
+        "Deploy the updated code to a staging environment with a realistic upload workload.",
+        "Monitor process RSS and GC time; they should stay near baseline levels (<100\u202fMB).",
+        "Verify that uploaded documents are still processed correctly by checking output of _extract_text for a sample set.",
+        "Run existing unit and integration tests to ensure no regressions.",
+        "Confirm that no new OOM events appear in logs over a sustained period."
+      ],
+      "rollback_plan": "Revert to the previous version of service/app.py by restoring the original AUDIT_TRACE_REGISTRY definition and process_upload implementation from version control, then redeploy the reverted code.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-MET-001",
+        "EV-MET-002"
+      ]
+    },
+    {
+      "proposal_id": "FIX-002",
+      "hypothesis_id": "HYP-002",
+      "incident_id": "inc_04_memory_leak",
+      "status": "PROPOSED",
+      "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+      "summary": "Remove the unbounded global audit registry and restore streaming processing to eliminate the memory leak.",
+      "rationale": "The memory leak is caused by storing every uploaded file's bytes in a class\u2011level dictionary that grows without bound under high concurrent upload load. By removing the AUDIT_TRACE_REGISTRY and processing uploads via a temporary BytesIO stream, memory usage remains bounded and the OOM condition is prevented.",
+      "changes": [
+        {
+          "file": "service/app.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Eliminate the global AUDIT_TRACE_REGISTRY and replace the upload handling with a streaming approach that does not retain file bytes in memory.",
+          "before": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)\n\n    def clear_registry(self):\n        self.AUDIT_TRACE_REGISTRY.clear()",
+          "after": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        stream = io.BytesIO(file_bytes)\n        return self._extract_text(stream)\n\n    # Audit trace registry removed; implement alternative logging if required"
+        }
+      ],
+      "patch": "--- a/service/app.py\n+++ b/service/app.py\n@@\n-import io\n-from typing import Dict, Any\n-\n-class DocumentProcessor:\n-    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n-\n-    def clear_registry(self):\n-        self.AUDIT_TRACE_REGISTRY.clear()\n+import io\n+from typing import Dict, Any\n+\n+class DocumentProcessor:\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        stream = io.BytesIO(file_bytes)\n+        return self._extract_text(stream)\n+\n+    # Audit trace registry removed; implement alternative logging if required\n+PROPOSED",
+      "expected_effect": "Upload processing no longer retains full file payloads in a growing in\u2011memory dictionary, keeping container memory usage stable even when concurrent uploads spike, thereby preventing OOM kills.",
+      "risks": [
+        "Removal of the audit registry may eliminate existing audit\u2011trail functionality used by downstream monitoring tools",
+        "If other components expect the registry to exist, they may raise AttributeError"
+      ],
+      "validation_plan": [
+        "Deploy the proposed code to a staging environment",
+        "Run a load test simulating 15+ concurrent uploads with typical payload sizes",
+        "Monitor container memory usage; it should stay well below the 1024\u202fMB limit",
+        "Verify that upload processing still returns correct results (e.g., extracted text)",
+        "Check application logs for any errors related to missing audit registry"
+      ],
+      "rollback_plan": "Revert to the previous version of service/app.py that includes the AUDIT_TRACE_REGISTRY and the original process_upload implementation, then redeploy.",
+      "evidence_ids": [
+        "EV-LOG-003",
+        "EV-LOG-004",
+        "EV-MET-001",
+        "EV-MET-003"
+      ]
+    },
+    {
+      "proposal_id": "FIX-003",
+      "hypothesis_id": "HYP-003",
+      "incident_id": "inc_04_memory_leak",
+      "status": "PROPOSED",
+      "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+      "summary": "Remove the global AUDIT_TRACE_REGISTRY and restore streaming processing to eliminate per\u2011request memory bloat.",
+      "rationale": "The memory leak originates from storing the full file bytes in a global dictionary for each upload, preventing garbage collection and causing OOM; reverting to the original BytesIO streaming approach releases memory after each request.",
+      "changes": [
+        {
+          "file": "service/app.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Delete the global audit registry and replace the in\u2011memory byte storage with streaming processing using BytesIO and _extract_text.",
+          "before": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)",
+          "after": "    # Removed global audit trace registry to prevent memory leak\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        stream = io.BytesIO(file_bytes)\n        return self._extract_text(stream)"
+        }
+      ],
+      "patch": "# PROPOSED\n--- a/service/app.py\n+++ b/service/app.py\n@@\n class DocumentProcessor:\n-    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n+    # Removed global audit trace registry to prevent memory leak\n+\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        stream = io.BytesIO(file_bytes)\n+        return self._extract_text(stream)\n",
+      "expected_effect": "Per\u2011request memory usage returns to baseline (~85\u202fMB), GC pause times drop to normal levels, and OOM kills cease under typical load.",
+      "risks": [
+        "If _extract_text fails for certain file formats, processing may error or return incomplete results",
+        "Removal of AUDIT_TRACE_REGISTRY may affect any external audit or debugging tools that relied on it"
+      ],
+      "validation_plan": [
+        "Deploy the change to a staging environment",
+        "Run a synthetic upload workload matching production traffic patterns",
+        "Monitor process RSS, GC time, and container memory limits for at least 30\u202fminutes",
+        "Confirm that no OOM events are logged and that extracted text matches expected output",
+        "Run existing unit/integration tests for DocumentProcessor"
+      ],
+      "rollback_plan": "Revert service/app.py to the original version containing AUDIT_TRACE_REGISTRY and the len(file_bytes) return, and redeploy the previous container image.",
+      "evidence_ids": [
+        "EV-CODE-004",
+        "EV-LOG-003",
+        "EV-MET-002",
+        "EV-MET-005"
+      ]
+    }
+  ],
+  "validation_errors": {},
+  "skipped_hypotheses": []
+}

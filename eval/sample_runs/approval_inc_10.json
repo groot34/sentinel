@@ -1,0 +1,41 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "approval_records": [
+    {
+      "proposal_id": "FIX-001",
+      "status": "APPROVED",
+      "decision": "approved",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:52:20.752406+00:00"
+    },
+    {
+      "proposal_id": "FIX-002",
+      "status": "REJECTED",
+      "decision": "rejected",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:52:20.754923+00:00",
+      "notes": "Explicit rejection."
+    },
+    {
+      "proposal_id": "FIX-003",
+      "status": "REJECTED",
+      "decision": "rejected",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:52:20.756941+00:00",
+      "notes": "Explicit rejection."
+    },
+    {
+      "proposal_id": "FIX-004",
+      "status": "REJECTED",
+      "decision": "rejected",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:52:20.758930+00:00",
+      "notes": "Explicit rejection."
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "approved": 1,
+    "rejected": 3
+  }
+}

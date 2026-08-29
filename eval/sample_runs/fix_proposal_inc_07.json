@@ -1,0 +1,148 @@
+{
+  "incident_id": "inc_07_retry_storm",
+  "proposals": [
+    {
+      "proposal_id": "FIX-001",
+      "hypothesis_id": "HYP-001",
+      "incident_id": "inc_07_retry_storm",
+      "status": "PROPOSED",
+      "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+      "summary": "Restore safe retry limits and backoff to prevent request storm.",
+      "rationale": "The root cause was the increase of MAX_RETRIES to 10 and removal of backoff, which caused immediate rapid retries and overload; reverting to the original limits (2 retries with a 0.5\u2011second backoff) throttles retry attempts and eliminates the stampede.",
+      "changes": [
+        {
+          "file": "service/app.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Revert retry constants to safe defaults",
+          "before": "    MAX_RETRIES = 10\n    BACKOFF_BASE_SECONDS = 0.0",
+          "after": "    MAX_RETRIES = 2\n    BACKOFF_BASE_SECONDS = 0.5"
+        },
+        {
+          "file": "service/payment_client.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Revert retry constants in the original client file",
+          "before": "    MAX_RETRIES = 10\n    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter",
+          "after": "    MAX_RETRIES = 2\n    BACKOFF_BASE_SECONDS = 0.5  # Restores backoff"
+        }
+      ],
+      "patch": "PROPOSED PATCH\ndiff --git a/service/app.py b/service/app.py\nindex 0000000..1111111 100644\n--- a/service/app.py\n+++ b/service/app.py\n@@ -1,0 +1,0 @@\n-    MAX_RETRIES = 10\n-    BACKOFF_BASE_SECONDS = 0.0\n+    MAX_RETRIES = 2\n+    BACKOFF_BASE_SECONDS = 0.5\n\ndiff --git a/service/payment_client.py b/service/payment_client.py\nindex 2222222..3333333 100644\n--- a/service/payment_client.py\n+++ b/service/payment_client.py\n@@ -1,0 +1,0 @@\n-    MAX_RETRIES = 10\n-    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter\n+    MAX_RETRIES = 2\n+    BACKOFF_BASE_SECONDS = 0.5  # Restores backoff\n",
+      "expected_effect": "Outbound request rate returns to baseline (~50 req/s) and downstream 503/429 errors drop, eliminating the retry\u2011induced overload.",
+      "risks": [
+        "Reduced tolerance for transient failures may increase chance of failed charges if downstream remains unavailable",
+        "Added backoff introduces slight latency for successful retries"
+      ],
+      "validation_plan": [
+        "Deploy the proposed change to a staging environment",
+        "Trigger a simulated 503 response from the mock gateway and verify that at most 2 retries occur with ~0.5\u202fs delay between attempts (check logs)",
+        "Measure outbound request rate; it should remain near the historical baseline (~50\u202freq/s)",
+        "Run the full payment integration test suite to ensure successful charges are still processed",
+        "Confirm that metrics for 503 and 429 responses drop to pre\u2011incident levels"
+      ],
+      "rollback_plan": "If regressions are observed, revert the MAX_RETRIES and BACKOFF_BASE_SECONDS constants back to 10 and 0.0 respectively in both service/app.py and service/payment_client.py, then redeploy the previous version.",
+      "evidence_ids": [
+        "EV-CODE-001",
+        "EV-CODE-002",
+        "EV-CODE-003",
+        "EV-CODE-004",
+        "EV-CODE-005",
+        "EV-CODE-006",
+        "EV-LOG-002",
+        "EV-LOG-004",
+        "EV-LOG-005",
+        "EV-LOG-006",
+        "EV-MET-001"
+      ]
+    },
+    {
+      "proposal_id": "FIX-002",
+      "hypothesis_id": "HYP-002",
+      "incident_id": "inc_07_retry_storm",
+      "status": "PROPOSED",
+      "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+      "summary": "Reduce retry count and introduce backoff to prevent retry\u2011storm amplification.",
+      "rationale": "The confirmed root cause is an overly aggressive retry configuration (high MAX_RETRIES and zero backoff) that caused rapid repeated calls to the downstream gateway, overwhelming it and triggering rate\u2011limit (429) and service\u2011unavailable (503) responses. Lowering MAX_RETRIES and adding a backoff interval will throttle retry attempts, breaking the feedback loop and preventing the stampede while still allowing reasonable recovery from transient failures.",
+      "changes": [
+        {
+          "file": "service/app.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Limit retry attempts and add exponential backoff with jitter to mitigate retry storm.",
+          "before": "    MAX_RETRIES = 10\n    BACKOFF_BASE_SECONDS = 0.0",
+          "after": "    MAX_RETRIES = 3\n    BACKOFF_BASE_SECONDS = 1.0  # Add exponential backoff with jitter"
+        }
+      ],
+      "patch": "PROPOSED PATCH\n--- a/service/app.py\n+++ b/service/app.py\n@@\n-    MAX_RETRIES = 10\n-    BACKOFF_BASE_SECONDS = 0.0\n+    MAX_RETRIES = 3\n+    BACKOFF_BASE_SECONDS = 1.0  # Add exponential backoff with jitter\n",
+      "expected_effect": "Retry loops will back off, reducing outbound request spikes; gateway error rates (429/503) should drop markedly and overall system stability improve.",
+      "risks": [
+        "Increased latency for genuine transient failures due to backoff delays",
+        "Potential for legitimate retries to be exhausted earlier, possibly leading to occasional failed charges"
+      ],
+      "validation_plan": [
+        "Deploy the change to a staging environment with traffic replay matching the incident pattern",
+        "Monitor outbound request rate, ensuring peak calls per second stay near baseline (<100 rps)",
+        "Verify HTTP 429 and 503 percentages return to normal (<1%) after retries",
+        "Run integration tests to confirm successful charge flow within acceptable latency",
+        "Confirm no new errors appear in application logs"
+      ],
+      "rollback_plan": "Revert the modified constants in service/app.py to the original values (MAX_RETRIES = 10, BACKOFF_BASE_SECONDS = 0.0) and redeploy the previous container image.",
+      "evidence_ids": [
+        "EV-LOG-001",
+        "EV-LOG-002",
+        "EV-LOG-003",
+        "EV-MET-002",
+        "EV-MET-003",
+        "EV-MET-007"
+      ]
+    },
+    {
+      "proposal_id": "FIX-003",
+      "hypothesis_id": "HYP-003",
+      "incident_id": "inc_07_retry_storm",
+      "status": "PROPOSED",
+      "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+      "summary": "Reduce the maximum retry count and re\u2011introduce a back\u2011off delay to prevent synchronized retry storms.",
+      "rationale": "The confirmed root cause is the zero back\u2011off and high MAX_RETRIES values that cause all instances to retry immediately and in lockstep, generating a burst of outbound calls; restoring a modest retry limit and a non\u2011zero back\u2011off with jitter spreads retries over time and limits the total number of attempts, eliminating the stampede while still allowing transient failures to be retried.",
+      "changes": [
+        {
+          "file": "service/payment_client.py",
+          "start_line": null,
+          "end_line": null,
+          "description": "Set safe retry limits and add back\u2011off delay with jitter.",
+          "before": "    MAX_RETRIES = 10\n    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter",
+          "after": "    MAX_RETRIES = 3\n    BACKOFF_BASE_SECONDS = 0.5  # Backoff with jitter"
+        }
+      ],
+      "patch": "PROPOSED PATCH:\ndiff --git a/service/payment_client.py b/service/payment_client.py\nindex 2b3c4d5..6e7f8a9 100644\n--- a/service/payment_client.py\n+++ b/service/payment_client.py\n@@ -5,4 +5,4 @@ class PaymentClient:\n-    MAX_RETRIES = 10\n-    BACKOFF_BASE_SECONDS = 0.0  # Immediate retries without jitter\n+    MAX_RETRIES = 3\n+    BACKOFF_BASE_SECONDS = 0.5  # Backoff with jitter\n",
+      "expected_effect": "Outbound request rate returns to baseline levels (~50\u202freq/s), ingress traffic remains stable, and error spikes (429/503) drop to normal percentages.",
+      "risks": [
+        "Reduced number of retry attempts may cause some transient failures to surface earlier",
+        "Added latency due to back\u2011off may slightly increase overall request latency"
+      ],
+      "validation_plan": [
+        "Deploy the proposed change to a staging environment with the same traffic pattern",
+        "Monitor metrics/metrics.csv for outbound call rate, 429/503 percentages, and correlation values",
+        "Verify that ingress request rate stays unchanged while outbound spikes disappear",
+        "Run integration tests that simulate transient 503 responses and ensure retries respect the new limits and back\u2011off"
+      ],
+      "rollback_plan": "Revert the constants in service/payment_client.py to MAX_RETRIES = 10 and BACKOFF_BASE_SECONDS = 0.0, redeploy the previous version, and confirm metrics return to pre\u2011fix state.",
+      "evidence_ids": [
+        "EV-CODE-002",
+        "EV-CODE-006",
+        "EV-MET-001",
+        "EV-MET-004",
+        "EV-MET-007"
+      ]
+    }
+  ],
+  "validation_errors": {
+    "FIX-001": [
+      "Proposed change references file 'service/payment_client.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_07_retry_storm."
+    ],
+    "FIX-003": [
+      "Proposed change references file 'service/payment_client.py' which does not exist under incident directory D:\\Assignemt\\sentinel-incident-investigator\\incidents\\inc_07_retry_storm."
+    ]
+  },
+  "skipped_hypotheses": []
+}

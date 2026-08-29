@@ -57,10 +57,34 @@ Orchestrator
     Root Cause Report (Confirmed Evidence-Backed Report)
             │
             ▼
-    Fix Proposal Agent (NOT IMPLEMENTED)
+    Fix Proposal Agent (IMPLEMENTED)
+    ├─ ONE Groq structured call per CONFIRMED hypothesis
+    ├─ Proposal validated by deterministic fix_tools.py
+    ├─ Status: PROPOSED (never auto-applied)
+    └─ Patch: unified diff, labelled PROPOSED
             │
             ▼
-    Human Approval Gate (NOT IMPLEMENTED)
+    Proposal Validation (IMPLEMENTED — agents/fix_tools.py)
+    ├─ Hypothesis eligibility check (CONFIRMED only)
+    ├─ Evidence ID existence check
+    ├─ File reference existence check
+    ├─ Source location validity check
+    ├─ Patch safety check (no destructive ops)
+    └─ Applied-claim detection
+            │
+            ▼
+    Human Approval Gate (IMPLEMENTED — agents/approval_gate.py)
+    ├─ State: PROPOSED → PENDING_APPROVAL → APPROVED | REJECTED
+    ├─ Default: REJECTED (non-interactive auto-rejects)
+    ├─ Only explicit "y/yes" → APPROVED
+    └─ Approval records decision ONLY — patch NOT applied
+            │
+            ▼
+    APPROVED / REJECTED
+            │
+            ▼
+    [NO AUTO-APPLY IN THIS MILESTONE]
+    Actual patch application is gated to a later stage (Orchestrator)
 ```
 
 ## 6. Evaluation
@@ -70,7 +94,7 @@ Sentinel is evaluated against a fair baseline across 10 canonical synthetic prod
 | Component | Status | Accuracy (Root Cause) | Verification Score | Mean Latency | Notes |
 |---|---|:---:|:---:|:---:|---|
 | **Baseline Investigator** | **MEASURED** | **10/10 (100%)** | **0%** | **15.98s** | Single-shot Groq model (`openai/gpt-oss-120b`). Guesses root cause without executable verification. |
-| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED. Code Agent = IMPLEMENTED. Hypothesis Engine = IMPLEMENTED. Verification Agent = IMPLEMENTED.** Fix Proposal Agent, Human Approval Gate, and Orchestrator are not implemented. |
+| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED. Code Agent = IMPLEMENTED. Hypothesis Engine = IMPLEMENTED. Verification Agent = IMPLEMENTED. Fix Proposal Agent = IMPLEMENTED. Human Approval Gate = IMPLEMENTED.** Orchestrator and final benchmark are not yet implemented. |
 
 **Fairness lock**: Baseline and Sentinel are benchmarked on the identical 10 incident bundles using the same Groq model (`openai/gpt-oss-120b`), temperature (`0.0`), and equivalent available evidence.
 

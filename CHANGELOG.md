@@ -2,6 +2,60 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.9.0] - 2026-08-29
+
+### Added
+- **Fix Proposal Agent (`agents/fix_proposal_agent.py`)**:
+  - Consumes CONFIRMED hypotheses, verification results, and evidence bundles.
+  - Reads incident `service/` source and `git_diff.patch` read-only; never modifies them.
+  - Generates exactly ONE Groq structured-generation call per CONFIRMED hypothesis (`openai/gpt-oss-120b` via `core.llm`). REJECTED and INCONCLUSIVE hypotheses are skipped entirely (zero Groq calls for them).
+  - Returns structured proposals with `proposal_id` (FIX-NNN), `hypothesis_id`, `status: PROPOSED`, mandatory `human_approval_notice`, `changes[]`, `patch` (unified diff, PROPOSED label), `risks[]`, `validation_plan[]`, `rollback_plan`, and `evidence_ids`.
+  - Normalises/force-sets all immutable fields (`status`, `human_approval_notice`, `proposal_id`, `hypothesis_id`) regardless of LLM output.
+  - Multi-hypothesis support: Incident 10 (cascade) generated 4 distinct proposals, each linked to its own confirmed hypothesis.
+  - CLI: `python agents/fix_proposal_agent.py <incident_dir> --hypotheses <hyp.json> --verification <ver.json> --logs --metrics --code --out <path>`.
+  - Strict isolation: never reads `ground_truth.md`, `eval/results_baseline.csv`, or any baseline artifacts.
+  - **NEVER automatically applies, commits, or deploys any patch.**
+- **Deterministic Proposal Validator (`agents/fix_tools.py`)**:
+  - Zero LLM calls. Read-only.
+  - 10 individual safety checks: `check_approval_notice_present`, `check_status_is_proposed`, `check_hypothesis_exists`, `check_hypothesis_eligible` (only CONFIRMED), `check_evidence_ids_exist`, `check_referenced_files_exist`, `check_source_locations_valid`, `check_patch_targets_allowed_files` (only `service/` prefix), `check_patch_not_destructive` (blocks subprocess, os.system, eval, git commands, DROP TABLE, rm -rf, etc.), `check_proposal_not_claiming_applied`.
+  - Master validator `validate_proposal()` runs all checks and returns `(is_valid, [errors])`.
+  - Helpers: `collect_all_evidence_ids`, `filter_confirmed_hypotheses`.
+  - Schema validators: `validate_proposal_schema`, `validate_approval_record_schema`.
+- **Human Approval Gate (`agents/approval_gate.py`)**:
+  - State machine: `PROPOSED → PENDING_APPROVAL → APPROVED | REJECTED`.
+  - Default is always `REJECTED`. Non-interactive mode (no TTY) auto-rejects.
+  - Only explicit affirmative (`y`, `Y`, `yes`, `YES`) produces `APPROVED`.
+  - EOF, empty input, whitespace, invalid input, `KeyboardInterrupt` all produce `REJECTED`.
+  - Approval does NOT apply the patch. It only records the human decision.
+  - No source files are modified. No git state is modified.
+  - `review_all()` supports injecting answers per `proposal_id` for testing and non-interactive flows.
+  - Generates structured `ApprovalRecord` validated against `schemas/approval_schema.json`.
+- **Schemas**:
+  - `schemas/fix_proposal_schema.json` — full fix proposal contract with required fields, `status: PROPOSED` enum constraint, mandatory `human_approval_notice` enum, `changes[]` items, `evidence_ids`, `patch`, `risks`, `validation_plan`, `rollback_plan`. Only `service/` file references permitted by validator.
+  - `schemas/approval_schema.json` — approval record contract: `proposal_id`, `status: APPROVED|REJECTED`, `decision`, `approved_by`, `timestamp`.
+- **Unit tests** (all mocked Groq; zero real API calls in tests):
+  - `tests/test_fix_tools.py` (48 tests): all 10 individual safety checks, master validator, `collect_all_evidence_ids`, `filter_confirmed_hypotheses`.
+  - `tests/test_approval_gate.py` (22 tests): all answer variants (y/Y/yes/YES/n/empty/invalid/whitespace), non-interactive default-reject, approval record schema, source-file immutability, `review_all` mixed-answer, timestamp presence.
+  - `tests/test_fix_proposal_agent.py` (21 tests): confirmed/rejected/inconclusive routing, Groq call count, no direct Groq imports, `core.llm` usage, no hardcoded incident IDs, source file immutability, proposal status/notice enforcement, bad-LLM-output handling, validation error recording.
+  - **Total tests: 261/261 passing (173 prior + 88 new).**
+- **Live Groq manual runs** (real Groq for proposal generation, non-interactive gate):
+  - `eval/sample_runs/fix_proposal_inc_01.json` — 0 proposals (all hypotheses REJECTED by verification)
+  - `eval/sample_runs/fix_proposal_inc_04.json` — 3 proposals (memory leak: remove `AUDIT_TRACE_REGISTRY`, restore streaming)
+  - `eval/sample_runs/fix_proposal_inc_07.json` — 3 proposals (retry storm: restore `MAX_RETRIES=2`, `BACKOFF=0.5s`)
+  - `eval/sample_runs/fix_proposal_inc_10.json` — 4 proposals (cascade: index migration, mock-DB index, conn context-manager, pool-error handling)
+  - `eval/sample_runs/approval_inc_04.json` — all 3 proposals REJECTED (human decision)
+  - `eval/sample_runs/approval_inc_07.json` — FIX-001 APPROVED, FIX-002/03 REJECTED
+  - `eval/sample_runs/approval_inc_10.json` — FIX-001 APPROVED, FIX-002/03/04 REJECTED
+  - **Safety verification: all incident source files confirmed unchanged after every approval gate run.**
+- **Run script (`run_fix_proposals.py`)**:
+  - End-to-end: loads existing verification outputs → FixProposalAgent → ApprovalGate → saves sample runs.
+  - Snapshot-verifies service file hashes before/after gate execution.
+
+### Safety contract (this milestone)
+- Approval records ONLY a human decision. No patch application occurs.
+- Orchestrator pipeline integration is NOT implemented (Milestone 9).
+- Final Sentinel benchmark is NOT run (Milestone 10).
+
 ## [0.8.0] - 2026-08-29
 
 ### Added

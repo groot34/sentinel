@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApprovalRecord",
+  "description": "Human approval gate record. Approval does NOT apply the patch; it only records the human decision.",
+  "type": "object",
+  "required": [
+    "proposal_id",
+    "status",
+    "decision",
+    "approved_by",
+    "timestamp"
+  ],
+  "properties": {
+    "proposal_id": {
+      "type": "string",
+      "pattern": "^FIX-[0-9]{3}$",
+      "description": "The proposal ID this record belongs to."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["APPROVED", "REJECTED"],
+      "description": "Final gate status. A proposal that has not passed the gate has no approval record."
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approved", "rejected"],
+      "description": "Machine-readable decision string."
+    },
+    "approved_by": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identity of the approver. Use 'human' if no user identity is available."
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp of the decision."
+    },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "Optional human notes recorded at approval/rejection time."
+    }
+  },
+  "additionalProperties": false
+}

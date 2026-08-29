@@ -1,0 +1,34 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "approval_records": [
+    {
+      "proposal_id": "FIX-001",
+      "status": "REJECTED",
+      "decision": "rejected",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:48:04.265784+00:00",
+      "notes": "Explicit rejection."
+    },
+    {
+      "proposal_id": "FIX-002",
+      "status": "REJECTED",
+      "decision": "rejected",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:48:04.265784+00:00",
+      "notes": "Explicit rejection."
+    },
+    {
+      "proposal_id": "FIX-003",
+      "status": "REJECTED",
+      "decision": "rejected",
+      "approved_by": "human",
+      "timestamp": "2026-08-29T09:48:04.265784+00:00",
+      "notes": "No input provided \u2014 defaulting to rejected."
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "approved": 0,
+    "rejected": 3
+  }
+}

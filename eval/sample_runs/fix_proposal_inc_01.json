@@ -1,0 +1,20 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "proposals": [],
+  "validation_errors": {},
+  "skipped_hypotheses": [
+    {
+      "hypothesis_id": "HYP-001",
+      "verdict": "REJECTED"
+    },
+    {
+      "hypothesis_id": "HYP-002",
+      "verdict": "REJECTED"
+    },
+    {
+      "hypothesis_id": "HYP-003",
+      "verdict": "REJECTED"
+    }
+  ],
+  "message": "No CONFIRMED hypotheses found. No fix proposals generated."
+}
