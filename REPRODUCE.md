@@ -154,3 +154,37 @@ python run_hypothesis_verification.py
 ```bash
 python -m eval.run_eval --mode advanced
 ```
+
+
+## Running the Sentinel Orchestrator (Full Pipeline)
+
+```bash
+# Run the complete Sentinel investigation pipeline on one incident.
+# Non-interactive mode: approval gate auto-rejects all proposals.
+# --sleep 3 respects the free-tier RPM rate limit between LLM-heavy stages.
+# --cache-dir enables resumability: completed stages are reused on reruns.
+
+python -m agents.orchestrator incidents/inc_01_n_plus_one_query \
+  --non-interactive --sleep 3 \
+  --cache-dir eval/results/sentinel \
+  --output eval/sample_runs/orchestrator/orchestrator_inc_01.json
+
+# Re-running after a rate limit: cached stages are reused automatically.
+# Only stages that failed (or were never run) are re-attempted.
+
+python -m agents.orchestrator incidents/inc_04_memory_leak \
+  --non-interactive --sleep 3 \
+  --cache-dir eval/results/sentinel \
+  --output eval/sample_runs/orchestrator/orchestrator_inc_04.json
+```
+
+> **Rate limit note:** The free-tier 200k tokens/day (TPD) limit is easily reached when running 4
+> large incidents back-to-back. Use `--cache-dir` to avoid re-running completed stages. If the fix-
+> proposal stage fails with a TPD error, wait for the daily reset and rerun — all earlier stages
+> will be restored from cache at zero token cost.
+
+## Running the Final Comparative Benchmark (Milestone 10 — Not Yet Run)
+
+```bash
+python -m eval.run_eval --mode advanced
+```

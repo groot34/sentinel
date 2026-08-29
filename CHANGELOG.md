@@ -2,6 +2,36 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.10.0] - 2026-08-29
+
+### Added
+- **Sentinel Orchestrator (`agents/orchestrator.py`)**:
+  - Full end-to-end pipeline coordinator: Logs → Metrics → Code → Evidence Fusion → Hypothesis Engine → Verification → Fix Proposal → Human Approval → Final Result.
+  - Makes **zero** direct LLM calls. All reasoning delegated to specialist agents.
+  - Stage-level output caching under `eval/results/sentinel/<incident_id>/` (`logs.json`, `metrics.json`, `code.json`, `hypotheses.json`, `verification.json`). Cached stage outputs are validated (incident_id must match) before reuse — stale/mismatched cache is silently rejected and the stage re-runs.
+  - Structured final result conforming to `schemas/orchestrator_result_schema.json` with `pipeline_status` ∈ {COMPLETED, PARTIAL, FAILED}, `stages` dict (each with `status`, `llm_calls`, `cache_hit`, `error`), `summary`, and `llm_call_count`.
+  - All failures surface as structured stage errors — never silent.
+  - Non-interactive approval gate (default): all proposals auto-REJECTED unless explicit "y/yes".
+  - `--sleep N` flag for rate-limit-aware execution.
+  - CLI: `python -m agents.orchestrator <incident_dir> [--non-interactive] [--sleep N] [--cache-dir DIR] [--output PATH]`.
+  - Strict isolation: never reads `ground_truth.md`, `eval/results_baseline.csv`, or baseline results.
+  - No subprocess / shell execution. No patch application.
+- **Result Schema (`schemas/orchestrator_result_schema.json`)**: Full investigation result contract with `pipeline_status`, `stages` map, `summary`, `llm_call_count`, mandatory `human_approval_notice`.
+- **Unit tests (`tests/test_orchestrator.py`)**: 28 tests covering stage ordering, evidence fusion, ground-truth/baseline isolation, zero direct LLM calls, cache reuse, cache invalidation, stage failure recording, approval defaults, source file immutability, schema validation, and module importability.
+- **Total test suite: 289/289 passing.**
+- **Live manual runs**:
+  - `eval/sample_runs/orchestrator/orchestrator_inc_01.json` — COMPLETED: 5 LLM calls, 1 confirmed hypothesis, 1 proposal, rejected by gate. Cache populated.
+  - `eval/sample_runs/orchestrator/orchestrator_inc_04.json` — COMPLETED: 8 LLM calls, 4 confirmed hypotheses, 4 proposals, all rejected by gate. Cache populated.
+  - `eval/sample_runs/orchestrator/orchestrator_inc_07.json` — PARTIAL: 0 LLM calls (all stages reused from cache); fix-proposal stage failed due to free-tier 200k TPD limit. Rate-limit error recorded. Evidence, hypothesis, and verification stages cached and reused correctly.
+  - `eval/sample_runs/orchestrator/orchestrator_inc_10.json` — PARTIAL: 0 LLM calls (all stages reused from cache); fix-proposal stage failed due to TPD limit. Same.
+  - Fix proposals for inc_07 and inc_10 are available in milestone 8 sample runs (`eval/sample_runs/fix_proposal_inc_07.json`, `eval/sample_runs/fix_proposal_inc_10.json`).
+  - **No source files modified in any run. Verified via `git diff -- incidents/`.**
+
+### Notes
+- Orchestrator LLM call budget: 0 (self) + 3 (evidence agents) + 1 (hypothesis) + N (fix proposals, one per CONFIRMED hypothesis) = 4–7 typical.
+- Free-tier TPD (200k tokens/day) is exhausted by running the full pipeline on 4 large incidents in one day. The cache makes reruns cheap (0 Groq calls for completed stages).
+- Final comparative benchmark (Baseline vs Sentinel across all 10 incidents) is **not yet run** — that is Milestone 10.
+
 ## [0.9.0] - 2026-08-29
 
 ### Added

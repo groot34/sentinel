@@ -1,0 +1,976 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "pipeline_status": "PARTIAL",
+  "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+  "llm_call_count": 0,
+  "stages": {
+    "logs": {
+      "status": "REUSED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "agent": "logs_agent",
+        "summary": "Multiple warnings and errors observed between 14:04 and 14:07, including transient disk pressure, query latency spikes, client retries, DB connection\u2011pool saturation, health\u2011check timeouts, gateway timeouts and pod termination, indicating escalating resource pressure and cascading failures.",
+        "evidence": [
+          {
+            "evidence_id": "EV-LOG-001",
+            "source": "logs",
+            "reference": "logs/application.log:8",
+            "timestamp": "2026-08-28T14:05:30Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:05:30Z ERROR [ledger-service] [db-pool] Connection pool saturated: 15/15 connections held by long-running sequential scans",
+            "interpretation": "DB connection pool fully utilized by long\u2011running scans, showing resource contention."
+          },
+          {
+            "evidence_id": "EV-LOG-002",
+            "source": "logs",
+            "reference": "logs/application.log:9",
+            "timestamp": "2026-08-28T14:06:00Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:06:00Z ERROR [ledger-service] GET /api/v1/health 500 INTERNAL_SERVER_ERROR - Healthcheck failed to acquire DB connection within 500ms",
+            "interpretation": "Health endpoint could not obtain a DB connection quickly, reflecting pool pressure."
+          },
+          {
+            "evidence_id": "EV-LOG-003",
+            "source": "logs",
+            "reference": "logs/application.log:11",
+            "timestamp": "2026-08-28T14:06:30Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:06:30Z FATAL [k8s] Readiness probe failed 3 consecutive times. Kubernetes killing pod ledger-service-67b8d-x9q42",
+            "interpretation": "Kubernetes marked the pod unready and terminated it after repeated probe failures."
+          },
+          {
+            "evidence_id": "EV-LOG-004",
+            "source": "logs",
+            "reference": "logs/application.log:12",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:07:00Z ERROR [ingress] 502 BAD_GATEWAY: No live upstream backend pods available for ledger-service",
+            "interpretation": "Ingress reported no healthy backend pods, likely a consequence of the pod termination."
+          },
+          {
+            "evidence_id": "EV-LOG-005",
+            "source": "logs",
+            "reference": "logs/application.log:5",
+            "timestamp": "2026-08-28T14:04:45Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:04:45Z WARN [ledger-service] [db] Query 'SELECT * FROM ledger_entries WHERE account_id = ? ORDER BY entry_date DESC' query time jumped to 1850ms (Seq Scan on 5M rows)",
+            "interpretation": "Database query latency spiked, indicating heavy scanning workload."
+          },
+          {
+            "evidence_id": "EV-LOG-006",
+            "source": "logs",
+            "reference": "logs/application.log:6",
+            "timestamp": "2026-08-28T14:05:00Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:05:00Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 1",
+            "interpretation": "Client observed a timeout and initiated the first retry."
+          },
+          {
+            "evidence_id": "EV-LOG-007",
+            "source": "logs",
+            "reference": "logs/application.log:7",
+            "timestamp": "2026-08-28T14:05:01Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:05:01Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 2",
+            "interpretation": "A second retry was triggered shortly after the first, showing repeated timeouts."
+          },
+          {
+            "evidence_id": "EV-LOG-008",
+            "source": "logs",
+            "reference": "logs/application.log:4",
+            "timestamp": "2026-08-28T14:04:15Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:04:15Z WARN [ledger-service] [k8s-autoscaler] Worker node 4 reported transient disk pressure event - distractor",
+            "interpretation": "Node reported transient disk pressure, a potential I/O stress indicator."
+          },
+          {
+            "evidence_id": "EV-LOG-009",
+            "source": "logs",
+            "reference": "logs/application.log:10",
+            "timestamp": "2026-08-28T14:06:15Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:06:15Z ERROR [ledger-service] GET /api/v1/accounts/10293/balance 504 GATEWAY_TIMEOUT",
+            "interpretation": "Client request timed out, likely due to underlying DB latency or pool saturation."
+          }
+        ]
+      },
+      "cache_hit": true
+    },
+    "metrics": {
+      "status": "REUSED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "agent": "metrics_agent",
+        "summary": "Several metrics exhibit simultaneous extreme deviations at 2026-08-28T14:07:00Z, including query latency, client retries, error rate, and pod readiness failures, with a preceding rise in active DB connections. The error rate surpasses the 90% threshold and shows a large period change. High positive correlations among these metrics indicate they moved together during the observed window.",
+        "evidence": [
+          {
+            "evidence_id": "EV-MET-001",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "ledger_query_duration_ms",
+            "value": 10000.0,
+            "type": "spike",
+            "interpretation": "ledger_query_duration_ms spiked to 10000\u202fms, far above its baseline mean of ~3.5\u202fms."
+          },
+          {
+            "evidence_id": "EV-MET-002",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "client_retries_sec",
+            "value": 120.0,
+            "type": "spike",
+            "interpretation": "client_retries_sec jumped to 120\u202fseconds, a dramatic increase from a baseline of 0\u202fs."
+          },
+          {
+            "evidence_id": "EV-MET-003",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "error_rate_pct",
+            "value": 100.0,
+            "type": "spike",
+            "interpretation": "error_rate_pct spiked to 100\u202f%, indicating total failures during the sample."
+          },
+          {
+            "evidence_id": "EV-MET-004",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 6",
+            "timestamp": "2026-08-28T14:05:30Z",
+            "metric": "active_db_conns",
+            "value": 15.0,
+            "type": "spike",
+            "interpretation": "active_db_conns rose to 15, well above its baseline mean of ~2.3 connections."
+          },
+          {
+            "evidence_id": "EV-MET-005",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "pod_readiness_failures",
+            "value": 5.0,
+            "type": "spike",
+            "interpretation": "pod_readiness_failures increased to 5 failures, whereas the baseline is 0."
+          },
+          {
+            "evidence_id": "EV-MET-006",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "error_rate_pct",
+            "value": 100.0,
+            "type": "threshold",
+            "interpretation": "error_rate_pct reached 100\u202f%, exceeding the defined 90\u202f% threshold."
+          },
+          {
+            "evidence_id": "EV-MET-007",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "error_rate_pct",
+            "value": 100.0,
+            "type": "period_change",
+            "interpretation": "error_rate_pct shifted from a baseline mean of 0\u202f% to an average of 47\u202f% in the period, a delta of 47\u202f%."
+          },
+          {
+            "evidence_id": "EV-MET-008",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv",
+            "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:07:00Z",
+            "metric": "pod_readiness_failures~error_rate_pct",
+            "value": 0.997117889419821,
+            "type": "correlation",
+            "interpretation": "pod readiness failures and error rate are almost perfectly positively correlated (Pearson r\u22480.997) over the 7\u2011sample window."
+          }
+        ]
+      },
+      "cache_hit": true
+    },
+    "code": {
+      "status": "REUSED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "agent": "code_agent",
+        "summary": "Observed a connection\u2011acquire method that increments active connections without a guaranteed release, and a migration change that adds a comment before a DROP INDEX statement without altering the actual SQL command.",
+        "evidence": [
+          {
+            "evidence_id": "EV-CODE-001",
+            "source": "code",
+            "reference": "service/app.py:9-13",
+            "type": "suspicious_pattern",
+            "excerpt": "    def acquire(self):\n        if self.active_conns >= self.max_conns:\n            raise TimeoutError(\"DB Pool Full\")\n        self.active_conns += 1\n        return self",
+            "interpretation": "The acquire method raises an error when the pool is full and increments active_conns, but there is no explicit release path shown, which may affect connection lifecycle."
+          },
+          {
+            "evidence_id": "EV-CODE-002",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "removed_code",
+            "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+            "interpretation": "The original migration line that drops the index was removed in the diff, indicating a change to the migration script."
+          },
+          {
+            "evidence_id": "EV-CODE-003",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "added_code",
+            "excerpt": "+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+            "interpretation": "A comment line was added before the DROP INDEX statement; the SQL command itself remains unchanged."
+          },
+          {
+            "evidence_id": "EV-CODE-004",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "changed_config",
+            "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;\n+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+            "interpretation": "The migration file was edited to include a descriptive comment, which does not modify the operational effect of the DROP INDEX command."
+          }
+        ]
+      },
+      "cache_hit": true
+    },
+    "evidence_fusion": {
+      "status": "SUCCEEDED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "evidence": [
+          {
+            "evidence_id": "EV-LOG-001",
+            "source": "logs",
+            "reference": "logs/application.log:8",
+            "timestamp": "2026-08-28T14:05:30Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:05:30Z ERROR [ledger-service] [db-pool] Connection pool saturated: 15/15 connections held by long-running sequential scans",
+            "interpretation": "DB connection pool fully utilized by long\u2011running scans, showing resource contention."
+          },
+          {
+            "evidence_id": "EV-LOG-002",
+            "source": "logs",
+            "reference": "logs/application.log:9",
+            "timestamp": "2026-08-28T14:06:00Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:06:00Z ERROR [ledger-service] GET /api/v1/health 500 INTERNAL_SERVER_ERROR - Healthcheck failed to acquire DB connection within 500ms",
+            "interpretation": "Health endpoint could not obtain a DB connection quickly, reflecting pool pressure."
+          },
+          {
+            "evidence_id": "EV-LOG-003",
+            "source": "logs",
+            "reference": "logs/application.log:11",
+            "timestamp": "2026-08-28T14:06:30Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:06:30Z FATAL [k8s] Readiness probe failed 3 consecutive times. Kubernetes killing pod ledger-service-67b8d-x9q42",
+            "interpretation": "Kubernetes marked the pod unready and terminated it after repeated probe failures."
+          },
+          {
+            "evidence_id": "EV-LOG-004",
+            "source": "logs",
+            "reference": "logs/application.log:12",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:07:00Z ERROR [ingress] 502 BAD_GATEWAY: No live upstream backend pods available for ledger-service",
+            "interpretation": "Ingress reported no healthy backend pods, likely a consequence of the pod termination."
+          },
+          {
+            "evidence_id": "EV-LOG-005",
+            "source": "logs",
+            "reference": "logs/application.log:5",
+            "timestamp": "2026-08-28T14:04:45Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:04:45Z WARN [ledger-service] [db] Query 'SELECT * FROM ledger_entries WHERE account_id = ? ORDER BY entry_date DESC' query time jumped to 1850ms (Seq Scan on 5M rows)",
+            "interpretation": "Database query latency spiked, indicating heavy scanning workload."
+          },
+          {
+            "evidence_id": "EV-LOG-006",
+            "source": "logs",
+            "reference": "logs/application.log:6",
+            "timestamp": "2026-08-28T14:05:00Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:05:00Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 1",
+            "interpretation": "Client observed a timeout and initiated the first retry."
+          },
+          {
+            "evidence_id": "EV-LOG-007",
+            "source": "logs",
+            "reference": "logs/application.log:7",
+            "timestamp": "2026-08-28T14:05:01Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:05:01Z WARN [ledger-service] [client] Balance check timeout after 1000ms -> triggering automatic retry attempt 2",
+            "interpretation": "A second retry was triggered shortly after the first, showing repeated timeouts."
+          },
+          {
+            "evidence_id": "EV-LOG-008",
+            "source": "logs",
+            "reference": "logs/application.log:4",
+            "timestamp": "2026-08-28T14:04:15Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:04:15Z WARN [ledger-service] [k8s-autoscaler] Worker node 4 reported transient disk pressure event - distractor",
+            "interpretation": "Node reported transient disk pressure, a potential I/O stress indicator."
+          },
+          {
+            "evidence_id": "EV-LOG-009",
+            "source": "logs",
+            "reference": "logs/application.log:10",
+            "timestamp": "2026-08-28T14:06:15Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:06:15Z ERROR [ledger-service] GET /api/v1/accounts/10293/balance 504 GATEWAY_TIMEOUT",
+            "interpretation": "Client request timed out, likely due to underlying DB latency or pool saturation."
+          },
+          {
+            "evidence_id": "EV-MET-001",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "ledger_query_duration_ms",
+            "value": 10000.0,
+            "type": "spike",
+            "interpretation": "ledger_query_duration_ms spiked to 10000\u202fms, far above its baseline mean of ~3.5\u202fms."
+          },
+          {
+            "evidence_id": "EV-MET-002",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "client_retries_sec",
+            "value": 120.0,
+            "type": "spike",
+            "interpretation": "client_retries_sec jumped to 120\u202fseconds, a dramatic increase from a baseline of 0\u202fs."
+          },
+          {
+            "evidence_id": "EV-MET-003",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "error_rate_pct",
+            "value": 100.0,
+            "type": "spike",
+            "interpretation": "error_rate_pct spiked to 100\u202f%, indicating total failures during the sample."
+          },
+          {
+            "evidence_id": "EV-MET-004",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 6",
+            "timestamp": "2026-08-28T14:05:30Z",
+            "metric": "active_db_conns",
+            "value": 15.0,
+            "type": "spike",
+            "interpretation": "active_db_conns rose to 15, well above its baseline mean of ~2.3 connections."
+          },
+          {
+            "evidence_id": "EV-MET-005",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "pod_readiness_failures",
+            "value": 5.0,
+            "type": "spike",
+            "interpretation": "pod_readiness_failures increased to 5 failures, whereas the baseline is 0."
+          },
+          {
+            "evidence_id": "EV-MET-006",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "error_rate_pct",
+            "value": 100.0,
+            "type": "threshold",
+            "interpretation": "error_rate_pct reached 100\u202f%, exceeding the defined 90\u202f% threshold."
+          },
+          {
+            "evidence_id": "EV-MET-007",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:07:00Z",
+            "metric": "error_rate_pct",
+            "value": 100.0,
+            "type": "period_change",
+            "interpretation": "error_rate_pct shifted from a baseline mean of 0\u202f% to an average of 47\u202f% in the period, a delta of 47\u202f%."
+          },
+          {
+            "evidence_id": "EV-MET-008",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv",
+            "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:07:00Z",
+            "metric": "pod_readiness_failures~error_rate_pct",
+            "value": 0.997117889419821,
+            "type": "correlation",
+            "interpretation": "pod readiness failures and error rate are almost perfectly positively correlated (Pearson r\u22480.997) over the 7\u2011sample window."
+          },
+          {
+            "evidence_id": "EV-CODE-001",
+            "source": "code",
+            "reference": "service/app.py:9-13",
+            "type": "suspicious_pattern",
+            "excerpt": "    def acquire(self):\n        if self.active_conns >= self.max_conns:\n            raise TimeoutError(\"DB Pool Full\")\n        self.active_conns += 1\n        return self",
+            "interpretation": "The acquire method raises an error when the pool is full and increments active_conns, but there is no explicit release path shown, which may affect connection lifecycle."
+          },
+          {
+            "evidence_id": "EV-CODE-002",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "removed_code",
+            "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+            "interpretation": "The original migration line that drops the index was removed in the diff, indicating a change to the migration script."
+          },
+          {
+            "evidence_id": "EV-CODE-003",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "added_code",
+            "excerpt": "+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+            "interpretation": "A comment line was added before the DROP INDEX statement; the SQL command itself remains unchanged."
+          },
+          {
+            "evidence_id": "EV-CODE-004",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "changed_config",
+            "excerpt": "-DROP INDEX IF EXISTS idx_ledger_account_entry_date;\n+-- Dropped index on ledger_entries table\n+DROP INDEX IF EXISTS idx_ledger_account_entry_date;",
+            "interpretation": "The migration file was edited to include a descriptive comment, which does not modify the operational effect of the DROP INDEX command."
+          }
+        ],
+        "evidence_ids": [
+          "EV-CODE-001",
+          "EV-CODE-002",
+          "EV-CODE-003",
+          "EV-CODE-004",
+          "EV-LOG-001",
+          "EV-LOG-002",
+          "EV-LOG-003",
+          "EV-LOG-004",
+          "EV-LOG-005",
+          "EV-LOG-006",
+          "EV-LOG-007",
+          "EV-LOG-008",
+          "EV-LOG-009",
+          "EV-MET-001",
+          "EV-MET-002",
+          "EV-MET-003",
+          "EV-MET-004",
+          "EV-MET-005",
+          "EV-MET-006",
+          "EV-MET-007",
+          "EV-MET-008"
+        ],
+        "sources": {
+          "logs": true,
+          "metrics": true,
+          "code": true
+        }
+      }
+    },
+    "hypotheses": {
+      "status": "REUSED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "hypotheses": [
+          {
+            "hypothesis_id": "HYP-001",
+            "claim": "The service failure cascade was triggered by DB connection\u2011pool saturation caused by long\u2011running sequential scans on the ledger_entries table.",
+            "evidence_ids": [
+              "EV-LOG-001",
+              "EV-LOG-002",
+              "EV-LOG-005",
+              "EV-MET-001",
+              "EV-MET-004",
+              "EV-MET-003"
+            ],
+            "supporting_reasoning": "Log EV-LOG-001 reports the pool at its maximum (15/15) due to long\u2011running scans; EV-LOG-002 shows the health endpoint timing out while acquiring a connection; EV-LOG-005 records a query taking 1850\u202fms with a sequential scan on 5\u202fM rows. Metrics EV-MET-001 and EV-MET-004 confirm a spike in query latency and active DB connections, while EV-MET-003 shows a 100\u202f% error rate, all consistent with a saturated pool caused by heavy scans.",
+            "falsification_criteria": [
+              "Active DB connections remain at baseline (~2) throughout the incident window",
+              "Query latency for ledger_entries stays within normal range (~3\u20115\u202fms)"
+            ],
+            "verification_plan": [
+              "Query the DB connection\u2011pool statistics for the incident timeframe to confirm connection count",
+              "Extract the execution plan of the ledger_entries query to verify presence of sequential scans",
+              "Correlate timestamps of high query latency with spikes in active connections",
+              "Re\u2011run the workload with the index present (if available) and observe whether the pool stays unsaturated"
+            ]
+          },
+          {
+            "hypothesis_id": "HYP-002",
+            "claim": "A recently removed index on ledger_entries caused full table scans, inflating query latency and exhausting the DB connection pool.",
+            "evidence_ids": [
+              "EV-CODE-002",
+              "EV-CODE-003",
+              "EV-CODE-004",
+              "EV-LOG-005",
+              "EV-MET-001"
+            ],
+            "supporting_reasoning": "Code diff evidence (EV-CODE-002\u2011004) shows the DROP INDEX statement was applied, removing idx_ledger_account_entry_date. Log EV-LOG-005 explicitly notes a sequential scan on 5\u202fM rows, and metric EV-MET-001 records query duration spiking to 10\u202f000\u202fms, indicating the missing index forced costly scans that pressured the pool.",
+            "falsification_criteria": [
+              "The index idx_ledger_account_entry_date is present in the live database schema during the incident",
+              "EXPLAIN of the problematic query shows index usage rather than a sequential scan"
+            ],
+            "verification_plan": [
+              "Connect to the production DB and list indexes on ledger_entries to confirm the index\u2019s existence",
+              "Run EXPLAIN ANALYZE on the SELECT query to observe the scan type",
+              "Review migration history to verify that the DROP INDEX migration was applied",
+              "Create the index in a staging environment and measure query latency under comparable load"
+            ]
+          },
+          {
+            "hypothesis_id": "HYP-003",
+            "claim": "The connection\u2011pool implementation leaks connections because the acquire method increments active connections without a corresponding release, leading to pool exhaustion.",
+            "evidence_ids": [
+              "EV-CODE-001",
+              "EV-MET-004",
+              "EV-LOG-001",
+              "EV-LOG-002"
+            ],
+            "supporting_reasoning": "EV-CODE-001 shows acquire() increments active_conns but no release path is visible. Metric EV-MET-004 records active connections rising to 15 (far above baseline). Log EV-LOG-001 confirms the pool is fully utilized, and EV-LOG-002 shows health checks timing out while waiting for a connection, all consistent with leaked connections preventing reuse.",
+            "falsification_criteria": [
+              "Codebase contains a reliable release/decrement mechanism that is exercised during normal operation",
+              "Active connection count drops back to baseline after request completion"
+            ],
+            "verification_plan": [
+              "Search the full codebase for any release() or context\u2011manager that decrements active_conns",
+              "Instrument the acquire and release calls to emit counters and observe net change during a load test",
+              "Add temporary logging around active_conns decrement and verify it occurs",
+              "Run a controlled load test and confirm that active_conns does not monotonically increase"
+            ]
+          },
+          {
+            "hypothesis_id": "HYP-004",
+            "claim": "Kubernetes readiness\u2011probe failures were a downstream symptom of the DB\u2011pool outage, causing pod termination and subsequent ingress 502 errors.",
+            "evidence_ids": [
+              "EV-LOG-003",
+              "EV-LOG-004",
+              "EV-MET-005",
+              "EV-MET-008",
+              "EV-MET-003"
+            ],
+            "supporting_reasoning": "Log EV-LOG-003 records three consecutive readiness\u2011probe failures leading to pod kill; EV-LOG-004 shows the ingress returning 502 due to no healthy backends. Metrics EV-MET-005 note five pod readiness failures, and EV-MET-008 demonstrates a near\u2011perfect correlation (r\u22480.997) between readiness failures and error rate, which spiked to 100\u202f% (EV-MET-003). This pattern suggests the probe, which checks the health endpoint, failed because the service could not obtain DB connections.",
+            "falsification_criteria": [
+              "Readiness probes succeed while DB connection metrics indicate saturation",
+              "Ingress 502 errors persist after a new pod becomes ready"
+            ],
+            "verification_plan": [
+              "Inspect the readiness\u2011probe definition to confirm it queries the /api/v1/health endpoint",
+              "Align probe failure timestamps with DB connection\u2011pool and error\u2011rate metrics to verify temporal overlap",
+              "Deploy a replacement pod while artificially keeping DB latency low and observe if the probe still fails",
+              "Check ingress logs after a new pod reaches Ready state to see whether 502 errors cease"
+            ]
+          }
+        ]
+      },
+      "cache_hit": true
+    },
+    "verification": {
+      "status": "REUSED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "results": [
+          {
+            "hypothesis_id": "HYP-001",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-005",
+                  "EV-MET-001",
+                  "EV-MET-004",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8",
+                "detail": "6 of 6 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-005",
+                  "EV-MET-001",
+                  "EV-MET-004",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8",
+                "detail": "6 of 6 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-005",
+                  "EV-MET-001",
+                  "EV-MET-004",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8",
+                "detail": "6 of 6 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-005",
+                  "EV-MET-001",
+                  "EV-MET-004",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8",
+                "detail": "6 of 6 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-005",
+                  "EV-MET-001",
+                  "EV-MET-004",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8",
+                "detail": "6 of 6 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-006",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-005",
+                  "EV-MET-001",
+                  "EV-MET-004",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8",
+                "detail": "6 of 6 referenced evidence items grounded."
+              }
+            ],
+            "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8, logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8, logs/application.log:8; logs/application.log:9; logs/application.log:5; metrics/metrics.csv:row 8; metrics/metrics.csv:row 6; metrics/metrics.csv:row 8)",
+            "confidence": 0.95
+          },
+          {
+            "hypothesis_id": "HYP-002",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-002",
+                  "EV-CODE-003",
+                  "EV-CODE-004",
+                  "EV-LOG-005",
+                  "EV-MET-001"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-002",
+                  "EV-CODE-003",
+                  "EV-CODE-004",
+                  "EV-LOG-005",
+                  "EV-MET-001"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-002",
+                  "EV-CODE-003",
+                  "EV-CODE-004",
+                  "EV-LOG-005",
+                  "EV-MET-001"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-002",
+                  "EV-CODE-003",
+                  "EV-CODE-004",
+                  "EV-LOG-005",
+                  "EV-MET-001"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-002",
+                  "EV-CODE-003",
+                  "EV-CODE-004",
+                  "EV-LOG-005",
+                  "EV-MET-001"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-006",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-002",
+                  "EV-CODE-003",
+                  "EV-CODE-004",
+                  "EV-LOG-005",
+                  "EV-MET-001"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              }
+            ],
+            "reasoning": "All required checks passed: Source file contains acquire() without release() call (AST name-count heuristic).; Source file contains acquire() without release() call (AST name-count heuristic).; Source file contains acquire() without release() call (AST name-count heuristic). (references: service\\app.py, service\\app.py, service\\app.py)",
+            "confidence": 0.95
+          },
+          {
+            "hypothesis_id": "HYP-003",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-MET-004",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-MET-004",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-MET-004",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-MET-004",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-MET-004",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              },
+              {
+                "check_id": "CHK-006",
+                "description": "Source file contains acquire() without release() call (AST name-count heuristic).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-MET-004",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "service\\app.py",
+                "detail": "[{\"file\": \"service\\\\app.py\", \"detail\": {\"acquire_count\": 1, \"release_count\": 1, \"has_pattern\": true, \"no_guaranteed_release\": [{\"func\": \"get_balance\", \"lineno\": 27, \"acquire_lines\": [28]}]}}]"
+              }
+            ],
+            "reasoning": "All required checks passed: Source file contains acquire() without release() call (AST name-count heuristic).; Source file contains acquire() without release() call (AST name-count heuristic).; Source file contains acquire() without release() call (AST name-count heuristic). (references: service\\app.py, service\\app.py, service\\app.py)",
+            "confidence": 0.95
+          },
+          {
+            "hypothesis_id": "HYP-004",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-003",
+                  "EV-LOG-004",
+                  "EV-MET-005",
+                  "EV-MET-008",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-003",
+                  "EV-LOG-004",
+                  "EV-MET-005",
+                  "EV-MET-008",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-003",
+                  "EV-LOG-004",
+                  "EV-MET-005",
+                  "EV-MET-008",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-003",
+                  "EV-LOG-004",
+                  "EV-MET-005",
+                  "EV-MET-008",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-003",
+                  "EV-LOG-004",
+                  "EV-MET-005",
+                  "EV-MET-008",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-006",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-003",
+                  "EV-LOG-004",
+                  "EV-MET-005",
+                  "EV-MET-008",
+                  "EV-MET-003"
+                ],
+                "reference": "logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8",
+                "detail": "5 of 5 referenced evidence items grounded."
+              }
+            ],
+            "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8, logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8, logs/application.log:11; logs/application.log:12; metrics/metrics.csv:row 8; metrics/metrics.csv; metrics/metrics.csv:row 8)",
+            "confidence": 0.95
+          }
+        ]
+      },
+      "cache_hit": true
+    },
+    "fix_proposals": {
+      "status": "FAILED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "proposals": [],
+        "validation_errors": {},
+        "skipped_hypotheses": []
+      },
+      "error": "LLMRateLimitError: Groq API rate limit exceeded after 3 attempts: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0n930hgesr90j3ekc8bafh3` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199866, Requested 6313. Please try again in 44m29.328s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+    },
+    "approvals": {
+      "status": "SUCCEEDED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_10_multi_symptom_cascade",
+        "approval_records": [],
+        "summary": {
+          "total": 0,
+          "approved": 0,
+          "rejected": 0
+        }
+      }
+    }
+  },
+  "summary": {
+    "confirmed_hypotheses": 4,
+    "rejected_hypotheses": 0,
+    "inconclusive_hypotheses": 0,
+    "proposals_generated": 0,
+    "proposals_approved": 0,
+    "proposals_rejected": 0
+  },
+  "error": null
+}

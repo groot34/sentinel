@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrchestratorResult",
+  "description": "Full Sentinel investigation result. Preserves the complete evidence -> hypothesis -> verification -> fix -> approval chain.",
+  "type": "object",
+  "required": [
+    "incident_id",
+    "pipeline_status",
+    "stages",
+    "llm_call_count",
+    "human_approval_notice"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Incident identifier."
+    },
+    "pipeline_status": {
+      "type": "string",
+      "enum": ["COMPLETED", "PARTIAL", "FAILED"],
+      "description": "Overall pipeline outcome."
+    },
+    "human_approval_notice": {
+      "type": "string",
+      "enum": ["AWAITING HUMAN APPROVAL — this fix has not been applied."],
+      "description": "Mandatory safety notice present in every result regardless of approval outcome."
+    },
+    "llm_call_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total LLM calls made across all agents. Orchestrator itself contributes 0."
+    },
+    "stages": {
+      "type": "object",
+      "required": ["logs", "metrics", "code", "evidence_fusion", "hypotheses", "verification", "fix_proposals", "approvals"],
+      "properties": {
+        "logs": { "$ref": "#/definitions/StageResult" },
+        "metrics": { "$ref": "#/definitions/StageResult" },
+        "code": { "$ref": "#/definitions/StageResult" },
+        "evidence_fusion": { "$ref": "#/definitions/StageResult" },
+        "hypotheses": { "$ref": "#/definitions/StageResult" },
+        "verification": { "$ref": "#/definitions/StageResult" },
+        "fix_proposals": { "$ref": "#/definitions/StageResult" },
+        "approvals": { "$ref": "#/definitions/StageResult" }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "confirmed_hypotheses": { "type": "integer" },
+        "rejected_hypotheses": { "type": "integer" },
+        "inconclusive_hypotheses": { "type": "integer" },
+        "proposals_generated": { "type": "integer" },
+        "proposals_approved": { "type": "integer" },
+        "proposals_rejected": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Top-level error if pipeline could not run."
+    }
+  },
+  "definitions": {
+    "StageResult": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["SUCCEEDED", "FAILED", "SKIPPED", "REUSED"],
+          "description": "Stage outcome."
+        },
+        "output": {
+          "description": "Stage output payload (agent result, fused evidence, etc.)."
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Error message if stage failed."
+        },
+        "llm_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "LLM calls made by this stage."
+        },
+        "cache_hit": {
+          "type": "boolean",
+          "description": "Whether a valid cached output was reused."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

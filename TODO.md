@@ -51,8 +51,13 @@
   - Schemas: `schemas/fix_proposal_schema.json`, `schemas/approval_schema.json`.
   - Unit tests: 88 new tests (test_fix_tools, test_approval_gate, test_fix_proposal_agent); 261/261 total passing.
   - Live Groq runs for incidents 01, 04, 07, 10; sample outputs saved; source files verified unchanged after every gate run.
-- [ ] **Milestone 9: Orchestrator Pipeline Integration**
-  - Wire end-to-end multi-agent pipeline in `agents/orchestrator.py`.
+- [x] **Milestone 9: Orchestrator Pipeline Integration**
+  - Implemented `agents/orchestrator.py` — coordinates all 8 pipeline stages; zero direct LLM calls.
+  - Stage-level output persistence: logs, metrics, code, hypotheses, and verification are cached under `eval/results/sentinel/<incident_id>/`; reused on re-runs to avoid duplicate Groq calls.
+  - Structured final result validated against `schemas/orchestrator_result_schema.json`.
+  - CLI: `python -m agents.orchestrator <incident_dir> [--non-interactive] [--sleep N] [--cache-dir DIR] [--output PATH]`.
+  - 28 new unit tests; full suite 289/289 passing.
+  - Live runs: inc_01 COMPLETED (5 LLM calls), inc_04 COMPLETED (8 LLM calls, 4 confirmed hypotheses), inc_07/inc_10 PARTIAL (fix-proposal stage hit free-tier TPD limit; all earlier stages REUSED from cache correctly).
 - [ ] **Milestone 10: Comparative Evaluation & Final Deliverables**
   - Run comparative benchmark: Baseline vs. Sentinel across all 10 incidents.
   - Record quantitative results in `CHANGELOG.md` and `eval/rubric.md`.

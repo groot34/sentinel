@@ -1,0 +1,1068 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "pipeline_status": "COMPLETED",
+  "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+  "llm_call_count": 8,
+  "stages": {
+    "logs": {
+      "status": "SUCCEEDED",
+      "llm_calls": 1,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "agent": "logs_agent",
+        "summary": "The upload-service showed rising memory usage, reaching 85% of its container limit, then critical memory pressure and OOM kill, with corresponding warnings and errors logged in quick succession.",
+        "evidence": [
+          {
+            "evidence_id": "EV-LOG-001",
+            "source": "logs",
+            "reference": "logs/application.log:6",
+            "timestamp": "2026-08-28T14:09:00Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)",
+            "interpretation": "Indicates high memory consumption approaching container limit."
+          },
+          {
+            "evidence_id": "EV-LOG-002",
+            "source": "logs",
+            "reference": "logs/application.log:7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident",
+            "interpretation": "Shows memory pressure became critical, near full usage."
+          },
+          {
+            "evidence_id": "EV-LOG-003",
+            "source": "logs",
+            "reference": "logs/application.log:8",
+            "timestamp": "2026-08-28T14:11:32Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child",
+            "interpretation": "Kernel OOM event triggered, selecting a process to kill."
+          },
+          {
+            "evidence_id": "EV-LOG-004",
+            "source": "logs",
+            "reference": "logs/application.log:9",
+            "timestamp": "2026-08-28T14:11:33Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)",
+            "interpretation": "Container terminated due to OOM kill."
+          },
+          {
+            "evidence_id": "EV-LOG-005",
+            "source": "logs",
+            "reference": "logs/application.log:4",
+            "timestamp": "2026-08-28T14:05:40Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor",
+            "interpretation": "Unrelated warning, likely not linked to memory issue."
+          }
+        ]
+      }
+    },
+    "metrics": {
+      "status": "SUCCEEDED",
+      "llm_calls": 1,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "agent": "metrics_agent",
+        "summary": "Metrics show a sharp increase in garbage collection time (520\u202fms) and RSS memory (995\u202fMB) at 14:11, together with a rise in active uploads (15). One OOM kill is recorded at 14:12, after which garbage collection time and active uploads drop to zero and memory usage falls to near baseline. Correlation analysis reveals strong positive relationships between memory usage and garbage collection time (r\u22480.90) and between memory usage and active uploads (r\u22480.85).",
+        "evidence": [
+          {
+            "evidence_id": "EV-MET-001",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "metric": "garbage_collection_time_ms",
+            "value": 520.0,
+            "type": "spike",
+            "interpretation": "GC time spikes far above its baseline (mean\u202f\u2248\u202f4.6\u202fms), indicating unusually long collection cycles at this moment."
+          },
+          {
+            "evidence_id": "EV-MET-002",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "metric": "memory_rss_mb",
+            "value": 995.0,
+            "type": "spike",
+            "interpretation": "RSS memory jumps to ~995\u202fMB, many standard deviations above its typical ~85\u202fMB level."
+          },
+          {
+            "evidence_id": "EV-MET-003",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "metric": "active_uploads",
+            "value": 15.0,
+            "type": "spike",
+            "interpretation": "Active uploads more than double the recent average, suggesting a burst of upload activity."
+          },
+          {
+            "evidence_id": "EV-MET-004",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "oom_kills_total",
+            "value": 1.0,
+            "type": "spike",
+            "interpretation": "An out\u2011of\u2011memory kill occurs immediately after the spike period."
+          },
+          {
+            "evidence_id": "EV-MET-005",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "garbage_collection_time_ms",
+            "value": 0.0,
+            "type": "drop",
+            "interpretation": "GC time drops to zero, a sharp reversal from the previous spike."
+          },
+          {
+            "evidence_id": "EV-MET-006",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "active_uploads",
+            "value": 0.0,
+            "type": "drop",
+            "interpretation": "Active uploads fall to zero, indicating the upload burst ended."
+          },
+          {
+            "evidence_id": "EV-MET-007",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "memory_rss_mb",
+            "value": 80.0,
+            "type": "drop",
+            "interpretation": "RSS memory decreases to near baseline after the earlier spike."
+          },
+          {
+            "evidence_id": "EV-MET-008",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv",
+            "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+            "metric": "memory_rss_mb~garbage_collection_time_ms",
+            "value": 0.9000525358529804,
+            "type": "correlation",
+            "interpretation": "Strong positive correlation (r\u22480.90) between memory usage and GC time over the observed window."
+          },
+          {
+            "evidence_id": "EV-MET-009",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv",
+            "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+            "metric": "memory_rss_mb~active_uploads",
+            "value": 0.8464146954076838,
+            "type": "correlation",
+            "interpretation": "High positive correlation (r\u22480.85) between memory usage and active upload count."
+          }
+        ]
+      }
+    },
+    "code": {
+      "status": "SUCCEEDED",
+      "llm_calls": 1,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "agent": "code_agent",
+        "summary": "The change introduces a module\u2011level mutable dictionary AUDIT_TRACE_REGISTRY and stores raw file bytes keyed by upload_id, while removing the previous BytesIO stream processing. The added global collection could retain data for each upload, and the diff is flagged as an unbounded collection pattern, suggesting a possible increase in memory usage.",
+        "evidence": [
+          {
+            "evidence_id": "EV-CODE-001",
+            "source": "code",
+            "reference": "service/app.py:5",
+            "type": "suspicious_pattern",
+            "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+            "interpretation": "Defines a module\u2011level mutable dict that persists for the lifetime of the process, which may accumulate entries over time."
+          },
+          {
+            "evidence_id": "EV-CODE-002",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "added_code",
+            "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+            "interpretation": "Adds a global registry and stores the full file_bytes for each upload_id, returning only the length; this creates a new persistent reference to the uploaded data."
+          },
+          {
+            "evidence_id": "EV-CODE-003",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "removed_code",
+            "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+            "interpretation": "Removes the previous in\u2011memory stream processing that likely released the data after extraction, replacing it with persistent storage."
+          },
+          {
+            "evidence_id": "EV-CODE-004",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "suspicious_pattern",
+            "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+            "interpretation": "Pattern detection flags the added global mutable collection as an unbounded collection, indicating a risk of uncontrolled memory growth if entries are not cleaned up."
+          }
+        ]
+      }
+    },
+    "evidence_fusion": {
+      "status": "SUCCEEDED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "evidence": [
+          {
+            "evidence_id": "EV-LOG-001",
+            "source": "logs",
+            "reference": "logs/application.log:6",
+            "timestamp": "2026-08-28T14:09:00Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:09:00Z WARN [upload-service] Memory usage at 85% of container limit (850MB / 1024MB)",
+            "interpretation": "Indicates high memory consumption approaching container limit."
+          },
+          {
+            "evidence_id": "EV-LOG-002",
+            "source": "logs",
+            "reference": "logs/application.log:7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:11:00Z ERROR [upload-service] System memory pressure critical: 990MB resident",
+            "interpretation": "Shows memory pressure became critical, near full usage."
+          },
+          {
+            "evidence_id": "EV-LOG-003",
+            "source": "logs",
+            "reference": "logs/application.log:8",
+            "timestamp": "2026-08-28T14:11:32Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:11:32Z FATAL [kernel] Out of memory: Kill process 1842 (python) score 982 or sacrifice child",
+            "interpretation": "Kernel OOM event triggered, selecting a process to kill."
+          },
+          {
+            "evidence_id": "EV-LOG-004",
+            "source": "logs",
+            "reference": "logs/application.log:9",
+            "timestamp": "2026-08-28T14:11:33Z",
+            "type": "error",
+            "excerpt": "2026-08-28T14:11:33Z ERROR [docker] Container upload-service died with exit code 137 (OOMKilled)",
+            "interpretation": "Container terminated due to OOM kill."
+          },
+          {
+            "evidence_id": "EV-LOG-005",
+            "source": "logs",
+            "reference": "logs/application.log:4",
+            "timestamp": "2026-08-28T14:05:40Z",
+            "type": "warning",
+            "excerpt": "2026-08-28T14:05:40Z WARN [upload-service] [s3-client] AWS STS temporary credentials renewal check scheduled - distractor",
+            "interpretation": "Unrelated warning, likely not linked to memory issue."
+          },
+          {
+            "evidence_id": "EV-MET-001",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "metric": "garbage_collection_time_ms",
+            "value": 520.0,
+            "type": "spike",
+            "interpretation": "GC time spikes far above its baseline (mean\u202f\u2248\u202f4.6\u202fms), indicating unusually long collection cycles at this moment."
+          },
+          {
+            "evidence_id": "EV-MET-002",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "metric": "memory_rss_mb",
+            "value": 995.0,
+            "type": "spike",
+            "interpretation": "RSS memory jumps to ~995\u202fMB, many standard deviations above its typical ~85\u202fMB level."
+          },
+          {
+            "evidence_id": "EV-MET-003",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 7",
+            "timestamp": "2026-08-28T14:11:00Z",
+            "metric": "active_uploads",
+            "value": 15.0,
+            "type": "spike",
+            "interpretation": "Active uploads more than double the recent average, suggesting a burst of upload activity."
+          },
+          {
+            "evidence_id": "EV-MET-004",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "oom_kills_total",
+            "value": 1.0,
+            "type": "spike",
+            "interpretation": "An out\u2011of\u2011memory kill occurs immediately after the spike period."
+          },
+          {
+            "evidence_id": "EV-MET-005",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "garbage_collection_time_ms",
+            "value": 0.0,
+            "type": "drop",
+            "interpretation": "GC time drops to zero, a sharp reversal from the previous spike."
+          },
+          {
+            "evidence_id": "EV-MET-006",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "active_uploads",
+            "value": 0.0,
+            "type": "drop",
+            "interpretation": "Active uploads fall to zero, indicating the upload burst ended."
+          },
+          {
+            "evidence_id": "EV-MET-007",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv:row 8",
+            "timestamp": "2026-08-28T14:12:00Z",
+            "metric": "memory_rss_mb",
+            "value": 80.0,
+            "type": "drop",
+            "interpretation": "RSS memory decreases to near baseline after the earlier spike."
+          },
+          {
+            "evidence_id": "EV-MET-008",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv",
+            "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+            "metric": "memory_rss_mb~garbage_collection_time_ms",
+            "value": 0.9000525358529804,
+            "type": "correlation",
+            "interpretation": "Strong positive correlation (r\u22480.90) between memory usage and GC time over the observed window."
+          },
+          {
+            "evidence_id": "EV-MET-009",
+            "source": "metrics",
+            "reference": "metrics/metrics.csv",
+            "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:12:00Z",
+            "metric": "memory_rss_mb~active_uploads",
+            "value": 0.8464146954076838,
+            "type": "correlation",
+            "interpretation": "High positive correlation (r\u22480.85) between memory usage and active upload count."
+          },
+          {
+            "evidence_id": "EV-CODE-001",
+            "source": "code",
+            "reference": "service/app.py:5",
+            "type": "suspicious_pattern",
+            "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+            "interpretation": "Defines a module\u2011level mutable dict that persists for the lifetime of the process, which may accumulate entries over time."
+          },
+          {
+            "evidence_id": "EV-CODE-002",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "added_code",
+            "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+            "interpretation": "Adds a global registry and stores the full file_bytes for each upload_id, returning only the length; this creates a new persistent reference to the uploaded data."
+          },
+          {
+            "evidence_id": "EV-CODE-003",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "removed_code",
+            "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+            "interpretation": "Removes the previous in\u2011memory stream processing that likely released the data after extraction, replacing it with persistent storage."
+          },
+          {
+            "evidence_id": "EV-CODE-004",
+            "source": "git_diff",
+            "reference": "git_diff.patch:hunk 1",
+            "type": "suspicious_pattern",
+            "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+            "interpretation": "Pattern detection flags the added global mutable collection as an unbounded collection, indicating a risk of uncontrolled memory growth if entries are not cleaned up."
+          }
+        ],
+        "evidence_ids": [
+          "EV-CODE-001",
+          "EV-CODE-002",
+          "EV-CODE-003",
+          "EV-CODE-004",
+          "EV-LOG-001",
+          "EV-LOG-002",
+          "EV-LOG-003",
+          "EV-LOG-004",
+          "EV-LOG-005",
+          "EV-MET-001",
+          "EV-MET-002",
+          "EV-MET-003",
+          "EV-MET-004",
+          "EV-MET-005",
+          "EV-MET-006",
+          "EV-MET-007",
+          "EV-MET-008",
+          "EV-MET-009"
+        ],
+        "sources": {
+          "logs": true,
+          "metrics": true,
+          "code": true
+        }
+      }
+    },
+    "hypotheses": {
+      "status": "SUCCEEDED",
+      "llm_calls": 1,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "hypotheses": [
+          {
+            "hypothesis_id": "HYP-001",
+            "claim": "The recent code change introduced a global AUDIT_TRACE_REGISTRY that stores full uploaded file bytes for each upload, causing unbounded memory growth leading to OOM.",
+            "evidence_ids": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-004",
+              "EV-MET-002",
+              "EV-MET-008",
+              "EV-LOG-001"
+            ],
+            "supporting_reasoning": "Code evidence shows a module\u2011level mutable dict that persists for the process lifetime and is populated with the raw bytes of every upload. Metrics (EV-MET-002) record a sudden RSS jump to ~995\u202fMB, and the strong correlation between memory usage and GC time (EV-MET-008) indicates memory is being retained rather than reclaimed. The warning log (EV-LOG-001) that memory reached 85% of the container limit occurs shortly after the code change, consistent with a leak caused by the registry.",
+            "falsification_criteria": [
+              "If the size of AUDIT_TRACE_REGISTRY remains constant despite a high volume of uploads, the hypothesis is disproved.",
+              "If restarting the service clears memory without any change to upload traffic, the hypothesis is disproved."
+            ],
+            "verification_plan": [
+              "Instrument the service to log the number of entries and total byte size of AUDIT_TRACE_REGISTRY after each upload.",
+              "Perform a controlled series of uploads of known size and monitor RSS memory alongside the registry size.",
+              "Revert the code change to remove the global registry and repeat the upload test to see if memory growth disappears.",
+              "Observe whether OOM events cease after the registry is cleared or the service is restarted."
+            ]
+          },
+          {
+            "hypothesis_id": "HYP-002",
+            "claim": "A transient surge in concurrent upload requests caused a short\u2011term spike in memory usage that exceeded the container limit, resulting in OOM.",
+            "evidence_ids": [
+              "EV-MET-003",
+              "EV-MET-009",
+              "EV-MET-002",
+              "EV-LOG-001",
+              "EV-LOG-002"
+            ],
+            "supporting_reasoning": "Metrics show active uploads more than doubled (EV-MET-003) and a high positive correlation between upload count and memory usage (EV-MET-009). At the same time RSS memory jumped to near the container ceiling (EV-MET-002) and logs recorded memory pressure becoming critical (EV-LOG-002). This temporal alignment suggests the upload burst drove memory consumption past the limit.",
+            "falsification_criteria": [
+              "If similar upload bursts in the past did not lead to memory spikes or OOM, the hypothesis is disproved.",
+              "If OOM events occur at times with no upload activity, the hypothesis is disproved."
+            ],
+            "verification_plan": [
+              "Extract timestamps of upload count spikes and align them with memory usage and OOM logs.",
+              "Replay the same upload burst in a test environment with identical memory limits and observe whether memory reaches the limit and triggers OOM.",
+              "Throttle the upload rate during a repeat of the burst and verify that memory stays below the limit, preventing OOM."
+            ]
+          },
+          {
+            "hypothesis_id": "HYP-003",
+            "claim": "Garbage collection pauses became excessively long, preventing timely reclamation of memory and contributing to OOM.",
+            "evidence_ids": [
+              "EV-MET-001",
+              "EV-MET-008",
+              "EV-MET-002",
+              "EV-LOG-001"
+            ],
+            "supporting_reasoning": "GC time spikes far above baseline (EV-MET-001) coincide with the RSS memory surge (EV-MET-002). The strong correlation between memory usage and GC time (EV-MET-008) indicates that as memory grew, GC pauses lengthened, reducing the ability to free memory promptly. The warning about high memory usage (EV-LOG-001) appears during these GC spikes, supporting a causal link.",
+            "falsification_criteria": [
+              "If GC pause durations recorded during the OOM event are within normal baseline ranges, the hypothesis is disproved.",
+              "If forcing a full GC manually reduces memory without causing additional pauses, the hypothesis is disproved."
+            ],
+            "verification_plan": [
+              "Enable detailed GC logging to capture pause durations during peak memory periods.",
+              "Compare observed GC pause times against historical baseline values.",
+              "Trigger an explicit full GC during a high\u2011memory state and measure whether RSS drops significantly.",
+              "Adjust GC tuning parameters (e.g., increase heap size or change generation thresholds) and verify whether OOM events are mitigated."
+            ]
+          },
+          {
+            "hypothesis_id": "HYP-004",
+            "claim": "The container memory limit (1\u202fGB) is insufficient for the workload, so normal operation reaches the limit and triggers OOM kills.",
+            "evidence_ids": [
+              "EV-LOG-001",
+              "EV-LOG-002",
+              "EV-LOG-004",
+              "EV-MET-002"
+            ],
+            "supporting_reasoning": "Logs show memory usage reaching 85% of the 1\u202fGB container limit (EV-LOG-001) and then becoming critical (EV-LOG-002), followed by an OOM kill (EV-LOG-004). Metrics record RSS peaking at ~995\u202fMB (EV-MET-002), essentially the full allocation, indicating the limit itself is a hard ceiling for the service's normal memory demands.",
+            "falsification_criteria": [
+              "If increasing the container memory limit eliminates OOM events while workload remains unchanged, the hypothesis is supported; conversely, if OOM persists after raising the limit, the hypothesis is disproved."
+            ],
+            "verification_plan": [
+              "Redeploy the upload-service with a higher memory limit (e.g., 2\u202fGB).",
+              "Run the same workload pattern that previously caused OOM.",
+              "Monitor RSS memory, warning logs, and OOM events to see if the service remains stable.",
+              "Document whether the memory peak stays well below the new limit and whether the container exits with code 137."
+            ]
+          }
+        ]
+      }
+    },
+    "verification": {
+      "status": "SUCCEEDED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "results": [
+          {
+            "hypothesis_id": "HYP-001",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-CODE-002",
+                  "EV-CODE-004",
+                  "EV-MET-002",
+                  "EV-MET-008",
+                  "EV-LOG-001"
+                ],
+                "reference": "service\\app.py:5",
+                "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-CODE-002",
+                  "EV-CODE-004",
+                  "EV-MET-002",
+                  "EV-MET-008",
+                  "EV-LOG-001"
+                ],
+                "reference": "service\\app.py:5",
+                "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-CODE-002",
+                  "EV-CODE-004",
+                  "EV-MET-002",
+                  "EV-MET-008",
+                  "EV-LOG-001"
+                ],
+                "reference": "service\\app.py:5",
+                "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-CODE-002",
+                  "EV-CODE-004",
+                  "EV-MET-002",
+                  "EV-MET-008",
+                  "EV-LOG-001"
+                ],
+                "reference": "service\\app.py:5",
+                "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-CODE-002",
+                  "EV-CODE-004",
+                  "EV-MET-002",
+                  "EV-MET-008",
+                  "EV-LOG-001"
+                ],
+                "reference": "service\\app.py:5",
+                "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+              },
+              {
+                "check_id": "CHK-006",
+                "description": "Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-CODE-001",
+                  "EV-CODE-002",
+                  "EV-CODE-004",
+                  "EV-MET-002",
+                  "EV-MET-008",
+                  "EV-LOG-001"
+                ],
+                "reference": "service\\app.py:5",
+                "detail": "[{\"name\": \"AUDIT_TRACE_REGISTRY\", \"class\": \"DocumentProcessor\", \"lineno\": 5, \"file\": \"service\\\\app.py\"}]"
+              }
+            ],
+            "reasoning": "All required checks passed: Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.; Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly.; Source contains class-level or module-level mutable collection (dict/list) that may grow unboundedly. (references: service\\app.py:5, service\\app.py:5, service\\app.py:5)",
+            "confidence": 0.95
+          },
+          {
+            "hypothesis_id": "HYP-002",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Matching log lines exist for extracted keywords.",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "logs/application.log",
+                "detail": "{\"ERROR\": 2, \"WARN\": 2, \"retry\": 0, \"timeout\": 0, \"pool exhausted\": 0, \"pool empty\": 0}"
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-003",
+                  "EV-MET-009",
+                  "EV-MET-002",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-003",
+                  "EV-MET-009",
+                  "EV-MET-002",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-003",
+                  "EV-MET-009",
+                  "EV-MET-002",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7",
+                "detail": "5 of 5 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-003",
+                  "EV-MET-009",
+                  "EV-MET-002",
+                  "EV-LOG-001",
+                  "EV-LOG-002"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7",
+                "detail": "5 of 5 referenced evidence items grounded."
+              }
+            ],
+            "reasoning": "All required checks passed: Matching log lines exist for extracted keywords.; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log, metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7, metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6; logs/application.log:7)",
+            "confidence": 0.95
+          },
+          {
+            "hypothesis_id": "HYP-003",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-001",
+                  "EV-MET-008",
+                  "EV-MET-002",
+                  "EV-LOG-001"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-001",
+                  "EV-MET-008",
+                  "EV-MET-002",
+                  "EV-LOG-001"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-001",
+                  "EV-MET-008",
+                  "EV-MET-002",
+                  "EV-LOG-001"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-001",
+                  "EV-MET-008",
+                  "EV-MET-002",
+                  "EV-LOG-001"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-001",
+                  "EV-MET-008",
+                  "EV-MET-002",
+                  "EV-LOG-001"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-006",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-MET-001",
+                  "EV-MET-008",
+                  "EV-MET-002",
+                  "EV-LOG-001"
+                ],
+                "reference": "metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6",
+                "detail": "4 of 4 referenced evidence items grounded."
+              }
+            ],
+            "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6, metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6, metrics/metrics.csv:row 7; metrics/metrics.csv; metrics/metrics.csv:row 7; logs/application.log:6)",
+            "confidence": 0.95
+          },
+          {
+            "hypothesis_id": "HYP-004",
+            "verdict": "CONFIRMED",
+            "checks": [
+              {
+                "check_id": "CHK-001",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-004",
+                  "EV-MET-002"
+                ],
+                "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-002",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-004",
+                  "EV-MET-002"
+                ],
+                "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-003",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-004",
+                  "EV-MET-002"
+                ],
+                "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-004",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-004",
+                  "EV-MET-002"
+                ],
+                "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7",
+                "detail": "4 of 4 referenced evidence items grounded."
+              },
+              {
+                "check_id": "CHK-005",
+                "description": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+                "result": "PASS",
+                "evidence": [
+                  "EV-LOG-001",
+                  "EV-LOG-002",
+                  "EV-LOG-004",
+                  "EV-MET-002"
+                ],
+                "reference": "logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7",
+                "detail": "4 of 4 referenced evidence items grounded."
+              }
+            ],
+            "reasoning": "All required checks passed: Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).; Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback). (references: logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7, logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7, logs/application.log:6; logs/application.log:7; logs/application.log:9; metrics/metrics.csv:row 7)",
+            "confidence": 0.95
+          }
+        ]
+      }
+    },
+    "fix_proposals": {
+      "status": "SUCCEEDED",
+      "llm_calls": 4,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "proposals": [
+          {
+            "proposal_id": "FIX-001",
+            "hypothesis_id": "HYP-001",
+            "incident_id": "inc_04_memory_leak",
+            "status": "PROPOSED",
+            "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+            "summary": "Remove the global AUDIT_TRACE_REGISTRY and stop storing full upload bytes in memory.",
+            "rationale": "The memory leak is caused by the module\u2011level AUDIT_TRACE_REGISTRY dict that retains the raw bytes of every uploaded file; removing this registry eliminates the unbounded memory growth and prevents OOM failures.",
+            "changes": [
+              {
+                "file": "service/app.py",
+                "start_line": null,
+                "end_line": null,
+                "description": "Delete the global audit registry and its usage, keeping only the length calculation for uploads.",
+                "before": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)\n\n    def clear_registry(self):\n        self.AUDIT_TRACE_REGISTRY.clear()",
+                "after": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        return len(file_bytes)"
+              }
+            ],
+            "patch": "PROPOSED PATCH\n--- a/service/app.py\n+++ b/service/app.py\n@@ -1,12 +1,7 @@\n import io\n from typing import Dict, Any\n \n class DocumentProcessor:\n-    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n-\n-    def clear_registry(self):\n-        self.AUDIT_TRACE_REGISTRY.clear()\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        return len(file_bytes)\n",
+            "expected_effect": "Memory usage remains stable regardless of upload volume; RSS stays within normal limits and OOM events are eliminated.",
+            "risks": [
+              "Removal of the audit registry eliminates detailed per\u2011upload byte storage which may be required for forensic auditing or debugging",
+              "If other components rely on clear_registry(), they will need to be updated"
+            ],
+            "validation_plan": [
+              "Deploy the updated service to a staging environment",
+              "Run a load test with a high volume of uploads and monitor RSS memory; it should not grow beyond baseline",
+              "Verify that the upload API still returns correct file size responses",
+              "Check that no audit\u2011related logs or features are broken",
+              "Confirm that the service remains responsive under sustained load"
+            ],
+            "rollback_plan": "Revert service/app.py to the original version containing AUDIT_TRACE_REGISTRY and its usage, redeploy, and monitor memory to ensure the previous behavior is restored if regressions appear.",
+            "evidence_ids": [
+              "EV-CODE-001",
+              "EV-CODE-002",
+              "EV-CODE-004",
+              "EV-LOG-001",
+              "EV-MET-002",
+              "EV-MET-008"
+            ]
+          },
+          {
+            "proposal_id": "FIX-002",
+            "hypothesis_id": "HYP-002",
+            "incident_id": "inc_04_memory_leak",
+            "status": "PROPOSED",
+            "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+            "summary": "Remove the global AUDIT_TRACE_REGISTRY and process uploads via streaming to eliminate unbounded memory growth.",
+            "rationale": "The memory leak was caused by storing each uploaded file's bytes in a module\u2011level dict that persisted for the container lifetime; removing this storage ensures memory is released after processing, preventing OOM during upload spikes.",
+            "changes": [
+              {
+                "file": "service/app.py",
+                "start_line": null,
+                "end_line": null,
+                "description": "Eliminate the global audit registry and use a stream for processing uploads, preventing persistent byte storage.",
+                "before": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)\n\n    def clear_registry(self):\n        self.AUDIT_TRACE_REGISTRY.clear()",
+                "after": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        stream = io.BytesIO(file_bytes)\n        return self._extract_text(stream)\n\n    # Retained for compatibility; no longer used\n    def clear_registry(self):\n        pass"
+              }
+            ],
+            "patch": "--- a/service/app.py\n+++ b/service/app.py\n@@ -1,9 +1,9 @@\n import io\n-from typing import Dict, Any\n-\n-class DocumentProcessor:\n-    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n-\n-    def clear_registry(self):\n-        self.AUDIT_TRACE_REGISTRY.clear()\n+from typing import Dict, Any\n+\n+class DocumentProcessor:\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        stream = io.BytesIO(file_bytes)\n+        return self._extract_text(stream)\n+\n+    # Retained for compatibility; no longer used\n+    def clear_registry(self):\n+        pass\n",
+            "expected_effect": "Memory usage remains stable during high upload concurrency, staying below container limits and avoiding OOM kills.",
+            "risks": [
+              "Potential loss of audit\u2011trace functionality if other components rely on AUDIT_TRACE_REGISTRY.",
+              "If _extract_text is not implemented or behaves differently, upload processing may fail."
+            ],
+            "validation_plan": [
+              "Deploy the change to a staging environment and simulate a burst of concurrent upload requests.",
+              "Monitor RSS memory usage to confirm it does not exceed the container limit during the burst.",
+              "Verify that uploaded documents are still processed correctly and the returned values are as expected.",
+              "Check application logs to ensure no memory\u2011pressure warnings appear.",
+              "Run the full test suite to confirm no regressions."
+            ],
+            "rollback_plan": "Revert service/app.py to its original contents with the AUDIT_TRACE_REGISTRY and original process_upload implementation, then redeploy the previous container image.",
+            "evidence_ids": [
+              "EV-LOG-001",
+              "EV-LOG-002",
+              "EV-MET-002",
+              "EV-MET-003",
+              "EV-MET-009"
+            ]
+          },
+          {
+            "proposal_id": "FIX-003",
+            "hypothesis_id": "HYP-003",
+            "incident_id": "inc_04_memory_leak",
+            "status": "PROPOSED",
+            "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+            "summary": "Remove persistent storage of uploaded bytes in the global AUDIT_TRACE_REGISTRY to stop unbounded memory growth.",
+            "rationale": "The confirmed root cause is that the global AUDIT_TRACE_REGISTRY retains every uploaded file's bytes, preventing garbage collection and causing long GC pauses; removing this storage allows memory to be reclaimed promptly.",
+            "changes": [
+              {
+                "file": "service/app.py",
+                "start_line": null,
+                "end_line": null,
+                "description": "Eliminate the registry write in process_upload so uploaded data is not retained globally, preventing memory bloat.",
+                "before": "    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)",
+                "after": "    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        # Process the upload without retaining the raw bytes in a global registry\n        return len(file_bytes)"
+              }
+            ],
+            "patch": "--- a/service/app.py\n+++ b/service/app.py\n@@ -5,7 +5,6 @@\n class DocumentProcessor:\n     AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        # Process the upload without retaining the raw bytes in a global registry\n+        return len(file_bytes)\n",
+            "expected_effect": "Memory usage remains stable under load, GC pause durations return to baseline, and OOM events are avoided.",
+            "risks": [
+              "If other components rely on AUDIT_TRACE_REGISTRY for later processing they may fail",
+              "Audit trace functionality that depends on stored bytes will be lost"
+            ],
+            "validation_plan": [
+              "Deploy the change to a staging environment with a realistic upload workload",
+              "Monitor RSS memory and GC pause metrics to verify they stay within baseline values",
+              "Run functional tests to confirm upload processing still returns correct length and no errors",
+              "Execute integration tests that may reference AUDIT_TRACE_REGISTRY to ensure they either pass or are updated accordingly"
+            ],
+            "rollback_plan": "Revert service/app.py to its previous version restoring the original process_upload implementation that stores bytes in AUDIT_TRACE_REGISTRY, then redeploy.",
+            "evidence_ids": [
+              "EV-LOG-001",
+              "EV-MET-001",
+              "EV-MET-002",
+              "EV-MET-008"
+            ]
+          },
+          {
+            "proposal_id": "FIX-004",
+            "hypothesis_id": "HYP-004",
+            "incident_id": "inc_04_memory_leak",
+            "status": "PROPOSED",
+            "human_approval_notice": "AWAITING HUMAN APPROVAL \u2014 this fix has not been applied.",
+            "summary": "Remove the unbounded global audit trace registry to reduce memory consumption per upload.",
+            "rationale": "The confirmed root cause is that the service retains full upload payloads in a global dictionary, causing memory usage to grow until it hits the container's 1\u202fGB limit; eliminating this persistent storage prevents the memory leak and keeps usage well below the limit.",
+            "changes": [
+              {
+                "file": "service/app.py",
+                "start_line": null,
+                "end_line": null,
+                "description": "Delete the AUDIT_TRACE_REGISTRY and its usage, and simplify process_upload to return the payload size without storing the bytes.",
+                "before": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n        return len(file_bytes)\n\n    def clear_registry(self):\n        self.AUDIT_TRACE_REGISTRY.clear()",
+                "after": "import io\nfrom typing import Dict, Any\n\nclass DocumentProcessor:\n    # Removed global audit trace registry to prevent unbounded memory growth.\n\n    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n        # Directly process without storing full bytes in a global dict.\n        return len(file_bytes)"
+              }
+            ],
+            "patch": "--- a/service/app.py\n+++ b/service/app.py\n@@ -1,9 +1,8 @@\n import io\n-from typing import Dict, Any\n+from typing import Dict, Any\n \n class DocumentProcessor:\n-    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}\n-\n-    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n-        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n-        return len(file_bytes)\n-\n-    def clear_registry(self):\n-        self.AUDIT_TRACE_REGISTRY.clear()\n+    # Removed global audit trace registry to prevent unbounded memory growth.\n+\n+    def process_upload(self, upload_id: str, file_bytes: bytes) -> int:\n+        # Directly process without storing full bytes in a global dict.\n+        return len(file_bytes)\n",
+            "expected_effect": "Memory usage will remain low during normal operation, staying well below the 1\u202fGB container limit and preventing OOM kills.",
+            "risks": [
+              "Loss of audit\u2011trace functionality that may be relied upon by other components",
+              "Potential side\u2011effects if external code expects the registry to exist"
+            ],
+            "validation_plan": [
+              "Deploy the modified service to a staging environment.",
+              "Run a realistic upload workload that previously triggered OOM.",
+              "Monitor container memory usage; it should stay under ~200\u202fMB.",
+              "Verify that upload processing still returns correct file size values.",
+              "Confirm that no new errors appear in application logs."
+            ],
+            "rollback_plan": "Revert service/app.py to the original version containing the AUDIT_TRACE_REGISTRY and its usage, then redeploy the previous container image.",
+            "evidence_ids": [
+              "EV-LOG-001",
+              "EV-LOG-002",
+              "EV-LOG-004",
+              "EV-MET-002"
+            ]
+          }
+        ],
+        "validation_errors": {},
+        "skipped_hypotheses": []
+      }
+    },
+    "approvals": {
+      "status": "SUCCEEDED",
+      "llm_calls": 0,
+      "output": {
+        "incident_id": "inc_04_memory_leak",
+        "approval_records": [
+          {
+            "proposal_id": "FIX-001",
+            "status": "REJECTED",
+            "decision": "rejected",
+            "approved_by": "human",
+            "timestamp": "2026-08-29T10:12:24.619685+00:00",
+            "notes": "No input provided \u2014 defaulting to rejected."
+          },
+          {
+            "proposal_id": "FIX-002",
+            "status": "REJECTED",
+            "decision": "rejected",
+            "approved_by": "human",
+            "timestamp": "2026-08-29T10:12:24.622724+00:00",
+            "notes": "No input provided \u2014 defaulting to rejected."
+          },
+          {
+            "proposal_id": "FIX-003",
+            "status": "REJECTED",
+            "decision": "rejected",
+            "approved_by": "human",
+            "timestamp": "2026-08-29T10:12:24.624726+00:00",
+            "notes": "No input provided \u2014 defaulting to rejected."
+          },
+          {
+            "proposal_id": "FIX-004",
+            "status": "REJECTED",
+            "decision": "rejected",
+            "approved_by": "human",
+            "timestamp": "2026-08-29T10:12:24.625727+00:00",
+            "notes": "No input provided \u2014 defaulting to rejected."
+          }
+        ],
+        "summary": {
+          "total": 4,
+          "approved": 0,
+          "rejected": 4
+        }
+      }
+    }
+  },
+  "summary": {
+    "confirmed_hypotheses": 4,
+    "rejected_hypotheses": 0,
+    "inconclusive_hypotheses": 0,
+    "proposals_generated": 4,
+    "proposals_approved": 0,
+    "proposals_rejected": 4
+  },
+  "error": null
+}

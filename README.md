@@ -29,41 +29,41 @@ Sentinel introduces an evidence-driven, hypothesis-testing workflow:
 ```
 Incident Bundle
     │
-    ▼
-Orchestrator
-    │
-    ├─► Logs Agent (IMPLEMENTED) ──┐
-    ├─► Metrics Agent (IMPLEMENTED)┼─► Evidence Items (with IDs)
-    └─► Code Agent (IMPLEMENTED) ──┘
-            │
-            ▼
-    Hypothesis Engine (IMPLEMENTED)
-    ├─ HYP-001: Falsifiable claim + EV-IDs
-    ├─ HYP-002: Competing hypothesis
-    ├─ HYP-003: Alternative explanation
-    └─ HYP-004: Secondary candidate
-            │
-            ▼
-    Verification Agent (IMPLEMENTED)
-    ├─ Deterministic AST checks
-    ├─ Source/log/metric invariant checks
-    ├─ Falsification condition evaluation
-    └─ Read-only (no mutations)
-            │
-            ▼
-    CONFIRMED / REJECTED / INCONCLUSIVE
-            │
-            ▼
-    Root Cause Report (Confirmed Evidence-Backed Report)
-            │
-            ▼
+    ├─────────────────────────────────────┐
+    ▼               ▼                     ▼
+Logs Agent      Metrics Agent         Code Agent
+(IMPLEMENTED)   (IMPLEMENTED)         (IMPLEMENTED)
+    │               │                     │
+    └───────────────┼─────────────────────┘
+                    ▼
+            Evidence Fusion
+            (IMPLEMENTED — Orchestrator)
+                    │
+                    ▼
+        Hypothesis Engine (IMPLEMENTED)
+        ├─ HYP-001: Falsifiable claim + EV-IDs
+        ├─ HYP-002: Competing hypothesis
+        ├─ HYP-003: Alternative explanation
+        └─ HYP-004: Secondary candidate
+                    │
+                    ▼
+        Verification Agent (IMPLEMENTED)
+        ├─ Deterministic AST checks
+        ├─ Source/log/metric invariant checks
+        ├─ Falsification condition evaluation
+        └─ Read-only (no mutations)
+                    │
+                    ▼
+        CONFIRMED / REJECTED / INCONCLUSIVE
+                    │
+                    ▼
     Fix Proposal Agent (IMPLEMENTED)
     ├─ ONE Groq structured call per CONFIRMED hypothesis
     ├─ Proposal validated by deterministic fix_tools.py
     ├─ Status: PROPOSED (never auto-applied)
     └─ Patch: unified diff, labelled PROPOSED
-            │
-            ▼
+                    │
+                    ▼
     Proposal Validation (IMPLEMENTED — agents/fix_tools.py)
     ├─ Hypothesis eligibility check (CONFIRMED only)
     ├─ Evidence ID existence check
@@ -71,20 +71,30 @@ Orchestrator
     ├─ Source location validity check
     ├─ Patch safety check (no destructive ops)
     └─ Applied-claim detection
-            │
-            ▼
+                    │
+                    ▼
     Human Approval Gate (IMPLEMENTED — agents/approval_gate.py)
     ├─ State: PROPOSED → PENDING_APPROVAL → APPROVED | REJECTED
     ├─ Default: REJECTED (non-interactive auto-rejects)
     ├─ Only explicit "y/yes" → APPROVED
     └─ Approval records decision ONLY — patch NOT applied
-            │
-            ▼
-    APPROVED / REJECTED
-            │
-            ▼
-    [NO AUTO-APPLY IN THIS MILESTONE]
-    Actual patch application is gated to a later stage (Orchestrator)
+                    │
+                    ▼
+            APPROVED / REJECTED
+                    │
+                    ▼
+    Final Investigation Result
+    (IMPLEMENTED — Orchestrator + orchestrator_result_schema.json)
+
+Orchestrator (IMPLEMENTED — agents/orchestrator.py):
+    - Makes ZERO direct LLM calls
+    - Coordinates all 8 stages
+    - Caches per-stage outputs for resumability (avoids duplicate Groq calls)
+    - Non-interactive by default (approval gate auto-rejects)
+    - Never reads ground_truth.md or baseline results
+    - [NO AUTO-APPLY IN THIS MILESTONE]
+
+[NO AUTO-APPLY] — Actual patch application is gated to a later stage.
 ```
 
 ## 6. Evaluation
@@ -94,7 +104,7 @@ Sentinel is evaluated against a fair baseline across 10 canonical synthetic prod
 | Component | Status | Accuracy (Root Cause) | Verification Score | Mean Latency | Notes |
 |---|---|:---:|:---:|:---:|---|
 | **Baseline Investigator** | **MEASURED** | **10/10 (100%)** | **0%** | **15.98s** | Single-shot Groq model (`openai/gpt-oss-120b`). Guesses root cause without executable verification. |
-| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED. Code Agent = IMPLEMENTED. Hypothesis Engine = IMPLEMENTED. Verification Agent = IMPLEMENTED. Fix Proposal Agent = IMPLEMENTED. Human Approval Gate = IMPLEMENTED.** Orchestrator and final benchmark are not yet implemented. |
+| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED. Code Agent = IMPLEMENTED. Hypothesis Engine = IMPLEMENTED. Verification Agent = IMPLEMENTED. Fix Proposal Agent = IMPLEMENTED. Human Approval Gate = IMPLEMENTED. Orchestrator = IMPLEMENTED.** Final comparative benchmark is not yet run (Milestone 10). |
 
 **Fairness lock**: Baseline and Sentinel are benchmarked on the identical 10 incident bundles using the same Groq model (`openai/gpt-oss-120b`), temperature (`0.0`), and equivalent available evidence.
 
