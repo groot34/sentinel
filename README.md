@@ -34,7 +34,7 @@ Orchestrator
     │
     ├─► Logs Agent (IMPLEMENTED) ──┐
     ├─► Metrics Agent (IMPLEMENTED)┼─► Evidence Items (with IDs)
-    └─► Code Agent (pending) ──────┘
+    └─► Code Agent (IMPLEMENTED) ──┘
             │
             ▼
     Hypothesis Engine (1–4 Falsifiable Hypotheses)
@@ -59,7 +59,7 @@ Sentinel is evaluated against a fair baseline across 10 canonical synthetic prod
 | Component | Status | Accuracy (Root Cause) | Verification Score | Mean Latency | Notes |
 |---|---|:---:|:---:|:---:|---|
 | **Baseline Investigator** | **MEASURED** | **10/10 (100%)** | **0%** | **15.98s** | Single-shot Groq model (`openai/gpt-oss-120b`). Guesses root cause without executable verification. |
-| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED.** Code Agent, Hypothesis Engine, Verification Agent, Fix Proposal Agent, and Orchestrator are not implemented. |
+| **Sentinel (Advanced)** | In Progress | *Pending* | *Target: 100%* | *TBD* | Multi-agent hypothesis generation, executable code verification, and human-in-the-loop fix gates. **Logs Agent = IMPLEMENTED. Metrics Agent = IMPLEMENTED. Code Agent = IMPLEMENTED.** Hypothesis Engine, Verification Agent, Fix Proposal Agent, and Orchestrator are not implemented. |
 
 **Fairness lock**: Baseline and Sentinel are benchmarked on the identical 10 incident bundles using the same Groq model (`openai/gpt-oss-120b`), temperature (`0.0`), and equivalent available evidence.
 

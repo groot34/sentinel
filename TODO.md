@@ -33,8 +33,11 @@
 ---
 
 ## Upcoming Milestones
-- [ ] **Milestone 6c: Code Agent**
-  - Implement `agents/code_agent.py` (diff inspection + AST/file analyzer).
+- [x] **Milestone 6c: Code Agent**
+  - Implemented `agents/code_tools.py` (unified-diff parser, AST/regex pattern detectors, reference-grounded evidence collection).
+  - Implemented `agents/code_agent.py` using `core.llm` and locked model `openai/gpt-oss-120b`.
+  - Schema: `schemas/code_agent_schema.json`.
+  - Unit tests mocked; live Groq sample runs for incidents 01, 04, 07, and 10.
 - [ ] **Milestone 7: Hypothesis Engine & Verification Agent**
   - Implement `agents/hypothesis_engine.py` generating 1–4 falsifiable hypotheses with evidence IDs.
   - Implement `agents/verification_agent.py` executing programmatic invariant checks (`CONFIRMED`, `REJECTED`, `INCONCLUSIVE`).

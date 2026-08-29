@@ -69,6 +69,24 @@ structured metric evidence (schemas/metrics_agent_schema.json)
 
 The Metrics Agent reports what the numbers show (spikes, drops, period shifts, correlations). It does not emit a verified root cause.
 
+### Code Agent pipeline (implemented)
+
+```
+source code + git_diff.patch
+        ↓
+deterministic code tools (agents/code_tools.py)
+        ↓
+candidate code evidence — added/removed lines, hunks, suspicious patterns
+        ↓
+small evidence bundle with real file:line or git_diff.patch:hunk references
+        ↓
+Groq interpretation (one generate_structured call)
+        ↓
+structured code evidence (schemas/code_agent_schema.json)
+```
+
+The Code Agent reports what changed in the source and what behaviour that change may introduce. It does not emit a verified root cause.
+
 ### Key Architectural Guardrails
 1. **Zero Secret Leakage**: `_sanitize_message` strips Groq/OpenAI pattern tokens from all exceptions, error logs, and stack traces.
 2. **Rate Limit & Backoff**: Exponential backoff on 429 rate limit errors with conservative retry limits (default 2 retries) to preserve free-tier quotas.

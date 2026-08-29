@@ -61,6 +61,27 @@ python -m agents.metrics_agent incidents/inc_10_multi_symptom_cascade \
 
 Requires `GROQ_API_KEY` and locked model `openai/gpt-oss-120b`. The Metrics Agent does not read `ground_truth.md` and does not run the Sentinel benchmark.
 
+## Running Code Agent (Evidence Only)
+```bash
+# Incident 01 — N+1 query pattern inside serializer loop
+python -m agents.code_agent incidents/inc_01_n_plus_one_query \
+  --output eval/sample_runs/code_agent_inc_01.json
+
+# Incident 04 — memory-related unbounded registry code change
+python -m agents.code_agent incidents/inc_04_memory_leak \
+  --output eval/sample_runs/code_agent_inc_04.json
+
+# Incident 07 — aggressive retry behaviour (10 retries, zero backoff)
+python -m agents.code_agent incidents/inc_07_retry_storm \
+  --output eval/sample_runs/code_agent_inc_07.json
+
+# Incident 10 — hard multi-symptom cascade (observations only, not a root-cause diagnosis)
+python -m agents.code_agent incidents/inc_10_multi_symptom_cascade \
+  --output eval/sample_runs/code_agent_inc_10.json
+```
+
+Requires `GROQ_API_KEY` and locked model `openai/gpt-oss-120b`. The Code Agent does not read `ground_truth.md` and does not run the Sentinel benchmark.
+
 ## Running Single Baseline Diagnosis
 ```bash
 # Diagnose one incident (requires GROQ_API_KEY in .env)

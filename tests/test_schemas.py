@@ -17,6 +17,7 @@ SCHEMA_FILES = [
     "report_schema.json",
     "logs_agent_schema.json",
     "metrics_agent_schema.json",
+    "code_agent_schema.json",
 ]
 
 
@@ -89,6 +90,33 @@ def test_metrics_agent_schema_validation() -> None:
                 "value": 10000.0,
                 "type": "spike",
                 "interpretation": "p95 latency reached 10000ms.",
+            }
+        ],
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_code_agent_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "code_agent_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "agent": "code_agent",
+        "summary": "Added per-item DB query inside serialization loop.",
+        "evidence": [
+            {
+                "evidence_id": "EV-CODE-001",
+                "source": "code",
+                "reference": "service/app.py:40-42",
+                "type": "suspicious_pattern",
+                "excerpt": (
+                    "        for item in order.items:\n"
+                    "            address = db_session.query_address_by_id(item.shipping_address_id)\n"
+                    '            data["items"].append({"item_id": item.id})'
+                ),
+                "interpretation": "DB call executed inside a loop over order items (N+1 query pattern).",
             }
         ],
     }

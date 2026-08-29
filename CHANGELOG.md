@@ -2,6 +2,30 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.7.0] - 2026-08-29
+
+### Added
+- **Deterministic Code Tools (`agents/code_tools.py`)**:
+  - Mechanical extractors with no LLM calls: `load_git_diff`, `parse_git_diff`, `list_changed_files`, `extract_added_lines`, `extract_removed_lines`, `extract_hunks`, `iter_source_files`, `search_source`, `get_source_context`, `detect_suspicious_patterns`, `collect_candidate_evidence`.
+  - Unified-diff parser with per-hunk added/removed line tracking and 1-indexed file/patch line numbers.
+  - AST-based pattern detectors: DB queries inside loops, class-level mutable collections, connection-acquire without guaranteed release, retry loops, check-then-act, unbounded collections.
+  - Regex-based line detectors: DROP/CREATE INDEX, high retry counts (>=5), zero backoff, short cache TTL (<=30s), long timeouts (>=30s), circuit-breaker-disabled hints, outbound HTTP calls.
+  - References of the form `service/app.py:40-42` (real files) or `git_diff.patch:hunk 1` (patch-hunk fallback when added lines have interleaved context).
+- **Code Evidence Agent (`agents/code_agent.py`)**:
+  - Locates `git_diff.patch` and `service/` source under an incident directory. Never reads `ground_truth.md`.
+  - Runs deterministic extraction first, then exactly one `core.llm` structured summarisation call (`openai/gpt-oss-120b`).
+  - Returns observational evidence JSON (not a root-cause diagnosis), with stable IDs `EV-CODE-001+` grounded to real source/diff content.
+  - CLI: `python -m agents.code_agent <incident_dir> --output <path>`.
+- **Code Agent Schema (`schemas/code_agent_schema.json`)** with sources `git_diff|code|config`, types `added_code|removed_code|suspicious_pattern|changed_config`, and stable `EV-CODE-NNN` IDs.
+- **Unit tests**:
+  - `tests/test_code_tools.py` (25 tests) covering diff loading/parsing, added/removed/hunk extraction, source search, source context, pattern detection across all 10 canonical incidents, reference grounding, empty/missing diff handling, determinism, and zero hardcoded incident IDs.
+  - `tests/test_code_agent.py` (20 tests, mocked Groq) covering core.llm usage, single LLM call, ground-truth isolation, malformed JSON fallback, empty/missing source/diff handling, unique IDs, real reference grounding, unmodified incident files, AST-only hardcoded-answer check, and schema conformance across all incidents.
+- **Live Groq sample runs** (not a Sentinel benchmark):
+  - `eval/sample_runs/code_agent_inc_01.json` (N+1 query pattern, EV-CODE-001..004)
+  - `eval/sample_runs/code_agent_inc_04.json` (memory-leak style unbounded registry, EV-CODE-001..004)
+  - `eval/sample_runs/code_agent_inc_07.json` (10 retries + zero backoff, EV-CODE-001..006)
+  - `eval/sample_runs/code_agent_inc_10.json` (multi-symptom migration + connection pool observations, EV-CODE-001..004)
+
 ## [0.6.0] - 2026-08-29
 
 ### Added
@@ -111,7 +135,6 @@ All notable changes and iterative improvements to the Sentinel project will be d
 ## [Unreleased]
 
 ### Planned Next
-- Specialized Evidence Agent (`code_agent.py`).
 - Hypothesis Engine and Verification Agent.
 - Orchestrator, Fix Proposal Agent, and comparative Sentinel evaluation.
 

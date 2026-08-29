@@ -1,0 +1,39 @@
+{
+  "incident_id": "inc_01_n_plus_one_query",
+  "agent": "code_agent",
+  "summary": "The recent change adds an \"items\" array to the order serialization and introduces a loop that performs a database lookup for each order item, while also removing a standalone \"item_count\" line. This introduces a pattern of a DB query inside a per\u2011item loop, which may affect query volume.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+            \"item_count\": len(order.items),\n+            \"items\": []\n+        for item in order.items:\n+            address = db_session.query_address_by_id(item.shipping_address_id)\n+            data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})",
+      "interpretation": "Adds initialization of an empty \"items\" list and a loop that queries the address table for each item, extending the serialized payload with per\u2011item details."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-            \"item_count\": len(order.items)",
+      "interpretation": "Removes the previous line that only emitted the item count without a trailing comma; the line is re\u2011added in the added_code block with a comma, indicating a formatting change rather than functional logic."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "code",
+      "reference": "service/app.py:40-42",
+      "type": "suspicious_pattern",
+      "excerpt": "        for item in order.items:\n            address = db_session.query_address_by_id(item.shipping_address_id)\n            data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})",
+      "interpretation": "Shows a direct database call inside a loop over order items, matching a known N+1 query pattern."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-            \"item_count\": len(order.items)\n+            \"item_count\": len(order.items),\n+            \"items\": []\n+        for item in order.items:\n+            address = db_session.query_address_by_id(item.shipping_address_id)\n+            data[\"items\"].append({\"item_id\": item.id, \"shipping_to\": address.city if address else None})",
+      "interpretation": "Diff highlights the introduction of a loop that performs a DB query per item, flagged as a potential N+1 query pattern."
+    }
+  ]
+}

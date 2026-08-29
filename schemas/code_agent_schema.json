@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CodeAgentEvidence",
+  "description": "Structured, traceable code/diff evidence produced by the Code Agent. This is not a root-cause diagnosis.",
+  "type": "object",
+  "required": ["incident_id", "agent", "evidence"],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Identifier of the analyzed incident bundle."
+    },
+    "agent": {
+      "type": "string",
+      "const": "code_agent",
+      "description": "Producing agent. Always code_agent."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short organisation of code/diff observations. Must not claim a verified root cause."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Prioritised code evidence items with stable IDs and precise source/diff references.",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "source",
+          "reference",
+          "type",
+          "excerpt"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^EV-CODE-[0-9]{3,}$",
+            "description": "Stable unique identifier (e.g. EV-CODE-001)."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["git_diff", "code", "config"],
+            "description": "Origin of this evidence item."
+          },
+          "reference": {
+            "type": "string",
+            "description": "Precise locator such as service/app.py:40-42 or git_diff.patch:hunk 1."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["added_code", "removed_code", "suspicious_pattern", "changed_config"],
+            "description": "Deterministic extraction category."
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "Exact original source or diff text. Must not be paraphrased."
+          },
+          "interpretation": {
+            "type": "string",
+            "description": "LLM organisation/priority note. Observational only, not a diagnosis."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

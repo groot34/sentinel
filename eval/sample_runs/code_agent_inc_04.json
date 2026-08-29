@@ -1,0 +1,39 @@
+{
+  "incident_id": "inc_04_memory_leak",
+  "agent": "code_agent",
+  "summary": "The recent change replaces streaming text extraction with storing the raw file bytes in a globally shared mutable dictionary and returns the byte length, while a class\u2011level mutable dict is declared for audit tracing. This introduces a global collection that can grow with each upload.",
+  "evidence": [
+    {
+      "evidence_id": "EV-CODE-001",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "suspicious_pattern",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)\n+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Pattern flagged as an unbounded collection: code now adds entries to a global dict keyed by upload_id, which may grow without explicit limits."
+    },
+    {
+      "evidence_id": "EV-CODE-002",
+      "source": "code",
+      "reference": "service/app.py:5",
+      "type": "suspicious_pattern",
+      "excerpt": "    AUDIT_TRACE_REGISTRY: Dict[str, bytes] = {}",
+      "interpretation": "Declaration of a mutable class\u2011level dictionary that is shared across the application, enabling state to persist between requests."
+    },
+    {
+      "evidence_id": "EV-CODE-003",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "added_code",
+      "excerpt": "+    AUDIT_TRACE_REGISTRY = {}\n+\n+        # Retaining reference in global audit trace registry\n+        self.AUDIT_TRACE_REGISTRY[upload_id] = file_bytes\n+        return len(file_bytes)",
+      "interpretation": "Added code stores the incoming file bytes in the global AUDIT_TRACE_REGISTRY and returns its length, removing prior processing logic."
+    },
+    {
+      "evidence_id": "EV-CODE-004",
+      "source": "git_diff",
+      "reference": "git_diff.patch:hunk 1",
+      "type": "removed_code",
+      "excerpt": "-        stream = io.BytesIO(file_bytes)\n-        return self._extract_text(stream)",
+      "interpretation": "Removed code previously created a BytesIO stream and called _extract_text, indicating a shift away from streaming text extraction."
+    }
+  ]
+}
