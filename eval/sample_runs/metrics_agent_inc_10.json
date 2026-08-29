@@ -1,0 +1,87 @@
+{
+  "incident_id": "inc_10_multi_symptom_cascade",
+  "agent": "metrics_agent",
+  "summary": "Several metrics exhibit simultaneous extreme deviations at 2026-08-28T14:07:00Z, including query latency, client retries, error rate, and pod readiness failures, with a preceding rise in active DB connections. The error rate surpasses the 90% threshold and shows a large period change. High positive correlations among these metrics indicate they moved together during the observed window.",
+  "evidence": [
+    {
+      "evidence_id": "EV-MET-001",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "ledger_query_duration_ms",
+      "value": 10000.0,
+      "type": "spike",
+      "interpretation": "ledger_query_duration_ms spiked to 10000\u202fms, far above its baseline mean of ~3.5\u202fms."
+    },
+    {
+      "evidence_id": "EV-MET-002",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "client_retries_sec",
+      "value": 120.0,
+      "type": "spike",
+      "interpretation": "client_retries_sec jumped to 120\u202fseconds, a dramatic increase from a baseline of 0\u202fs."
+    },
+    {
+      "evidence_id": "EV-MET-003",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "error_rate_pct",
+      "value": 100.0,
+      "type": "spike",
+      "interpretation": "error_rate_pct spiked to 100\u202f%, indicating total failures during the sample."
+    },
+    {
+      "evidence_id": "EV-MET-004",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 6",
+      "timestamp": "2026-08-28T14:05:30Z",
+      "metric": "active_db_conns",
+      "value": 15.0,
+      "type": "spike",
+      "interpretation": "active_db_conns rose to 15, well above its baseline mean of ~2.3 connections."
+    },
+    {
+      "evidence_id": "EV-MET-005",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "pod_readiness_failures",
+      "value": 5.0,
+      "type": "spike",
+      "interpretation": "pod_readiness_failures increased to 5 failures, whereas the baseline is 0."
+    },
+    {
+      "evidence_id": "EV-MET-006",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "error_rate_pct",
+      "value": 100.0,
+      "type": "threshold",
+      "interpretation": "error_rate_pct reached 100\u202f%, exceeding the defined 90\u202f% threshold."
+    },
+    {
+      "evidence_id": "EV-MET-007",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv:row 8",
+      "timestamp": "2026-08-28T14:07:00Z",
+      "metric": "error_rate_pct",
+      "value": 100.0,
+      "type": "period_change",
+      "interpretation": "error_rate_pct shifted from a baseline mean of 0\u202f% to an average of 47\u202f% in the period, a delta of 47\u202f%."
+    },
+    {
+      "evidence_id": "EV-MET-008",
+      "source": "metrics",
+      "reference": "metrics/metrics.csv",
+      "timestamp": "2026-08-28T14:00:00Z/2026-08-28T14:07:00Z",
+      "metric": "pod_readiness_failures~error_rate_pct",
+      "value": 0.997117889419821,
+      "type": "correlation",
+      "interpretation": "pod readiness failures and error rate are almost perfectly positively correlated (Pearson r\u22480.997) over the 7\u2011sample window."
+    }
+  ]
+}

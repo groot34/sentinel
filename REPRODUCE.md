@@ -44,6 +44,23 @@ python -m agents.logs_agent incidents/inc_10_multi_symptom_cascade \
 
 Requires `GROQ_API_KEY` and locked model `openai/gpt-oss-120b`. The Logs Agent does not read `ground_truth.md` and does not run the Sentinel benchmark.
 
+## Running Metrics Agent (Evidence Only)
+```bash
+# Incident 01 — database/latency metrics
+python -m agents.metrics_agent incidents/inc_01_n_plus_one_query \
+  --output eval/sample_runs/metrics_agent_inc_01.json
+
+# Incident 03 — Kafka/consumer-lag metrics
+python -m agents.metrics_agent incidents/inc_03_consumer_lag \
+  --output eval/sample_runs/metrics_agent_inc_03.json
+
+# Incident 10 — multi-symptom cascade (observations only, not a root-cause diagnosis)
+python -m agents.metrics_agent incidents/inc_10_multi_symptom_cascade \
+  --output eval/sample_runs/metrics_agent_inc_10.json
+```
+
+Requires `GROQ_API_KEY` and locked model `openai/gpt-oss-120b`. The Metrics Agent does not read `ground_truth.md` and does not run the Sentinel benchmark.
+
 ## Running Single Baseline Diagnosis
 ```bash
 # Diagnose one incident (requires GROQ_API_KEY in .env)

@@ -23,13 +23,17 @@
   - Implemented `agents/logs_agent.py` using `core.llm` and locked model `openai/gpt-oss-120b`.
   - Schema: `schemas/logs_agent_schema.json`.
   - Unit tests mocked; live Groq sample runs for incidents 01 and 10.
+- [x] **Milestone 6b: Metrics Agent + Deterministic Metric Tools** (2026-08-29)
+  - Implemented `agents/metric_tools.py` (no LLM calls; baseline z-score spikes/drops).
+  - Implemented `agents/metrics_agent.py` using `core.llm` and locked model `openai/gpt-oss-120b`.
+  - Schema: `schemas/metrics_agent_schema.json`.
+  - Unit tests mocked; live Groq sample runs for incidents 01, 03, and 10.
 
 
 ---
 
 ## Upcoming Milestones
-- [ ] **Milestone 6b: Remaining Specialized Evidence Agents**
-  - Implement `agents/metrics_agent.py` (statistical anomaly detector + Groq summarizer).
+- [ ] **Milestone 6c: Code Agent**
   - Implement `agents/code_agent.py` (diff inspection + AST/file analyzer).
 - [ ] **Milestone 7: Hypothesis Engine & Verification Agent**
   - Implement `agents/hypothesis_engine.py` generating 1–4 falsifiable hypotheses with evidence IDs.

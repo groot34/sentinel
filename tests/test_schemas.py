@@ -16,6 +16,7 @@ SCHEMA_FILES = [
     "orchestrator_schema.json",
     "report_schema.json",
     "logs_agent_schema.json",
+    "metrics_agent_schema.json",
 ]
 
 
@@ -63,6 +64,31 @@ def test_logs_agent_schema_validation() -> None:
                 "type": "error",
                 "excerpt": "ERROR [order-service] [db-pool] Pool exhausted: 20/20 active connections held by bulk order serializer",
                 "interpretation": "Connection pool is fully occupied.",
+            }
+        ],
+    }
+    jsonschema.validate(instance=valid_sample, schema=schema)
+
+
+def test_metrics_agent_schema_validation() -> None:
+    schema_path = SCHEMAS_DIR / "metrics_agent_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    valid_sample = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "agent": "metrics_agent",
+        "summary": "Latency and connection count rose versus the early window.",
+        "evidence": [
+            {
+                "evidence_id": "EV-MET-001",
+                "source": "metrics",
+                "reference": "metrics/metrics.csv:row 9",
+                "timestamp": "2026-08-28T14:12:00Z",
+                "metric": "latency_p95_ms",
+                "value": 10000.0,
+                "type": "spike",
+                "interpretation": "p95 latency reached 10000ms.",
             }
         ],
     }

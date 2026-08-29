@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MetricsAgentEvidence",
+  "description": "Structured, traceable quantitative evidence produced by the Metrics Agent. This is not a root-cause diagnosis.",
+  "type": "object",
+  "required": ["incident_id", "agent", "evidence"],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Identifier of the analyzed incident bundle."
+    },
+    "agent": {
+      "type": "string",
+      "const": "metrics_agent",
+      "description": "Producing agent. Always metrics_agent."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short organisation of metric observations. Must not claim a verified root cause."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Prioritised metric evidence items with stable IDs and precise source references.",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "source",
+          "reference",
+          "metric",
+          "value",
+          "type"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^EV-MET-[0-9]{3,}$",
+            "description": "Stable unique identifier (e.g. EV-MET-001)."
+          },
+          "source": {
+            "type": "string",
+            "const": "metrics",
+            "description": "Origin of this evidence item."
+          },
+          "reference": {
+            "type": "string",
+            "description": "Precise source locator, e.g. metrics/metrics.csv:row 7 (1-indexed file line, header is row 1)."
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Timestamp of the referenced metric sample, or a start/end window for series-level items."
+          },
+          "metric": {
+            "type": "string",
+            "description": "Metric column name, or name1~name2 for a correlation pair."
+          },
+          "value": {
+            "type": "number",
+            "description": "Original metric sample, or the Pearson r for correlation items."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["spike", "drop", "threshold", "period_change", "correlation", "anomaly"],
+            "description": "Deterministic extraction category."
+          },
+          "interpretation": {
+            "type": "string",
+            "description": "LLM organisation/priority note. Observational only, not a diagnosis."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

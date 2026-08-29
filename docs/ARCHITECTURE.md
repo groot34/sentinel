@@ -53,6 +53,22 @@ structured log evidence (schemas/logs_agent_schema.json)
 
 The Logs Agent organises observations only. It does not emit a verified root cause.
 
+### Metrics Agent pipeline (implemented)
+
+```
+metrics.csv
+        ↓
+deterministic metric tools (agents/metric_tools.py)
+        ↓
+candidate quantitative evidence
+        ↓
+Groq summarisation (one generate_structured call)
+        ↓
+structured metric evidence (schemas/metrics_agent_schema.json)
+```
+
+The Metrics Agent reports what the numbers show (spikes, drops, period shifts, correlations). It does not emit a verified root cause.
+
 ### Key Architectural Guardrails
 1. **Zero Secret Leakage**: `_sanitize_message` strips Groq/OpenAI pattern tokens from all exceptions, error logs, and stack traces.
 2. **Rate Limit & Backoff**: Exponential backoff on 429 rate limit errors with conservative retry limits (default 2 retries) to preserve free-tier quotas.

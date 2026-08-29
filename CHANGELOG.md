@@ -2,6 +2,27 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [0.6.0] - 2026-08-29
+
+### Added
+- **Deterministic Metric Tools (`agents/metric_tools.py`)**:
+  - Mechanical extractors with no LLM calls: `load_metrics`, `list_metrics`, `get_metric_window`, `calculate_summary`, `detect_spikes`, `detect_drops`, `detect_threshold_violations`, `compare_periods`, `detect_metric_correlations`, `find_metric_anomalies`, `collect_candidate_evidence`.
+  - Anomaly method: early baseline window of `ceil(n/3)` samples; spike if z >= 2.0 (or any increase when baseline std is 0); drop if z <= -2.0 (or any decrease when std is 0). Population stdev (`statistics.pstdev`).
+  - References of the form `metrics/metrics.csv:row N` (1-indexed file lines, header is row 1) with original numeric values preserved.
+- **Metrics Evidence Agent (`agents/metrics_agent.py`)**:
+  - Loads `metrics/metrics.csv` from an incident directory, never `ground_truth.md`.
+  - Runs deterministic extraction first, then exactly one `core.llm` structured summarisation call (`openai/gpt-oss-120b`).
+  - Returns observational evidence JSON (not a root-cause diagnosis), with stable IDs `EV-MET-001+` grounded to real samples.
+  - CLI: `python -m agents.metrics_agent <incident_dir> --output <path>`.
+- **Metrics Agent Schema (`schemas/metrics_agent_schema.json`)**.
+- **Unit tests**:
+  - `tests/test_metric_tools.py` (12 tests).
+  - `tests/test_metrics_agent.py` (11 tests, mocked Groq).
+- **Live Groq sample runs** (not a Sentinel benchmark):
+  - `eval/sample_runs/metrics_agent_inc_01.json`
+  - `eval/sample_runs/metrics_agent_inc_03.json`
+  - `eval/sample_runs/metrics_agent_inc_10.json`
+
 ## [0.5.0] - 2026-08-29
 
 ### Added
@@ -90,7 +111,7 @@ All notable changes and iterative improvements to the Sentinel project will be d
 ## [Unreleased]
 
 ### Planned Next
-- Specialized Evidence Agents (`metrics_agent.py`, `code_agent.py`).
+- Specialized Evidence Agent (`code_agent.py`).
 - Hypothesis Engine and Verification Agent.
 - Orchestrator, Fix Proposal Agent, and comparative Sentinel evaluation.
 
