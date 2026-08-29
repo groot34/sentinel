@@ -158,3 +158,55 @@ Benchmark results stored in `eval/results_baseline.csv`, `eval/baseline_summary.
 
 ## 7. Hot Take
 > *Plausibility is the enemy of reliability.* Most AI incident response tools are dangerous because they sound authoritative even when they are dead wrong. Incident investigation is an empirical science: if a hypothesis cannot be verified against concrete evidence, it has no business being in a root-cause report.
+
+---
+
+## 8. Quickstart
+
+### Prerequisites
+- Python 3.11+
+- A free [Groq API key](https://console.groq.com) (no credit card required)
+
+### Install
+
+```bash
+git clone https://github.com/groot34/sentinel.git
+cd sentinel-incident-investigator
+python -m venv .venv
+# Linux / macOS
+source .venv/bin/activate
+# Windows
+.venv\Scripts\activate
+
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env and set GROQ_API_KEY=gsk_your_key_here
+```
+
+### Run the test suite (no API key required)
+
+```bash
+pytest
+# 315 unit tests + 51 incident dataset validation tests — all mocked, zero real Groq calls
+```
+
+### Investigate one incident
+
+```bash
+# Runs full 8-stage Sentinel pipeline on inc_01 (N+1 query) — requires GROQ_API_KEY
+python -m agents.orchestrator incidents/inc_01_n_plus_one_query
+```
+
+Output is a structured JSON result: evidence → hypotheses → CONFIRMED/REJECTED verdicts → fix proposals → approval gate.
+
+### Reproduce the full benchmark
+
+See **[REPRODUCE.md](REPRODUCE.md)** for the complete step-by-step guide to running the baseline evaluation, the Sentinel evaluation, and the final comparative benchmark across all 10 incidents.
+
+```bash
+# Baseline benchmark (10 incidents, ~3 min on free tier)
+python -m eval.run_eval --mode baseline
+
+# Sentinel full benchmark (10 incidents, ~25 min on free tier; resumes from cache)
+python -m eval.run_sentinel_eval
+```
