@@ -16,13 +16,13 @@ test:
 	pytest tests/ -v
 
 baseline:
-	python eval/run_eval.py --mode baseline
+	python -m eval.run_eval --mode baseline
 
 run:
-	python agents/orchestrator.py
+	python -m agents.orchestrator incidents/inc_01_n_plus_one_query
 
 eval:
-	python eval/run_eval.py --mode compare
+	python -m eval.run_sentinel_eval
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
