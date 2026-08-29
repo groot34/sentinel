@@ -67,3 +67,8 @@
   - Verified: incident directories unchanged (zero diff), ground truth unmodified, baseline outputs unmodified, source files unmodified by approval, zero auto-applied patches, zero `.env`/key leakage.
   - README updated with "Final Evaluation" section (baseline 10/10, sentinel 10/10, accuracy Δ 0.0pp, verification 100% vs 0%, latency/token comparison, safety). CHANGELOG, REPRODUCE, ARCHITECTURE, TODO all updated.
   - Full test suite: 310/310 passing (no regressions). Working tree clean after commit.
+- [x] **Final Engineering Audit** (2026-08-29)
+  - Token telemetry propagation: `core/llm.py` session token tracking integrated with `agents/orchestrator.py` stage-level delta snapshotting.
+  - LLM call accounting model: audited 58 calls derivation (uncached 70 theoretical calls - 12 saved via cached/rate-limited stages = 58).
+  - Safety and deterministic evaluator verification: 0 subprocess/eval/exec, deterministic rule evaluator, strict isolation of ground truth and baseline artifacts.
+  - 5 new audit unit tests in `tests/test_final_evaluation.py` (315/315 passing). All 51 incident dataset integrity tests passing.

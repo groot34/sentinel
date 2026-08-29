@@ -2,6 +2,19 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [1.1.0] - 2026-08-29
+
+### Added
+- **Session Token Telemetry in `core/llm.py`**:
+  - Implemented `_session_prompt_tokens`, `_session_completion_tokens`, `_session_total_tokens`, `_session_llm_calls`, `get_session_token_usage()`, `reset_session_token_usage()` in `GroqLLMClient`.
+- **Stage-Level Token Propagation in `agents/orchestrator.py`**:
+  - `_run_evidence_stage`, `_run_hypothesis_stage`, `_run_fix_proposal_stage` snapshot and calculate exact delta tokens for fresh executions.
+  - Reused/cached stages contribute exactly 0 tokens and 0 calls.
+  - `OrchestratorResult` aggregates `prompt_tokens`, `completion_tokens`, `total_tokens` across all stages.
+- **Audit Test Suite (`tests/test_final_evaluation.py`)**:
+  - 5 new audit tests covering token telemetry tracking, cached stage zero-token contribution, 58 LLM call mathematical breakdown (70 uncached theoretical - 12 saved via cached/rate-limited stages = 58 calls), failed stage cache exclusion, and schema conformance with token properties.
+- **Audit Trajectories**: Added `trajectories/session_10_final_evaluation.md` and `trajectories/session_11_final_audit.md`.
+
 ## [1.0.0] - 2026-08-29
 
 ### Added

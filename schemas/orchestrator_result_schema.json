@@ -30,6 +30,21 @@
       "minimum": 0,
       "description": "Total LLM calls made across all agents. Orchestrator itself contributes 0."
     },
+    "prompt_tokens": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Total prompt tokens consumed during this pipeline run."
+    },
+    "completion_tokens": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Total completion tokens consumed during this pipeline run."
+    },
+    "total_tokens": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Total tokens consumed during this pipeline run."
+    },
     "stages": {
       "type": "object",
       "required": ["logs", "metrics", "code", "evidence_fusion", "hypotheses", "verification", "fix_proposals", "approvals"],

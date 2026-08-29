@@ -122,10 +122,32 @@ class GroqLLMClient:
         self._last_response: Optional[LLMResponse] = None
         self.max_retries = max(0, max_retries)
 
+        # Session token tracking
+        self._session_prompt_tokens: int = 0
+        self._session_completion_tokens: int = 0
+        self._session_total_tokens: int = 0
+        self._session_llm_calls: int = 0
+
         # Allow dependency injection of a mocked/pre-configured client instance for unit testing
         self._raw_client = client_instance
 
         self._validate_configuration()
+
+    def get_session_token_usage(self) -> Dict[str, int]:
+        """Return cumulative token usage and call count for this client session."""
+        return {
+            "prompt_tokens": self._session_prompt_tokens,
+            "completion_tokens": self._session_completion_tokens,
+            "total_tokens": self._session_total_tokens,
+            "llm_calls": self._session_llm_calls,
+        }
+
+    def reset_session_token_usage(self) -> None:
+        """Reset session token and call counters."""
+        self._session_prompt_tokens = 0
+        self._session_completion_tokens = 0
+        self._session_total_tokens = 0
+        self._session_llm_calls = 0
 
 
     def _validate_configuration(self) -> None:
@@ -268,6 +290,14 @@ class GroqLLMClient:
                     prompt_tokens = getattr(chat_completion.usage, "prompt_tokens", None)
                     completion_tokens = getattr(chat_completion.usage, "completion_tokens", None)
                     total_tokens = getattr(chat_completion.usage, "total_tokens", None)
+
+                if prompt_tokens is not None:
+                    self._session_prompt_tokens += prompt_tokens
+                if completion_tokens is not None:
+                    self._session_completion_tokens += completion_tokens
+                if total_tokens is not None:
+                    self._session_total_tokens += total_tokens
+                self._session_llm_calls += 1
 
                 resp = LLMResponse(
                     content=content,

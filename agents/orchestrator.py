@@ -83,9 +83,18 @@ def _stage_result(
     output: Any = None,
     error: Optional[str] = None,
     llm_calls: int = 0,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
     cache_hit: bool = False,
 ) -> Dict[str, Any]:
-    r: Dict[str, Any] = {"status": status, "llm_calls": llm_calls}
+    r: Dict[str, Any] = {
+        "status": status,
+        "llm_calls": llm_calls,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
     if output is not None:
         r["output"] = output
     if error is not None:
@@ -187,6 +196,24 @@ def _save_cache(path: Path, data: Dict[str, Any]) -> None:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception:
         pass  # cache write failure is not fatal
+
+
+def _get_token_usage_snapshot(client: Any) -> Dict[str, int]:
+    if client is not None and hasattr(client, "get_session_token_usage"):
+        try:
+            return client.get_session_token_usage()
+        except Exception:
+            pass
+    return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0}
+
+
+def _calc_token_delta(before: Dict[str, int], after: Dict[str, int]) -> Dict[str, int]:
+    return {
+        "prompt_tokens": max(0, (after.get("prompt_tokens") or 0) - (before.get("prompt_tokens") or 0)),
+        "completion_tokens": max(0, (after.get("completion_tokens") or 0) - (before.get("completion_tokens") or 0)),
+        "total_tokens": max(0, (after.get("total_tokens") or 0) - (before.get("total_tokens") or 0)),
+        "llm_calls": max(0, (after.get("llm_calls") or 0) - (before.get("llm_calls") or 0)),
+    }
 
 
 class IncidentOrchestrator:
@@ -451,14 +478,34 @@ class IncidentOrchestrator:
             cached = _load_cache(cache_path, incident_id)
             if cached is not None:
                 print(f"  [reuse] {stage_name} (cached)")
-                return cached, 0, _stage_result(STATUS_REUSED, output=cached, llm_calls=0, cache_hit=True)
+                return cached, 0, _stage_result(
+                    STATUS_REUSED,
+                    output=cached,
+                    llm_calls=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    cache_hit=True,
+                )
 
+        client = self._get_llm_client()
+        tok_before = _get_token_usage_snapshot(client)
         try:
             print(f"  [run  ] {stage_name}...")
             output = run_fn()
+            tok_after = _get_token_usage_snapshot(client)
+            delta = _calc_token_delta(tok_before, tok_after)
+            calls = delta["llm_calls"] or expected_llm_calls
             if cache_path:
                 _save_cache(cache_path, output)
-            return output, expected_llm_calls, _stage_result(STATUS_SUCCEEDED, output=output, llm_calls=expected_llm_calls)
+            return output, calls, _stage_result(
+                STATUS_SUCCEEDED,
+                output=output,
+                llm_calls=calls,
+                prompt_tokens=delta["prompt_tokens"],
+                completion_tokens=delta["completion_tokens"],
+                total_tokens=delta["total_tokens"],
+            )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             print(f"  [FAIL ] {stage_name}: {err}")
@@ -471,16 +518,28 @@ class IncidentOrchestrator:
         metrics_output: Optional[Dict[str, Any]],
         code_output: Optional[Dict[str, Any]],
     ):
+        client = self._get_llm_client()
+        tok_before = _get_token_usage_snapshot(client)
         try:
             print("  [run  ] hypothesis_engine...")
-            engine = HypothesisEngine(llm_client=self._get_llm_client())
+            engine = HypothesisEngine(llm_client=client)
             hyps = engine.generate_hypotheses(
                 incident_id=incident_id,
                 logs_evidence=logs_output,
                 metrics_evidence=metrics_output,
                 code_evidence=code_output,
             )
-            return hyps, 1, _stage_result(STATUS_SUCCEEDED, output=hyps, llm_calls=1)
+            tok_after = _get_token_usage_snapshot(client)
+            delta = _calc_token_delta(tok_before, tok_after)
+            calls = delta["llm_calls"] or 1
+            return hyps, calls, _stage_result(
+                STATUS_SUCCEEDED,
+                output=hyps,
+                llm_calls=calls,
+                prompt_tokens=delta["prompt_tokens"],
+                completion_tokens=delta["completion_tokens"],
+                total_tokens=delta["total_tokens"],
+            )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             print(f"  [FAIL ] hypothesis_engine: {err}")
@@ -505,7 +564,14 @@ class IncidentOrchestrator:
                 metrics_evidence=metrics_output,
                 code_evidence=code_output,
             )
-            return result, _stage_result(STATUS_SUCCEEDED, output=result, llm_calls=0)
+            return result, _stage_result(
+                STATUS_SUCCEEDED,
+                output=result,
+                llm_calls=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             print(f"  [FAIL ] verification_agent: {err}")
@@ -521,9 +587,26 @@ class IncidentOrchestrator:
         metrics_output: Optional[Dict[str, Any]],
         code_output: Optional[Dict[str, Any]],
     ):
+        cache_path = self._stage_cache_path(incident_id, "fix_proposals")
+        if cache_path:
+            cached = _load_cache(cache_path, incident_id)
+            if cached is not None and isinstance(cached.get("proposals"), list):
+                print(f"  [reuse] fix_proposals (cached)")
+                return cached, 0, _stage_result(
+                    STATUS_REUSED,
+                    output=cached,
+                    llm_calls=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    cache_hit=True,
+                )
+
+        client = self._get_llm_client()
+        tok_before = _get_token_usage_snapshot(client)
         try:
             print("  [run  ] fix_proposal_agent...")
-            agent = FixProposalAgent(llm_client=self._get_llm_client())
+            agent = FixProposalAgent(llm_client=client)
             bundle = agent.propose_fix(
                 incident_dir=incident_path,
                 hypotheses=hypotheses,
@@ -532,10 +615,20 @@ class IncidentOrchestrator:
                 metrics_evidence=metrics_output,
                 code_evidence=code_output,
             )
+            tok_after = _get_token_usage_snapshot(client)
+            delta = _calc_token_delta(tok_before, tok_after)
             n_proposals = len(bundle.get("proposals") or [])
-            # Each confirmed hypothesis → 1 Groq call
-            llm_calls = n_proposals
-            return bundle, llm_calls, _stage_result(STATUS_SUCCEEDED, output=bundle, llm_calls=llm_calls)
+            calls = delta["llm_calls"] or n_proposals
+            if cache_path and bundle.get("proposals"):
+                _save_cache(cache_path, bundle)
+            return bundle, calls, _stage_result(
+                STATUS_SUCCEEDED,
+                output=bundle,
+                llm_calls=calls,
+                prompt_tokens=delta["prompt_tokens"],
+                completion_tokens=delta["completion_tokens"],
+                total_tokens=delta["total_tokens"],
+            )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             print(f"  [FAIL ] fix_proposal_agent: {err}")
@@ -556,12 +649,26 @@ class IncidentOrchestrator:
                     "approval_records": [],
                     "summary": {"total": 0, "approved": 0, "rejected": 0},
                 }
-                return result, _stage_result(STATUS_SUCCEEDED, output=result, llm_calls=0)
+                return result, _stage_result(
+                    STATUS_SUCCEEDED,
+                    output=result,
+                    llm_calls=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                )
 
             # Always non-interactive in the orchestrator unless overridden
             gate = ApprovalGate(interactive=not self.non_interactive)
             result = gate.review_all(proposals_bundle)
-            return result, _stage_result(STATUS_SUCCEEDED, output=result, llm_calls=0)
+            return result, _stage_result(
+                STATUS_SUCCEEDED,
+                output=result,
+                llm_calls=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             print(f"  [FAIL ] approval_gate: {err}")
@@ -606,11 +713,18 @@ class IncidentOrchestrator:
         n_approved = approval_summary.get("approved", 0)
         n_rejected_proposals = approval_summary.get("rejected", 0)
 
+        total_prompt_tokens = sum((s.get("prompt_tokens") or 0) for s in stages.values())
+        total_completion_tokens = sum((s.get("completion_tokens") or 0) for s in stages.values())
+        total_tokens = sum((s.get("total_tokens") or 0) for s in stages.values())
+
         result: Dict[str, Any] = {
             "incident_id": incident_id,
             "pipeline_status": pipeline_status,
             "human_approval_notice": HUMAN_APPROVAL_NOTICE,
             "llm_call_count": total_llm_calls,
+            "prompt_tokens": total_prompt_tokens,
+            "completion_tokens": total_completion_tokens,
+            "total_tokens": total_tokens,
             "stages": stages,
             "summary": {
                 "confirmed_hypotheses": confirmed,
