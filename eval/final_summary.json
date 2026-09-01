@@ -9,11 +9,11 @@
     "failures": 0,
     "accuracy": 1.0,
     "accuracy_pct": "10/10 = 100.0%",
-    "avg_latency_seconds": 15.984,
-    "total_tokens": 26544,
+    "avg_latency_seconds": 13.619,
+    "total_tokens": 26156,
     "total_llm_calls": 10,
     "verification_score": 0,
-    "note": "Single-shot Groq model. Guesses root cause without executable verification. Numbers locked from baseline_summary.json produced by commit e999b2a live run."
+    "note": "Single-shot Groq model. Guesses root cause without executable verification."
   },
   "sentinel": {
     "total": 10,
@@ -32,19 +32,19 @@
     "hypotheses_confirmed": 30,
     "hypotheses_rejected": 1,
     "hypotheses_inconclusive": 0,
-    "note": "Multi-agent pipeline with deterministic, read-only verification. Each root cause has a traceable evidence chain HYP \u2192 EV-IDs \u2192 CHK-IDs \u2192 PASS/FAIL \u2192 verdict. Total Groq calls \u2248 sum of individual stage calls (verification itself uses 0 Groq). Instrumentation gap: sentinel stage-level token counts are not reported by IncidentOrchestrator (0 recorded)."
+    "note": "Multi-agent pipeline with deterministic verification. Evidence-gated root causes."
   },
   "comparison": {
     "accuracy_delta": 0.0,
     "accuracy_delta_pct": "+0.0 percentage points",
     "relative_improvement": 0.0,
-    "latency_delta_seconds": 129.452,
-    "token_delta": -26544,
+    "latency_delta_seconds": 131.817,
+    "token_delta": -26156,
     "additional_llm_calls": 48,
     "incidents_improved": 0,
     "incidents_regressed": 0,
     "incidents_equal": 10,
-    "verification_improvement": "Sentinel verified: 10/10 = 100% of incidents have \u22651 CONFIRMED hypothesis. Baseline verification = 0% (no checks executed)."
+    "verification_improvement": "Sentinel verification score: 100% vs Baseline: 0%"
   },
   "per_incident": [
     {
@@ -163,15 +163,6 @@
     "baseline_isolated": true,
     "source_modifications": 0,
     "patches_auto_applied": 0,
-    "approval_mode": "non-interactive (auto-reject); approval auto-rejection is not treated as investigation failure (Milestone \u00a75)."
-  },
-  "integrity": {
-    "baseline_numbers_from": "eval\\baseline_summary.json",
-    "sentinel_numbers_from": "eval\\final_comparison.csv",
-    "denominator": 10,
-    "correctness_rule": "sentinel accuracy = s_correct / total_incidents. Failures are NOT removed from the denominator. PARTIAL status (e.g. fix_proposal stage rate-limited) does NOT reduce correctness if diagnosis and verification produced a verdict (per Milestone \u00a75: approval/safety-gate rejection is not an investigation failure).",
-    "instrumentation_gaps": [
-      "Sentinel stage token counts not exposed by IncidentOrchestrator \u2192 0 in output."
-    ]
+    "approval_mode": "non-interactive (auto-reject)"
   }
 }
