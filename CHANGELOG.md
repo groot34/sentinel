@@ -2,6 +2,25 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission01] - 2026-09-05
+
+### Added
+- **Domain Model Layer (`core/domain/models.py`)**:
+  - Strongly typed Pydantic V2 internal domain models for evidence (`EvidenceItem`, `LogEvidenceItem`, `MetricEvidenceItem`, `CodeEvidenceItem`, `LogsAgentEvidence`, `MetricsAgentEvidence`, `CodeAgentEvidence`), hypotheses (`Hypothesis`, `HypothesisBundle`), verification (`VerificationResult`, `VerificationCheck`, `VerificationBundle`), fix proposals (`FileChange`, `FixProposal`, `FixProposalBundle`), human approval gates (`ApprovalRecord`, `ApprovalBundle`), and orchestrator results (`StageResult`, `InvestigationResultSummary`, `InvestigationResult`).
+  - Typed Enums: `IncidentStatus`, `StageStatus`, `VerificationVerdict`, `CheckResult`, `CheckType`, `ProposalStatus`, `ApprovalDecision`, `ApprovalStatus`, `EvidenceSourceType`, `LogEvidenceType`, `MetricEvidenceType`, `CodeEvidenceType`, `CodeSourceType`.
+  - Bidirectional serialization: `.from_dict()` and `.to_dict()` on all domain models, preserving full compatibility with existing external JSON schema contracts.
+- **Investigation State Container (`core/domain/state.py`)**:
+  - `InvestigationState` lifecycle management container for tracking a single incident investigation.
+  - `StageTransition` tracking with discrete timestamps, stage statuses (`RUNNING`, `SUCCEEDED`, `FAILED`, `SKIPPED`, `CACHED`), errors, and execution metadata.
+  - Lifecycle API: `start_stage()`, `complete_stage()`, `fail_stage()`, `skip_stage()`, `mark_cached()`, `add_evidence()`, `add_hypotheses()`, `add_verification_results()`, `add_proposals()`, `record_approval()`, `complete()`, `mark_partial()`, `fail()`.
+  - Transition validation rejecting invalid states and disallowing operations on terminal states.
+  - Complete isolation: zero storage of raw incident bundles, log files, `ground_truth.md`, or baseline output artifacts in state.
+- **Mission 01 Domain Test Suites**:
+  - `tests/test_domain_models.py` (16 unit tests): bidirectional dictionary round-tripping, schema compatibility, enum enforcement, and missing/invalid field validation.
+  - `tests/test_investigation_state.py` (16 unit tests): lifecycle transitions, invalid transition rejection, evidence/hypothesis/result accumulation, terminal state updates, and ground truth/baseline isolation.
+- **Package Exports (`core/domain/__init__.py`)**: Clean top-level exports for all domain models, enums, transitions, and state classes.
+- **Pipeline Integrity**: Zero modifications to existing agents, orchestrator runtime logic, prompt templates, or LLM call behavior.
+
 ## [1.1.0] - 2026-08-29
 
 ### Added

@@ -6,7 +6,19 @@
 
 ---
 
-## Completed Milestones
+## Sentinel 2.0 Milestones
+- [x] **Mission 01: Domain Model + Investigation State** (2026-09-05)
+  - Created `core/domain/models.py` with typed Pydantic V2 domain models and enums.
+  - Created `core/domain/state.py` with `InvestigationState` and `StageTransition`.
+  - Created `core/domain/__init__.py` exporting domain classes.
+  - Bidirectional `.from_dict()` and `.to_dict()` round-trip serialization.
+  - Zero agent/orchestrator runtime changes (isolated foundation).
+  - 32 new unit tests in `tests/test_domain_models.py` and `tests/test_investigation_state.py` (347/347 total passing).
+- [ ] **Mission 02: Orchestrator Migration to Investigation State** (Upcoming)
+
+---
+
+## Completed Milestones (Sentinel 1.0)
 - [x] **Milestone 1: Repository Skeleton & Schema Contracts** (2026-08-28)
 - [x] **Milestone 2: Synthetic Incident Dataset (10 Canonical Incidents)** (2026-08-28)
 - [x] **Milestone 3: Centralized Groq Runtime LLM Client** (2026-08-29)
