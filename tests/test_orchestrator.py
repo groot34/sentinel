@@ -940,3 +940,125 @@ def test_human_approval_notice_in_result():
         result = orch.investigate(INC_01)
 
     assert result["human_approval_notice"] == HUMAN_APPROVAL_NOTICE
+
+
+# ===========================================================================
+# Mission 02: InvestigationState Integration Tests
+# ===========================================================================
+
+def test_orchestrator_creates_and_populates_investigation_state():
+    """Verify that IncidentOrchestrator creates and populates InvestigationState as source of truth."""
+    orch = IncidentOrchestrator(non_interactive=True)
+    with (
+        patch("agents.orchestrator.LogsAgent") as MockLogs,
+        patch("agents.orchestrator.MetricsAgent") as MockMetrics,
+        patch("agents.orchestrator.CodeAgent") as MockCode,
+        patch("agents.orchestrator.HypothesisEngine") as MockHyp,
+        patch("agents.orchestrator.VerificationAgent") as MockVer,
+        patch("agents.orchestrator.FixProposalAgent") as MockFix,
+        patch("agents.orchestrator.ApprovalGate") as MockGate,
+    ):
+        MockLogs.return_value.extract_evidence.return_value = _mk_logs(n=2)
+        MockMetrics.return_value.extract_evidence.return_value = _mk_metrics(n=2)
+        MockCode.return_value.extract_evidence.return_value = _mk_code(n=2)
+        MockHyp.return_value.generate_hypotheses.return_value = _mk_hypotheses()
+        MockVer.return_value.verify.return_value = _mk_verification()
+        MockFix.return_value.propose_fix.return_value = _mk_fix_proposals(1)
+        MockGate.return_value.review_all.return_value = {
+            "incident_id": "inc_01_n_plus_one_query",
+            "approval_records": [{
+                "proposal_id": "FIX-001",
+                "status": "REJECTED",
+                "decision": "rejected",
+                "approved_by": "human",
+                "timestamp": "2026-08-28T14:00:00Z",
+                "notes": None,
+            }],
+            "summary": {"total": 1, "approved": 0, "rejected": 1},
+        }
+        result = orch.investigate(INC_01)
+
+    # 1. State was created and accessible
+    assert orch.last_state is not None
+    state = orch.last_state
+    assert state.incident_id == "inc_01_n_plus_one_query"
+    assert state.status == "COMPLETED"
+
+    # 2. All 8 stages tracked in state
+    for st in ("logs", "metrics", "code", "evidence_fusion", "hypotheses", "verification", "fix_proposals", "approvals"):
+        assert st in state.stages
+        assert state.stages[st].status == "SUCCEEDED"
+
+    # 3. Accumulated domain items in state
+    assert len(state.evidence) >= 6
+    assert len(state.hypotheses) == 1
+    assert len(state.verification_results) >= 1
+    assert len(state.proposals) == 1
+    assert len(state.approvals) == 1
+
+    # 4. Result matches state
+    assert result["pipeline_status"] == "COMPLETED"
+    assert result["stages"]["logs"]["status"] == "SUCCEEDED"
+
+
+def test_orchestrator_state_tracks_cached_stages(tmp_path):
+    """Verify that cached stages update InvestigationState with CACHED/REUSED."""
+    cache_dir = tmp_path / "inc_01_n_plus_one_query"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "logs.json").write_text(json.dumps(_mk_logs(n=2)), encoding="utf-8")
+
+    orch = IncidentOrchestrator(non_interactive=True, output_dir=cache_dir)
+    with (
+        patch("agents.orchestrator.LogsAgent") as MockLogs,
+        patch("agents.orchestrator.MetricsAgent") as MockMetrics,
+        patch("agents.orchestrator.CodeAgent") as MockCode,
+        patch("agents.orchestrator.HypothesisEngine") as MockHyp,
+        patch("agents.orchestrator.VerificationAgent") as MockVer,
+        patch("agents.orchestrator.FixProposalAgent") as MockFix,
+        patch("agents.orchestrator.ApprovalGate") as MockGate,
+    ):
+        MockLogs.return_value.extract_evidence.return_value = _mk_logs(n=2)
+        MockMetrics.return_value.extract_evidence.return_value = _mk_metrics(n=2)
+        MockCode.return_value.extract_evidence.return_value = _mk_code(n=2)
+        MockHyp.return_value.generate_hypotheses.return_value = _mk_hypotheses()
+        MockVer.return_value.verify.return_value = _mk_verification()
+        MockFix.return_value.propose_fix.return_value = _mk_fix_proposals(0)
+        MockGate.return_value.review_all.return_value = {
+            "incident_id": "inc_01_n_plus_one_query",
+            "approval_records": [],
+            "summary": {"total": 0, "approved": 0, "rejected": 0},
+        }
+        result = orch.investigate(INC_01)
+
+    state = orch.last_state
+    assert state.stages["logs"].status == "REUSED"
+    assert state.stages["logs"].cache_hit is True
+    assert result["stages"]["logs"]["cache_hit"] is True
+
+
+def test_orchestrator_state_preserves_previous_stages_on_partial_failure():
+    """Verify that when a downstream stage fails, earlier successful stages remain intact in state."""
+    orch = IncidentOrchestrator(non_interactive=True)
+    with (
+        patch("agents.orchestrator.LogsAgent") as MockLogs,
+        patch("agents.orchestrator.MetricsAgent") as MockMetrics,
+        patch("agents.orchestrator.CodeAgent") as MockCode,
+        patch("agents.orchestrator.HypothesisEngine") as MockHyp,
+    ):
+        MockLogs.return_value.extract_evidence.return_value = _mk_logs(n=2)
+        MockMetrics.return_value.extract_evidence.return_value = _mk_metrics(n=2)
+        MockCode.return_value.extract_evidence.return_value = _mk_code(n=2)
+        MockHyp.return_value.generate_hypotheses.side_effect = RuntimeError("Hypothesis generation failed")
+
+        result = orch.investigate(INC_01)
+
+    state = orch.last_state
+    assert state.status == "PARTIAL"
+    assert state.stages["logs"].status == "SUCCEEDED"
+    assert state.stages["metrics"].status == "SUCCEEDED"
+    assert state.stages["code"].status == "SUCCEEDED"
+    assert state.stages["evidence_fusion"].status == "SUCCEEDED"
+    assert state.stages["hypotheses"].status == "FAILED"
+    assert state.stages["verification"].status == "SKIPPED"
+    assert result["pipeline_status"] == "PARTIAL"
+

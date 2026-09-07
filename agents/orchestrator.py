@@ -48,6 +48,8 @@ from agents.hypothesis_engine import HypothesisEngine
 from agents.logs_agent import LogsAgent
 from agents.metrics_agent import MetricsAgent
 from agents.verification_agent import VerificationAgent
+from core.domain.models import IncidentStatus, StageStatus
+from core.domain.state import InvestigationState
 from core.llm import LLMError, get_llm_client
 
 RESULT_SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "orchestrator_result_schema.json"
@@ -242,6 +244,8 @@ class IncidentOrchestrator:
         self.non_interactive = non_interactive
         self.output_dir = output_dir
         self._result_schema = _load_result_schema()
+        self.state: Optional[InvestigationState] = None
+        self.last_state: Optional[InvestigationState] = None
 
     def _get_llm_client(self):
         if self._llm_client is None:
@@ -276,19 +280,13 @@ class IncidentOrchestrator:
         _validate_incident_dir(incident_path)
         incident_id = incident_path.name
 
-        stages: Dict[str, Dict[str, Any]] = {
-            "logs": _stage_result(STATUS_SKIPPED),
-            "metrics": _stage_result(STATUS_SKIPPED),
-            "code": _stage_result(STATUS_SKIPPED),
-            "evidence_fusion": _stage_result(STATUS_SKIPPED),
-            "hypotheses": _stage_result(STATUS_SKIPPED),
-            "verification": _stage_result(STATUS_SKIPPED),
-            "fix_proposals": _stage_result(STATUS_SKIPPED),
-            "approvals": _stage_result(STATUS_SKIPPED),
-        }
-        total_llm_calls = 0
+        # Create exactly one InvestigationState for this investigation
+        state = InvestigationState(incident_id=incident_id)
+        self.state = state
+        self.last_state = state
 
         # ── Stage 1: Logs ─────────────────────────────────────────────
+        state.start_stage("logs")
         logs_output, logs_calls, logs_stage = self._run_evidence_stage(
             stage_name="logs",
             incident_id=incident_id,
@@ -296,11 +294,25 @@ class IncidentOrchestrator:
             run_fn=lambda: LogsAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
             expected_llm_calls=1,
         )
-        stages["logs"] = logs_stage
-        total_llm_calls += logs_calls
+        if logs_stage.get("status") == STATUS_REUSED:
+            state.mark_cached("logs", output=logs_output)
+        elif logs_stage.get("status") == STATUS_SUCCEEDED:
+            state.complete_stage(
+                "logs",
+                output=logs_output,
+                llm_calls=logs_stage.get("llm_calls", 0),
+                prompt_tokens=logs_stage.get("prompt_tokens", 0),
+                completion_tokens=logs_stage.get("completion_tokens", 0),
+                total_tokens=logs_stage.get("total_tokens", 0),
+            )
+        else:
+            state.fail_stage("logs", error=logs_stage.get("error", "Unknown error"), output=logs_output)
+        if logs_output:
+            state.add_evidence(logs_output)
 
         # ── Stage 2: Metrics ──────────────────────────────────────────
         self._sleep()
+        state.start_stage("metrics")
         metrics_output, metrics_calls, metrics_stage = self._run_evidence_stage(
             stage_name="metrics",
             incident_id=incident_id,
@@ -308,11 +320,25 @@ class IncidentOrchestrator:
             run_fn=lambda: MetricsAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
             expected_llm_calls=1,
         )
-        stages["metrics"] = metrics_stage
-        total_llm_calls += metrics_calls
+        if metrics_stage.get("status") == STATUS_REUSED:
+            state.mark_cached("metrics", output=metrics_output)
+        elif metrics_stage.get("status") == STATUS_SUCCEEDED:
+            state.complete_stage(
+                "metrics",
+                output=metrics_output,
+                llm_calls=metrics_stage.get("llm_calls", 0),
+                prompt_tokens=metrics_stage.get("prompt_tokens", 0),
+                completion_tokens=metrics_stage.get("completion_tokens", 0),
+                total_tokens=metrics_stage.get("total_tokens", 0),
+            )
+        else:
+            state.fail_stage("metrics", error=metrics_stage.get("error", "Unknown error"), output=metrics_output)
+        if metrics_output:
+            state.add_evidence(metrics_output)
 
         # ── Stage 3: Code ─────────────────────────────────────────────
         self._sleep()
+        state.start_stage("code")
         code_output, code_calls, code_stage = self._run_evidence_stage(
             stage_name="code",
             incident_id=incident_id,
@@ -320,52 +346,60 @@ class IncidentOrchestrator:
             run_fn=lambda: CodeAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
             expected_llm_calls=1,
         )
-        stages["code"] = code_stage
-        total_llm_calls += code_calls
+        if code_stage.get("status") == STATUS_REUSED:
+            state.mark_cached("code", output=code_output)
+        elif code_stage.get("status") == STATUS_SUCCEEDED:
+            state.complete_stage(
+                "code",
+                output=code_output,
+                llm_calls=code_stage.get("llm_calls", 0),
+                prompt_tokens=code_stage.get("prompt_tokens", 0),
+                completion_tokens=code_stage.get("completion_tokens", 0),
+                total_tokens=code_stage.get("total_tokens", 0),
+            )
+        else:
+            state.fail_stage("code", error=code_stage.get("error", "Unknown error"), output=code_output)
+        if code_output:
+            state.add_evidence(code_output)
 
         # ── Stage 4: Evidence Fusion ──────────────────────────────────
+        state.start_stage("evidence_fusion")
         fused = _fuse_evidence(incident_id, logs_output, metrics_output, code_output)
         fusion_errors = _validate_evidence_fusion(fused)
         if fusion_errors:
-            stages["evidence_fusion"] = _stage_result(
-                STATUS_FAILED,
-                output=fused,
-                error="; ".join(fusion_errors),
-            )
-            return self._build_result(
-                incident_id=incident_id,
+            err_msg = "; ".join(fusion_errors)
+            state.fail_stage("evidence_fusion", error=err_msg, output=fused)
+            state.fail(error=f"Evidence fusion failed: {err_msg}")
+            return self._build_result_from_state(
+                state=state,
                 pipeline_status=PIPELINE_FAILED,
-                stages=stages,
-                total_llm_calls=total_llm_calls,
-                error=f"Evidence fusion failed: {'; '.join(fusion_errors)}",
+                error=f"Evidence fusion failed: {err_msg}",
             )
-        stages["evidence_fusion"] = _stage_result(STATUS_SUCCEEDED, output=fused)
+        state.complete_stage("evidence_fusion", output=fused)
         cache_path = self._stage_cache_path(incident_id, "evidence_fusion")
         if cache_path:
             _save_cache(cache_path, fused)
 
         # Require at least some evidence to continue
         if not fused["evidence"]:
-            stages["hypotheses"] = _stage_result(
-                STATUS_SKIPPED, error="No evidence collected; cannot generate hypotheses."
-            )
-            return self._build_result(
-                incident_id=incident_id,
+            state.skip_stage("hypotheses", reason="No evidence collected; cannot generate hypotheses.")
+            state.mark_partial()
+            return self._build_result_from_state(
+                state=state,
                 pipeline_status=PIPELINE_PARTIAL,
-                stages=stages,
-                total_llm_calls=total_llm_calls,
                 error="No evidence extracted from any source.",
             )
 
         # ── Stage 5: Hypothesis Engine ────────────────────────────────
         self._sleep()
+        state.start_stage("hypotheses")
         hyp_cache_path = self._stage_cache_path(incident_id, "hypotheses")
         hyp_cached = _load_cache(hyp_cache_path, incident_id) if hyp_cache_path else None
         if hyp_cached is not None:
             print(f"  [reuse] hypotheses (cached)")
             hypotheses_output = hyp_cached
-            hyp_stage = _stage_result(STATUS_REUSED, output=hyp_cached, cache_hit=True)
-            hyp_calls = 0
+            state.mark_cached("hypotheses", output=hyp_cached)
+            state.add_hypotheses(hypotheses_output)
         else:
             hypotheses_output, hyp_calls, hyp_stage = self._run_hypothesis_stage(
                 incident_id=incident_id,
@@ -373,29 +407,38 @@ class IncidentOrchestrator:
                 metrics_output=metrics_output,
                 code_output=code_output,
             )
-            if hyp_cache_path and hyp_stage["status"] == STATUS_SUCCEEDED:
-                _save_cache(hyp_cache_path, hypotheses_output)
-        stages["hypotheses"] = hyp_stage
-        total_llm_calls += hyp_calls
+            if hyp_stage.get("status") == STATUS_SUCCEEDED:
+                if hyp_cache_path:
+                    _save_cache(hyp_cache_path, hypotheses_output)
+                state.complete_stage(
+                    "hypotheses",
+                    output=hypotheses_output,
+                    llm_calls=hyp_stage.get("llm_calls", 0),
+                    prompt_tokens=hyp_stage.get("prompt_tokens", 0),
+                    completion_tokens=hyp_stage.get("completion_tokens", 0),
+                    total_tokens=hyp_stage.get("total_tokens", 0),
+                )
+                state.add_hypotheses(hypotheses_output)
+            else:
+                state.fail_stage("hypotheses", error=hyp_stage.get("error", "Hypothesis stage failed"), output=hypotheses_output)
 
-        if hyp_stage["status"] == STATUS_FAILED:
-            stages["verification"] = _stage_result(
-                STATUS_SKIPPED, error="Hypothesis stage failed; cannot verify."
-            )
-            return self._build_result(
-                incident_id=incident_id,
+        if state.stages.get("hypotheses") and state.stages["hypotheses"].status == STATUS_FAILED:
+            state.skip_stage("verification", reason="Hypothesis stage failed; cannot verify.")
+            state.mark_partial()
+            return self._build_result_from_state(
+                state=state,
                 pipeline_status=PIPELINE_PARTIAL,
-                stages=stages,
-                total_llm_calls=total_llm_calls,
             )
 
         # ── Stage 6: Verification ─────────────────────────────────────
+        state.start_stage("verification")
         ver_cache_path = self._stage_cache_path(incident_id, "verification")
         ver_cached = _load_cache(ver_cache_path, incident_id) if ver_cache_path else None
         if ver_cached is not None:
             print(f"  [reuse] verification (cached)")
             verification_output = ver_cached
-            ver_stage = _stage_result(STATUS_REUSED, output=ver_cached, cache_hit=True)
+            state.mark_cached("verification", output=ver_cached)
+            state.add_verification_results(verification_output)
         else:
             verification_output, ver_stage = self._run_verification_stage(
                 incident_id=incident_id,
@@ -405,23 +448,32 @@ class IncidentOrchestrator:
                 metrics_output=metrics_output,
                 code_output=code_output,
             )
-            if ver_cache_path and ver_stage["status"] == STATUS_SUCCEEDED:
-                _save_cache(ver_cache_path, verification_output)
-        stages["verification"] = ver_stage
+            if ver_stage.get("status") == STATUS_SUCCEEDED:
+                if ver_cache_path:
+                    _save_cache(ver_cache_path, verification_output)
+                state.complete_stage(
+                    "verification",
+                    output=verification_output,
+                    llm_calls=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                )
+                state.add_verification_results(verification_output)
+            else:
+                state.fail_stage("verification", error=ver_stage.get("error", "Verification stage failed"), output=verification_output)
 
-        if ver_stage["status"] == STATUS_FAILED:
-            stages["fix_proposals"] = _stage_result(
-                STATUS_SKIPPED, error="Verification stage failed; cannot propose fixes."
-            )
-            return self._build_result(
-                incident_id=incident_id,
+        if state.stages.get("verification") and state.stages["verification"].status == STATUS_FAILED:
+            state.skip_stage("fix_proposals", reason="Verification stage failed; cannot propose fixes.")
+            state.mark_partial()
+            return self._build_result_from_state(
+                state=state,
                 pipeline_status=PIPELINE_PARTIAL,
-                stages=stages,
-                total_llm_calls=total_llm_calls,
             )
 
         # ── Stage 7: Fix Proposals ────────────────────────────────────
         self._sleep()
+        state.start_stage("fix_proposals")
         proposals_bundle, fix_calls, fix_stage = self._run_fix_proposal_stage(
             incident_id=incident_id,
             incident_path=incident_path,
@@ -431,33 +483,66 @@ class IncidentOrchestrator:
             metrics_output=metrics_output,
             code_output=code_output,
         )
-        stages["fix_proposals"] = fix_stage
-        total_llm_calls += fix_calls
+        if fix_stage.get("status") == STATUS_REUSED:
+            state.mark_cached("fix_proposals", output=proposals_bundle)
+            state.add_proposals(proposals_bundle)
+        elif fix_stage.get("status") == STATUS_SUCCEEDED:
+            state.complete_stage(
+                "fix_proposals",
+                output=proposals_bundle,
+                llm_calls=fix_stage.get("llm_calls", 0),
+                prompt_tokens=fix_stage.get("prompt_tokens", 0),
+                completion_tokens=fix_stage.get("completion_tokens", 0),
+                total_tokens=fix_stage.get("total_tokens", 0),
+            )
+            state.add_proposals(proposals_bundle)
+        else:
+            state.fail_stage("fix_proposals", error=fix_stage.get("error", "Fix proposal failed"), output=proposals_bundle)
+            if proposals_bundle:
+                state.add_proposals(proposals_bundle)
 
         # ── Stage 8: Human Approval ───────────────────────────────────
+        state.start_stage("approvals")
         approval_output, approval_stage = self._run_approval_stage(
             proposals_bundle=proposals_bundle,
         )
-        stages["approvals"] = approval_stage
+        if approval_stage.get("status") == STATUS_SUCCEEDED:
+            state.complete_stage(
+                "approvals",
+                output=approval_output,
+                llm_calls=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            )
+            state.record_approval(approval_output)
+        else:
+            state.fail_stage("approvals", error=approval_stage.get("error", "Approval stage failed"), output=approval_output)
+            if approval_output:
+                state.record_approval(approval_output)
 
         # ── Build final result ────────────────────────────────────────
         all_failed = all(
-            s["status"] == STATUS_FAILED
-            for s in stages.values()
-            if s["status"] != STATUS_SKIPPED
+            s.status == STATUS_FAILED
+            for s in state.stages.values()
+            if s.status != STATUS_SKIPPED
         )
-        has_any_failure = any(s["status"] == STATUS_FAILED for s in stages.values())
+        has_any_failure = any(s.status == STATUS_FAILED for s in state.stages.values())
         pipeline_status = (
             PIPELINE_FAILED if all_failed
             else PIPELINE_PARTIAL if has_any_failure
             else PIPELINE_COMPLETED
         )
+        if pipeline_status == PIPELINE_COMPLETED:
+            state.complete()
+        elif pipeline_status == PIPELINE_PARTIAL:
+            state.mark_partial()
+        else:
+            state.fail()
 
-        return self._build_result(
-            incident_id=incident_id,
+        return self._build_result_from_state(
+            state=state,
             pipeline_status=pipeline_status,
-            stages=stages,
-            total_llm_calls=total_llm_calls,
         )
 
     # ------------------------------------------------------------------
@@ -682,6 +767,53 @@ class IncidentOrchestrator:
     # ------------------------------------------------------------------
     # Result builder
     # ------------------------------------------------------------------
+
+    def _build_result_from_state(
+        self,
+        state: InvestigationState,
+        pipeline_status: str,
+        error: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Convert an InvestigationState into a backward-compatible OrchestratorResult dict."""
+        stages_dict: Dict[str, Dict[str, Any]] = {}
+        stage_names = [
+            "logs",
+            "metrics",
+            "code",
+            "evidence_fusion",
+            "hypotheses",
+            "verification",
+            "fix_proposals",
+            "approvals",
+        ]
+        for name in stage_names:
+            if name in state.stages:
+                st = state.stages[name]
+                st_dict: Dict[str, Any] = {
+                    "status": st.status if isinstance(st.status, str) else st.status.value,
+                    "llm_calls": st.llm_calls,
+                    "prompt_tokens": st.prompt_tokens,
+                    "completion_tokens": st.completion_tokens,
+                    "total_tokens": st.total_tokens,
+                }
+                if st.output is not None:
+                    st_dict["output"] = st.output
+                if st.error is not None:
+                    st_dict["error"] = st.error
+                if st.cache_hit:
+                    st_dict["cache_hit"] = True
+                stages_dict[name] = st_dict
+            else:
+                stages_dict[name] = _stage_result(STATUS_SKIPPED)
+
+        total_llm_calls = sum((s.get("llm_calls") or 0) for s in stages_dict.values())
+        return self._build_result(
+            incident_id=state.incident_id,
+            pipeline_status=pipeline_status,
+            stages=stages_dict,
+            total_llm_calls=total_llm_calls,
+            error=error or state.error,
+        )
 
     def _build_result(
         self,

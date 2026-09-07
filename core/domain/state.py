@@ -112,6 +112,9 @@ class InvestigationState(BaseDomainModel):
         stage_name: str,
         output: Any = None,
         llm_calls: int = 0,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
         completed_at: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> StageTransition:
@@ -121,7 +124,6 @@ class InvestigationState(BaseDomainModel):
                 f"Cannot complete stage '{stage_name}': current active stage is '{self.current_stage}'"
             )
 
-        # Update last transition for this stage
         transition = self._get_active_transition(stage_name)
         now = completed_at or _utcnow_iso()
         if transition is not None:
@@ -143,6 +145,9 @@ class InvestigationState(BaseDomainModel):
             status=StageStatus.SUCCEEDED,
             output=output,
             llm_calls=llm_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
         self.llm_call_count += max(0, llm_calls)
         self.current_stage = None
@@ -152,6 +157,7 @@ class InvestigationState(BaseDomainModel):
         self,
         stage_name: str,
         error: str,
+        output: Any = None,
         completed_at: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> StageTransition:
@@ -182,7 +188,12 @@ class InvestigationState(BaseDomainModel):
 
         self.stages[stage_name] = StageResult(
             status=StageStatus.FAILED,
+            output=output,
             error=error,
+            llm_calls=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
         )
         self.current_stage = None
         return transition
@@ -210,7 +221,13 @@ class InvestigationState(BaseDomainModel):
         self.stages[stage_name] = StageResult(
             status=StageStatus.SKIPPED,
             error=reason,
+            llm_calls=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
         )
+        if self.current_stage == stage_name:
+            self.current_stage = None
         return transition
 
     def mark_cached(
@@ -221,20 +238,33 @@ class InvestigationState(BaseDomainModel):
     ) -> StageTransition:
         """Record a cached stage reuse."""
         now = _utcnow_iso()
-        transition = StageTransition(
-            stage=stage_name,
-            status=StageStatus.CACHED,
-            started_at=now,
-            completed_at=now,
-            metadata=metadata or {},
-        )
-        self.stage_history.append(transition)
+        transition = self._get_active_transition(stage_name)
+        if transition is not None:
+            transition.status = StageStatus.CACHED
+            transition.completed_at = now
+            if metadata:
+                transition.metadata.update(metadata)
+        else:
+            transition = StageTransition(
+                stage=stage_name,
+                status=StageStatus.CACHED,
+                started_at=now,
+                completed_at=now,
+                metadata=metadata or {},
+            )
+            self.stage_history.append(transition)
+
         self.stages[stage_name] = StageResult(
             status=StageStatus.REUSED,
             output=output,
             llm_calls=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
             cache_hit=True,
         )
+        if self.current_stage == stage_name:
+            self.current_stage = None
         return transition
 
     def _get_active_transition(self, stage_name: str) -> Optional[StageTransition]:
@@ -245,8 +275,32 @@ class InvestigationState(BaseDomainModel):
         return None
 
     # -----------------------------------------------------------------------
-    # Evidence & Artefact Accumulation Methods
+    # Evidence & Artefact Accumulation Methods (Deterministic Deduplication)
     # -----------------------------------------------------------------------
+
+    def _dict_to_evidence_item(self, ev_dict: Dict[str, Any]) -> Optional[Union[LogEvidenceItem, MetricEvidenceItem, CodeEvidenceItem, EvidenceItem]]:
+        """Convert an evidence dictionary to a strongly typed evidence item."""
+        if not isinstance(ev_dict, dict):
+            return None
+        ev_id = ev_dict.get("evidence_id", "")
+        if ev_id.startswith("EV-LOG-"):
+            return LogEvidenceItem.from_dict(ev_dict)
+        elif ev_id.startswith("EV-MET-"):
+            return MetricEvidenceItem.from_dict(ev_dict)
+        elif ev_id.startswith("EV-CODE-"):
+            return CodeEvidenceItem.from_dict(ev_dict)
+        elif "source_type" in ev_dict:
+            return EvidenceItem.from_dict(ev_dict)
+        elif "evidence_id" in ev_dict:
+            return EvidenceItem.from_dict({
+                "evidence_id": ev_dict["evidence_id"],
+                "source_type": ev_dict.get("source", "logs"),
+                "description": ev_dict.get("description", ev_dict.get("excerpt", "")),
+                "raw_snippet": ev_dict.get("raw_snippet", ev_dict.get("excerpt", "")),
+                "timestamp": ev_dict.get("timestamp"),
+                "metadata": ev_dict.get("metadata"),
+            })
+        return None
 
     def add_evidence(
         self,
@@ -262,162 +316,209 @@ class InvestigationState(BaseDomainModel):
             List[Any],
         ],
     ) -> None:
-        """Add evidence item(s) or agent evidence bundles to the investigation state."""
+        """Add evidence item(s) or bundles to state with deterministic ID deduplication."""
         if isinstance(evidence, list):
             for item in evidence:
                 self.add_evidence(item)
             return
 
+        items_to_add: List[Union[LogEvidenceItem, MetricEvidenceItem, CodeEvidenceItem, EvidenceItem]] = []
+
         if isinstance(evidence, (LogsAgentEvidence, MetricsAgentEvidence, CodeAgentEvidence)):
-            for item in evidence.evidence:
-                self.evidence.append(item)
-            return
-
-        if isinstance(evidence, (LogEvidenceItem, MetricEvidenceItem, CodeEvidenceItem, EvidenceItem)):
-            self.evidence.append(evidence)
-            return
-
-        if isinstance(evidence, dict):
-            # Check if it's an agent bundle
+            items_to_add = list(evidence.evidence)
+        elif isinstance(evidence, (LogEvidenceItem, MetricEvidenceItem, CodeEvidenceItem, EvidenceItem)):
+            items_to_add = [evidence]
+        elif isinstance(evidence, dict):
             if "agent" in evidence and "evidence" in evidence:
                 agent_name = evidence.get("agent")
                 if agent_name == "logs_agent":
-                    bundle = LogsAgentEvidence.from_dict(evidence)
-                    for item in bundle.evidence:
-                        self.evidence.append(item)
-                    return
+                    try:
+                        bundle = LogsAgentEvidence.from_dict(evidence)
+                        items_to_add = list(bundle.evidence)
+                    except Exception:
+                        items_to_add = [self._dict_to_evidence_item(ev) for ev in evidence.get("evidence", []) if isinstance(ev, dict)]
                 elif agent_name == "metrics_agent":
-                    bundle = MetricsAgentEvidence.from_dict(evidence)
-                    for item in bundle.evidence:
-                        self.evidence.append(item)
-                    return
+                    try:
+                        bundle = MetricsAgentEvidence.from_dict(evidence)
+                        items_to_add = list(bundle.evidence)
+                    except Exception:
+                        items_to_add = [self._dict_to_evidence_item(ev) for ev in evidence.get("evidence", []) if isinstance(ev, dict)]
                 elif agent_name == "code_agent":
-                    bundle = CodeAgentEvidence.from_dict(evidence)
-                    for item in bundle.evidence:
-                        self.evidence.append(item)
-                    return
-
-            # Check individual item type by ID pattern or source field
-            ev_id = evidence.get("evidence_id", "")
-            if ev_id.startswith("EV-LOG-"):
-                self.evidence.append(LogEvidenceItem.from_dict(evidence))
-            elif ev_id.startswith("EV-MET-"):
-                self.evidence.append(MetricEvidenceItem.from_dict(evidence))
-            elif ev_id.startswith("EV-CODE-"):
-                self.evidence.append(CodeEvidenceItem.from_dict(evidence))
-            elif "source_type" in evidence:
-                self.evidence.append(EvidenceItem.from_dict(evidence))
+                    try:
+                        bundle = CodeAgentEvidence.from_dict(evidence)
+                        items_to_add = list(bundle.evidence)
+                    except Exception:
+                        items_to_add = [self._dict_to_evidence_item(ev) for ev in evidence.get("evidence", []) if isinstance(ev, dict)]
+                else:
+                    items_to_add = [self._dict_to_evidence_item(ev) for ev in evidence.get("evidence", []) if isinstance(ev, dict)]
+            elif "evidence" in evidence and isinstance(evidence["evidence"], list):
+                items_to_add = [self._dict_to_evidence_item(ev) for ev in evidence["evidence"] if isinstance(ev, dict)]
             else:
-                # Generic fallback if required fields present
-                if "evidence_id" in evidence:
-                    self.evidence.append(EvidenceItem.from_dict({
-                        "evidence_id": evidence["evidence_id"],
-                        "source_type": evidence.get("source", "logs"),
-                        "description": evidence.get("description", evidence.get("excerpt", "")),
-                        "raw_snippet": evidence.get("raw_snippet", evidence.get("excerpt", "")),
-                        "timestamp": evidence.get("timestamp"),
-                        "metadata": evidence.get("metadata"),
-                    }))
+                single_item = self._dict_to_evidence_item(evidence)
+                if single_item is not None:
+                    items_to_add = [single_item]
+
+        seen_ids = {e.evidence_id for e in self.evidence if hasattr(e, "evidence_id")}
+        for item in items_to_add:
+            if item is not None and hasattr(item, "evidence_id") and item.evidence_id not in seen_ids:
+                self.evidence.append(item)
+                seen_ids.add(item.evidence_id)
 
     def add_hypotheses(
         self,
         hypotheses: Union[Hypothesis, HypothesisBundle, Dict[str, Any], List[Any]],
     ) -> None:
-        """Add hypothesis item(s) or bundle to the state."""
+        """Add hypothesis item(s) or bundle to the state with deterministic ID deduplication."""
         if isinstance(hypotheses, list):
             for item in hypotheses:
                 self.add_hypotheses(item)
             return
 
+        items_to_add: List[Hypothesis] = []
         if isinstance(hypotheses, HypothesisBundle):
-            self.hypotheses.extend(hypotheses.hypotheses)
-            return
-
-        if isinstance(hypotheses, Hypothesis):
-            self.hypotheses.append(hypotheses)
-            return
-
-        if isinstance(hypotheses, dict):
+            items_to_add = list(hypotheses.hypotheses)
+        elif isinstance(hypotheses, Hypothesis):
+            items_to_add = [hypotheses]
+        elif isinstance(hypotheses, dict):
             if "hypotheses" in hypotheses and isinstance(hypotheses["hypotheses"], list):
                 bundle = HypothesisBundle.from_dict(hypotheses)
-                self.hypotheses.extend(bundle.hypotheses)
+                items_to_add = list(bundle.hypotheses)
             else:
-                self.hypotheses.append(Hypothesis.from_dict(hypotheses))
+                items_to_add = [Hypothesis.from_dict(hypotheses)]
+
+        seen_ids = {h.hypothesis_id for h in self.hypotheses if hasattr(h, "hypothesis_id")}
+        for item in items_to_add:
+            if item is not None and hasattr(item, "hypothesis_id") and item.hypothesis_id not in seen_ids:
+                self.hypotheses.append(item)
+                seen_ids.add(item.hypothesis_id)
 
     def add_verification_results(
         self,
         results: Union[VerificationResult, VerificationBundle, Dict[str, Any], List[Any]],
     ) -> None:
-        """Add verification result(s) or bundle to the state."""
+        """Add verification result(s) or bundle to state with deterministic deduplication."""
         if isinstance(results, list):
             for item in results:
                 self.add_verification_results(item)
             return
 
+        items_to_add: List[VerificationResult] = []
+
         if isinstance(results, VerificationBundle):
-            self.verification_results.extend(results.verification_results)
-            return
-
-        if isinstance(results, VerificationResult):
-            self.verification_results.append(results)
-            return
-
-        if isinstance(results, dict):
-            if "verification_results" in results or "verifications" in results or "results" in results:
-                bundle = VerificationBundle.from_dict(results)
-                self.verification_results.extend(bundle.verification_results)
+            items_to_add = list(results.verification_results)
+        elif isinstance(results, VerificationResult):
+            items_to_add = [results]
+        elif isinstance(results, dict):
+            raw_list = results.get("verification_results") or results.get("verifications") or results.get("results")
+            if isinstance(raw_list, list):
+                for r in raw_list:
+                    if isinstance(r, dict):
+                        if "verification_id" in r:
+                            items_to_add.append(VerificationResult.from_dict(r))
+                        elif "hypothesis_id" in r and "verdict" in r:
+                            # Aggregate verification agent output shape
+                            hyp_id = r.get("hypothesis_id", "HYP-001")
+                            verdict = r.get("verdict", "CONFIRMED")
+                            reasoning = r.get("reasoning", "")
+                            checks = r.get("checks") or []
+                            if checks:
+                                for i, chk in enumerate(checks, start=1):
+                                    chk_id = chk.get("check_id") or f"CHK-{i:03d}"
+                                    v_id = f"VER-{hyp_id.replace('-', '')}-{chk_id.replace('-', '')}"
+                                    items_to_add.append(VerificationResult(
+                                        verification_id=v_id,
+                                        hypothesis_id=hyp_id,
+                                        status=verdict,
+                                        check_type=chk.get("check_type", "code_invariant"),
+                                        check_code_or_query=chk.get("description", "verification check"),
+                                        execution_output=chk.get("detail") or f"Result: {chk.get('result', 'PASS')}",
+                                        verified_evidence_ids=chk.get("evidence") or [],
+                                        reasoning=reasoning,
+                                    ))
+                            else:
+                                v_id = f"VER-{hyp_id.replace('-', '')}-001"
+                                items_to_add.append(VerificationResult(
+                                    verification_id=v_id,
+                                    hypothesis_id=hyp_id,
+                                    status=verdict,
+                                    check_type="code_invariant",
+                                    check_code_or_query="verification check",
+                                    execution_output=f"Verdict: {verdict}",
+                                    verified_evidence_ids=[],
+                                    reasoning=reasoning,
+                                ))
             else:
-                self.verification_results.append(VerificationResult.from_dict(results))
+                if "verification_id" in results:
+                    items_to_add = [VerificationResult.from_dict(results)]
+
+        seen_ids = {
+            getattr(v, "verification_id", None) or getattr(v, "hypothesis_id", None)
+            for v in self.verification_results
+        }
+        for item in items_to_add:
+            item_id = getattr(item, "verification_id", None) or getattr(item, "hypothesis_id", None)
+            if item is not None and (item_id is None or item_id not in seen_ids):
+                self.verification_results.append(item)
+                if item_id is not None:
+                    seen_ids.add(item_id)
 
     def add_proposals(
         self,
         proposals: Union[FixProposal, FixProposalBundle, Dict[str, Any], List[Any]],
     ) -> None:
-        """Add fix proposal(s) or bundle to the state."""
+        """Add fix proposal(s) or bundle to state with deterministic ID deduplication."""
         if isinstance(proposals, list):
             for item in proposals:
                 self.add_proposals(item)
             return
 
+        items_to_add: List[FixProposal] = []
         if isinstance(proposals, FixProposalBundle):
-            self.proposals.extend(proposals.proposals)
-            return
-
-        if isinstance(proposals, FixProposal):
-            self.proposals.append(proposals)
-            return
-
-        if isinstance(proposals, dict):
+            items_to_add = list(proposals.proposals)
+        elif isinstance(proposals, FixProposal):
+            items_to_add = [proposals]
+        elif isinstance(proposals, dict):
             if "proposals" in proposals and isinstance(proposals["proposals"], list):
                 bundle = FixProposalBundle.from_dict(proposals)
-                self.proposals.extend(bundle.proposals)
+                items_to_add = list(bundle.proposals)
             else:
-                self.proposals.append(FixProposal.from_dict(proposals))
+                items_to_add = [FixProposal.from_dict(proposals)]
+
+        seen_ids = {p.proposal_id for p in self.proposals if hasattr(p, "proposal_id")}
+        for item in items_to_add:
+            if item is not None and hasattr(item, "proposal_id") and item.proposal_id not in seen_ids:
+                self.proposals.append(item)
+                seen_ids.add(item.proposal_id)
 
     def record_approval(
         self,
         approval: Union[ApprovalRecord, ApprovalBundle, Dict[str, Any], List[Any]],
     ) -> None:
-        """Record human approval gate decision(s)."""
+        """Record human approval gate decision(s) with deterministic ID deduplication."""
         if isinstance(approval, list):
             for item in approval:
                 self.record_approval(item)
             return
 
+        items_to_add: List[ApprovalRecord] = []
         if isinstance(approval, ApprovalBundle):
-            self.approvals.extend(approval.approvals)
-            return
+            items_to_add = list(approval.approvals)
+        elif isinstance(approval, ApprovalRecord):
+            items_to_add = [approval]
+        elif isinstance(approval, dict):
+            raw_list = approval.get("approvals") or approval.get("approval_records")
+            if isinstance(raw_list, list):
+                for item in raw_list:
+                    if isinstance(item, dict):
+                        items_to_add.append(ApprovalRecord.from_dict(item))
+            elif "proposal_id" in approval:
+                items_to_add = [ApprovalRecord.from_dict(approval)]
 
-        if isinstance(approval, ApprovalRecord):
-            self.approvals.append(approval)
-            return
-
-        if isinstance(approval, dict):
-            if "approvals" in approval and isinstance(approval["approvals"], list):
-                bundle = ApprovalBundle.from_dict(approval)
-                self.approvals.extend(bundle.approvals)
-            else:
-                self.approvals.append(ApprovalRecord.from_dict(approval))
+        seen_ids = {a.proposal_id for a in self.approvals if hasattr(a, "proposal_id")}
+        for item in items_to_add:
+            if item is not None and hasattr(item, "proposal_id") and item.proposal_id not in seen_ids:
+                self.approvals.append(item)
+                seen_ids.add(item.proposal_id)
 
     # -----------------------------------------------------------------------
     # Final Investigation Lifecycle Methods

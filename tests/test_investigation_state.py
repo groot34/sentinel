@@ -376,3 +376,143 @@ def test_state_round_trip_serialization() -> None:
     assert restored.stage_history[0].status == StageStatus.SUCCEEDED
     assert len(restored.evidence) == 1
     assert restored.evidence[0].evidence_id == "EV-LOG-001"
+
+
+# ============================================================================
+# Mission 02 Deduplication & Telemetry Tests
+# ============================================================================
+
+def test_evidence_id_deduplication_first_occurrence_wins():
+    state = InvestigationState(incident_id="inc_01")
+    item1 = LogEvidenceItem(
+        evidence_id="EV-LOG-001",
+        source="logs",
+        reference="logs/app.log:1",
+        type="error",
+        excerpt="First version",
+    )
+    item2 = LogEvidenceItem(
+        evidence_id="EV-LOG-001",
+        source="logs",
+        reference="logs/app.log:2",
+        type="error",
+        excerpt="Duplicate version should be ignored",
+    )
+    item3 = MetricEvidenceItem(
+        evidence_id="EV-MET-001",
+        source="metrics",
+        reference="metrics/m.csv:2",
+        metric="latency",
+        value=100.0,
+        type="spike",
+    )
+
+    state.add_evidence([item1, item2, item3])
+    assert len(state.evidence) == 2
+    assert state.evidence[0].evidence_id == "EV-LOG-001"
+    assert state.evidence[0].excerpt == "First version"
+    assert state.evidence[1].evidence_id == "EV-MET-001"
+
+
+def test_hypothesis_id_deduplication_preserves_order():
+    state = InvestigationState(incident_id="inc_01")
+    h1 = Hypothesis(
+        hypothesis_id="HYP-001",
+        claim="Claim A",
+        evidence_ids=["EV-LOG-001"],
+        supporting_reasoning="Reason A",
+        falsification_criteria=["Crit A"],
+        verification_plan=["Plan A"],
+    )
+    h2 = Hypothesis(
+        hypothesis_id="HYP-002",
+        claim="Claim B",
+        evidence_ids=["EV-MET-001"],
+        supporting_reasoning="Reason B",
+        falsification_criteria=["Crit B"],
+        verification_plan=["Plan B"],
+    )
+    h1_dup = Hypothesis(
+        hypothesis_id="HYP-001",
+        claim="Claim A Duplicate",
+        evidence_ids=["EV-LOG-001"],
+        supporting_reasoning="Reason A Dup",
+        falsification_criteria=["Crit A Dup"],
+        verification_plan=["Plan A Dup"],
+    )
+
+    state.add_hypotheses([h1, h2, h1_dup])
+    assert len(state.hypotheses) == 2
+    assert state.hypotheses[0].hypothesis_id == "HYP-001"
+    assert state.hypotheses[0].claim == "Claim A"
+    assert state.hypotheses[1].hypothesis_id == "HYP-002"
+
+
+def test_proposal_id_deduplication():
+    state = InvestigationState(incident_id="inc_01")
+    p1 = FixProposal(
+        proposal_id="FIX-001",
+        hypothesis_id="HYP-001",
+        incident_id="inc_01",
+        summary="Fix A",
+        rationale="Rat A",
+        expected_effect="Eff A",
+        validation_plan=["Val A"],
+        rollback_plan="Roll A",
+        evidence_ids=["EV-LOG-001"],
+    )
+    p1_dup = FixProposal(
+        proposal_id="FIX-001",
+        hypothesis_id="HYP-001",
+        incident_id="inc_01",
+        summary="Fix A Duplicate",
+        rationale="Rat A Dup",
+        expected_effect="Eff A Dup",
+        validation_plan=["Val A Dup"],
+        rollback_plan="Roll A Dup",
+        evidence_ids=["EV-LOG-001"],
+    )
+
+    state.add_proposals([p1, p1_dup])
+    assert len(state.proposals) == 1
+    assert state.proposals[0].summary == "Fix A"
+
+
+def test_approval_record_deduplication():
+    state = InvestigationState(incident_id="inc_01")
+    a1 = ApprovalRecord(
+        proposal_id="FIX-001",
+        status="APPROVED",
+        decision="approved",
+        approved_by="lead",
+        timestamp="2026-08-28T12:00:00Z",
+    )
+    a1_dup = ApprovalRecord(
+        proposal_id="FIX-001",
+        status="REJECTED",
+        decision="rejected",
+        approved_by="lead",
+        timestamp="2026-08-28T12:01:00Z",
+    )
+
+    state.record_approval([a1, a1_dup])
+    assert len(state.approvals) == 1
+    assert state.approvals[0].decision == "approved"
+
+
+def test_stage_telemetry_tracking():
+    state = InvestigationState(incident_id="inc_01")
+    state.start_stage("logs")
+    state.complete_stage(
+        "logs",
+        output={"found": 3},
+        llm_calls=2,
+        prompt_tokens=450,
+        completion_tokens=150,
+        total_tokens=600,
+    )
+    assert state.stages["logs"].llm_calls == 2
+    assert state.stages["logs"].prompt_tokens == 450
+    assert state.stages["logs"].completion_tokens == 150
+    assert state.stages["logs"].total_tokens == 600
+    assert state.llm_call_count == 2

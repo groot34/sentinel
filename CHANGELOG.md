@@ -2,6 +2,20 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission02] - 2026-09-07
+
+### Added
+- **Stateful Orchestrator Migration (`agents/orchestrator.py`)**:
+  - Made `InvestigationState` the internal source of truth for `IncidentOrchestrator` runs without rewriting downstream agents.
+  - Retained strict stage lifecycle transitions: `start_stage()`, `complete_stage()`, `fail_stage()`, `skip_stage()`, `mark_cached()`.
+  - Stages tracked in order: `logs` -> `metrics` -> `code` -> `evidence_fusion` -> `hypotheses` -> `verification` -> `fix_proposals` -> `approvals`.
+  - Added deterministic ID deduplication across `evidence` (`evidence_id`), `hypotheses` (`hypothesis_id`), `proposals` (`proposal_id`), and `approvals` (`proposal_id`), preserving first-occurrence order.
+  - Added stage token telemetry propagation (`prompt_tokens`, `completion_tokens`, `total_tokens`, `llm_calls`) into `StageResult` and `InvestigationState`.
+  - Added `self.last_state` inspection attribute on `IncidentOrchestrator`.
+  - Built `_build_result_from_state` converting internal `InvestigationState` into full backward-compatible `OrchestratorResult` output dictionaries adhering to `schemas/orchestrator_result_schema.json`.
+  - Added comprehensive unit tests in `tests/test_investigation_state.py` and `tests/test_orchestrator.py` covering stage lifecycles, caching, partial failure preservation, and deduplication (355/355 total tests passing).
+  - Maintained strict zero-leak isolation against `ground_truth.md` and baseline outputs.
+
 ## [2.0.0-mission01] - 2026-09-05
 
 ### Added

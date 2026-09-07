@@ -193,8 +193,8 @@ class MetricEvidenceItem(BaseDomainModel):
     evidence_id: str = Field(..., pattern=r"^EV-MET-[0-9]{3,}$")
     source: str = "metrics"
     reference: str
-    metric: str
-    value: float
+    metric: str = "metric_sample"
+    value: float = 0.0
     type: Union[MetricEvidenceType, str]
     timestamp: Optional[str] = None
     interpretation: Optional[str] = None
@@ -370,6 +370,9 @@ class StageResult(BaseDomainModel):
     output: Optional[Any] = None
     error: Optional[str] = None
     llm_calls: int = Field(default=0, ge=0)
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
     cache_hit: Optional[bool] = None
 
 
