@@ -2,6 +2,37 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission03] - 2026-09-09
+
+### Added
+- **Persistence Repository Architecture (`core/persistence/`)**:
+  - `PersistenceRepository` (`core/persistence/repository.py`): Abstract base class defining minimal lifecycle contract: `save(state)`, `load(id)`, `exists(id)`, `delete(id)`, `list()`.
+  - `PersistenceError` (`core/persistence/repository.py`): Explicit base exception class for all persistence and deserialization failures.
+  - `FilesystemRepository` (`core/persistence/filesystem.py`): Concrete atomic local filesystem storage storing state at `<persistence_root>/<investigation_id>/state.json`.
+- **Path and ID Traversal Security**:
+  - Strict regex validation (`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`) rejecting path traversal attempts (`../`, `..\`, `/`, `C:\`, `:`, spaces).
+  - Canonical path containment verification ensuring IDs cannot escape `persistence_root`.
+- **Atomic File Writing**:
+  - Crash-safe write strategy using unique temporary files (`.tmp`), full flush, `os.fsync`, and atomic replacement (`os.replace`).
+  - Automatic cleanup of temporary files upon write or replacement errors.
+- **Safety Boundary & Secret Leak Prevention**:
+  - Rejection of non-`InvestigationState` instances (arbitrary dictionaries rejected).
+  - Defence-in-depth serialized string inspection rejecting benchmark artefacts (`ground_truth.md`, `results_baseline.csv`, `baseline_summary.json`).
+  - Defence-in-depth scan rejecting API keys and sensitive environment tokens (`GROQ_API_KEY`, etc.).
+- **Orchestrator Integration & Resume API (`agents/orchestrator.py`)**:
+  - Added optional `repository: Optional[PersistenceRepository] = None` to `IncidentOrchestrator.__init__`. Default behavior bit-for-bit unchanged when `repository=None`.
+  - Added lifecycle persistence calls: initial state creation, after each stage completion/cache/skip/failure, and after final pipeline status transition.
+  - Fail-fast persistence policy: persistence errors are never silently swallowed and propagate immediately.
+  - Added `IncidentOrchestrator.resume(investigation_id, incident_dir)` restoring state and resuming the pipeline.
+  - Deterministic `_find_resume_stage` identifying first incomplete or failed stage in canonical order (`logs` -> `metrics` -> `code` -> `evidence_fusion` -> `hypotheses` -> `verification` -> `fix_proposals` -> `approvals`).
+  - Output reinjection: previously successful stage outputs are restored from persisted state and passed directly into downstream stages without re-executing agents or LLM calls.
+  - Completed investigations (`status=COMPLETED`) are immutable and refuse resumption.
+  - Crash recovery semantics: stages interrupted in `RUNNING` status are retried from the beginning with deduplicated state accumulation.
+- **Test Coverage**:
+  - `tests/test_persistence.py` (29 tests): round-trips, idempotency, overwrites, malformed JSON, schema corruption, ID mismatches, atomic write replacement, cleanup, traversal rejection, safety boundary enforcement.
+  - `tests/test_orchestrator_resume.py` (18 tests): lifecycle persistence hooks, failure persistence, clear error on missing repository/state, completed refusal, skipping succeeded/reused stages, retrying failed/running stages, zero unnecessary LLM calls, deduplication, schema fidelity, cache coexistence.
+  - Full test suite passing (402/402 tests) and incident verification suite passing (51/51 checks).
+
 ## [2.0.0-mission02] - 2026-09-07
 
 ### Added

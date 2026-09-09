@@ -21,8 +21,13 @@
   - Token telemetry propagation (`prompt_tokens`, `completion_tokens`, `total_tokens`, `llm_calls`).
   - ID deduplication for evidence, hypotheses, proposals, and approvals.
   - Backward-compatible `OrchestratorResult` output dictionary via `_build_result_from_state`.
-  - Full test suite passing (355/355 tests) and 51/51 incident validation tests passing.
-- [ ] **Mission 03: Structured Investigation Export & Persistent Artefacts** (Upcoming)
+- [x] **Mission 03: Persistence + Resume** (2026-09-09)
+  - Created `core/persistence/repository.py` defining `PersistenceRepository` ABC and `PersistenceError`.
+  - Created `core/persistence/filesystem.py` implementing `FilesystemRepository` with atomic write (`.tmp` + `os.replace`), ID traversal security, and safety assertions against benchmark/secret leakage.
+  - Integrated persistence hooks into `IncidentOrchestrator` (`agents/orchestrator.py`) with optional `repository` parameter.
+  - Implemented `IncidentOrchestrator.resume(investigation_id, incident_dir)` with deterministic stage discovery and output reinjection.
+  - 47 new unit/integration tests in `tests/test_persistence.py` and `tests/test_orchestrator_resume.py` (402/402 total tests passing, 51/51 incident validation passing).
+- [ ] **Mission 04: Structured Investigation Export & Persistent Artefacts** (Upcoming)
 
 ---
 

@@ -51,6 +51,7 @@ from agents.verification_agent import VerificationAgent
 from core.domain.models import IncidentStatus, StageStatus
 from core.domain.state import InvestigationState
 from core.llm import LLMError, get_llm_client
+from core.persistence.repository import PersistenceError, PersistenceRepository
 
 RESULT_SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "orchestrator_result_schema.json"
 
@@ -64,6 +65,41 @@ STATUS_REUSED = "REUSED"
 PIPELINE_COMPLETED = "COMPLETED"
 PIPELINE_PARTIAL = "PARTIAL"
 PIPELINE_FAILED = "FAILED"
+
+# Canonical stage execution order
+CANONICAL_STAGE_ORDER = [
+    "logs",
+    "metrics",
+    "code",
+    "evidence_fusion",
+    "hypotheses",
+    "verification",
+    "fix_proposals",
+    "approvals",
+]
+
+
+def _find_resume_stage(state: InvestigationState) -> Optional[str]:
+    """Find the first incomplete or retryable stage in canonical order.
+
+    Rules:
+    - SUCCEEDED -> skip
+    - REUSED / CACHED -> skip
+    - FAILED -> resume from here
+    - RUNNING -> resume from here
+    - SKIPPED -> resume from here
+    - missing -> first incomplete stage
+    - If all stages completed -> None
+    """
+    for stage_name in CANONICAL_STAGE_ORDER:
+        sr = state.stages.get(stage_name)
+        if sr is None:
+            return stage_name
+        status = sr.status if isinstance(sr.status, str) else sr.status.value
+        if status in (STATUS_SUCCEEDED, STATUS_REUSED, "CACHED"):
+            continue
+        return stage_name
+    return None
 
 # Forbidden files — must never be read or passed to any agent
 # Forbidden files — must never be read or passed to any agent.
@@ -231,6 +267,7 @@ class IncidentOrchestrator:
         sleep_between_stages: float = 0.0,
         non_interactive: bool = True,
         output_dir: Optional[Path] = None,
+        repository: Optional[PersistenceRepository] = None,
     ) -> None:
         """
         Args:
@@ -238,14 +275,29 @@ class IncidentOrchestrator:
             sleep_between_stages: Seconds to sleep between LLM-heavy stages (rate-limit guard).
             non_interactive: If True, approval gate auto-rejects (non-interactive mode).
             output_dir: Directory for caching per-stage outputs (enables resumability).
+            repository: Optional PersistenceRepository for durable InvestigationState persistence.
         """
         self._llm_client = llm_client
         self.sleep_between_stages = float(sleep_between_stages)
         self.non_interactive = non_interactive
         self.output_dir = output_dir
+        self.repository = repository
+        self._repository = repository
         self._result_schema = _load_result_schema()
         self.state: Optional[InvestigationState] = None
         self.last_state: Optional[InvestigationState] = None
+
+    def _persist(self, state: InvestigationState) -> None:
+        """Persist investigation state if repository is configured.
+
+        Never swallows persistence exceptions.
+        """
+        if self._repository is not None:
+            self._repository.save(state)
+
+    def _find_resume_stage(self, state: InvestigationState) -> Optional[str]:
+        """Find the first incomplete or retryable stage in canonical order."""
+        return _find_resume_stage(state)
 
     def _get_llm_client(self):
         if self._llm_client is None:
@@ -267,7 +319,7 @@ class IncidentOrchestrator:
             time.sleep(self.sleep_between_stages)
 
     # ------------------------------------------------------------------
-    # Main entry point
+    # Main entry points
     # ------------------------------------------------------------------
 
     def investigate(self, incident_dir: Path | str) -> Dict[str, Any]:
@@ -284,106 +336,194 @@ class IncidentOrchestrator:
         state = InvestigationState(incident_id=incident_id)
         self.state = state
         self.last_state = state
+        self._persist(state)
+
+        return self._run_pipeline(incident_path=incident_path, state=state, resume_stage="logs")
+
+    def resume(self, investigation_id: str, incident_dir: Path | str) -> Dict[str, Any]:
+        """Resume an incomplete or failed investigation from durable state.
+
+        Args:
+            investigation_id: Identifier of the investigation to resume.
+            incident_dir: Path to the incident bundle directory.
+
+        Returns:
+            Validated OrchestratorResult dict.
+
+        Raises:
+            PersistenceError: If repository is unconfigured, state missing, or state completed.
+            FileNotFoundError: If incident_dir does not exist.
+        """
+        if self._repository is None:
+            raise PersistenceError("Persistence repository is required for resume")
+
+        incident_path = Path(incident_dir)
+        _validate_incident_dir(incident_path)
+        if incident_path.name != investigation_id:
+            raise PersistenceError(
+                f"Incident directory name '{incident_path.name}' does not match investigation ID '{investigation_id}'"
+            )
+
+        state = self._repository.load(investigation_id)
+        if state is None:
+            raise PersistenceError(f"No persisted state found for investigation '{investigation_id}'")
+
+        status_val = state.status if isinstance(state.status, str) else state.status.value
+        if status_val in (IncidentStatus.COMPLETED, "COMPLETED"):
+            raise PersistenceError(f"Cannot resume completed investigation '{investigation_id}'")
+
+        # Reset active stage and error state for clean resumption
+        state.current_stage = None
+        if status_val in (IncidentStatus.FAILED, IncidentStatus.PARTIAL, "FAILED", "PARTIAL"):
+            state.status = IncidentStatus.RUNNING
+            state.error = None
+
+        self.state = state
+        self.last_state = state
+
+        resume_stage = self._find_resume_stage(state)
+        return self._run_pipeline(incident_path=incident_path, state=state, resume_stage=resume_stage)
+
+    def _run_pipeline(
+        self,
+        incident_path: Path,
+        state: InvestigationState,
+        resume_stage: Optional[str] = "logs",
+    ) -> Dict[str, Any]:
+        incident_id = incident_path.name
+
+        def should_run(stage_name: str) -> bool:
+            if resume_stage is None:
+                return False
+            resume_idx = CANONICAL_STAGE_ORDER.index(resume_stage)
+            stage_idx = CANONICAL_STAGE_ORDER.index(stage_name)
+            return stage_idx >= resume_idx
+
+        def _get_stage_output(s_name: str) -> Any:
+            sr = state.stages.get(s_name)
+            if sr is not None and sr.status in (STATUS_SUCCEEDED, STATUS_REUSED, "CACHED"):
+                return sr.output
+            return None
+
+        # Reinject previously completed outputs for downstream stages
+        logs_output = _get_stage_output("logs")
+        metrics_output = _get_stage_output("metrics")
+        code_output = _get_stage_output("code")
+        fused = _get_stage_output("evidence_fusion")
+        hypotheses_output = _get_stage_output("hypotheses")
+        verification_output = _get_stage_output("verification")
+        proposals_bundle = _get_stage_output("fix_proposals")
+        approval_output = _get_stage_output("approvals")
 
         # ── Stage 1: Logs ─────────────────────────────────────────────
-        state.start_stage("logs")
-        logs_output, logs_calls, logs_stage = self._run_evidence_stage(
-            stage_name="logs",
-            incident_id=incident_id,
-            incident_path=incident_path,
-            run_fn=lambda: LogsAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
-            expected_llm_calls=1,
-        )
-        if logs_stage.get("status") == STATUS_REUSED:
-            state.mark_cached("logs", output=logs_output)
-        elif logs_stage.get("status") == STATUS_SUCCEEDED:
-            state.complete_stage(
-                "logs",
-                output=logs_output,
-                llm_calls=logs_stage.get("llm_calls", 0),
-                prompt_tokens=logs_stage.get("prompt_tokens", 0),
-                completion_tokens=logs_stage.get("completion_tokens", 0),
-                total_tokens=logs_stage.get("total_tokens", 0),
+        if should_run("logs"):
+            state.start_stage("logs")
+            logs_output, logs_calls, logs_stage = self._run_evidence_stage(
+                stage_name="logs",
+                incident_id=incident_id,
+                incident_path=incident_path,
+                run_fn=lambda: LogsAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
+                expected_llm_calls=1,
             )
-        else:
-            state.fail_stage("logs", error=logs_stage.get("error", "Unknown error"), output=logs_output)
-        if logs_output:
-            state.add_evidence(logs_output)
+            if logs_stage.get("status") == STATUS_REUSED:
+                state.mark_cached("logs", output=logs_output)
+            elif logs_stage.get("status") == STATUS_SUCCEEDED:
+                state.complete_stage(
+                    "logs",
+                    output=logs_output,
+                    llm_calls=logs_stage.get("llm_calls", 0),
+                    prompt_tokens=logs_stage.get("prompt_tokens", 0),
+                    completion_tokens=logs_stage.get("completion_tokens", 0),
+                    total_tokens=logs_stage.get("total_tokens", 0),
+                )
+            else:
+                state.fail_stage("logs", error=logs_stage.get("error", "Unknown error"), output=logs_output)
+            if logs_output:
+                state.add_evidence(logs_output)
+            self._persist(state)
 
         # ── Stage 2: Metrics ──────────────────────────────────────────
-        self._sleep()
-        state.start_stage("metrics")
-        metrics_output, metrics_calls, metrics_stage = self._run_evidence_stage(
-            stage_name="metrics",
-            incident_id=incident_id,
-            incident_path=incident_path,
-            run_fn=lambda: MetricsAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
-            expected_llm_calls=1,
-        )
-        if metrics_stage.get("status") == STATUS_REUSED:
-            state.mark_cached("metrics", output=metrics_output)
-        elif metrics_stage.get("status") == STATUS_SUCCEEDED:
-            state.complete_stage(
-                "metrics",
-                output=metrics_output,
-                llm_calls=metrics_stage.get("llm_calls", 0),
-                prompt_tokens=metrics_stage.get("prompt_tokens", 0),
-                completion_tokens=metrics_stage.get("completion_tokens", 0),
-                total_tokens=metrics_stage.get("total_tokens", 0),
+        if should_run("metrics"):
+            self._sleep()
+            state.start_stage("metrics")
+            metrics_output, metrics_calls, metrics_stage = self._run_evidence_stage(
+                stage_name="metrics",
+                incident_id=incident_id,
+                incident_path=incident_path,
+                run_fn=lambda: MetricsAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
+                expected_llm_calls=1,
             )
-        else:
-            state.fail_stage("metrics", error=metrics_stage.get("error", "Unknown error"), output=metrics_output)
-        if metrics_output:
-            state.add_evidence(metrics_output)
+            if metrics_stage.get("status") == STATUS_REUSED:
+                state.mark_cached("metrics", output=metrics_output)
+            elif metrics_stage.get("status") == STATUS_SUCCEEDED:
+                state.complete_stage(
+                    "metrics",
+                    output=metrics_output,
+                    llm_calls=metrics_stage.get("llm_calls", 0),
+                    prompt_tokens=metrics_stage.get("prompt_tokens", 0),
+                    completion_tokens=metrics_stage.get("completion_tokens", 0),
+                    total_tokens=metrics_stage.get("total_tokens", 0),
+                )
+            else:
+                state.fail_stage("metrics", error=metrics_stage.get("error", "Unknown error"), output=metrics_output)
+            if metrics_output:
+                state.add_evidence(metrics_output)
+            self._persist(state)
 
         # ── Stage 3: Code ─────────────────────────────────────────────
-        self._sleep()
-        state.start_stage("code")
-        code_output, code_calls, code_stage = self._run_evidence_stage(
-            stage_name="code",
-            incident_id=incident_id,
-            incident_path=incident_path,
-            run_fn=lambda: CodeAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
-            expected_llm_calls=1,
-        )
-        if code_stage.get("status") == STATUS_REUSED:
-            state.mark_cached("code", output=code_output)
-        elif code_stage.get("status") == STATUS_SUCCEEDED:
-            state.complete_stage(
-                "code",
-                output=code_output,
-                llm_calls=code_stage.get("llm_calls", 0),
-                prompt_tokens=code_stage.get("prompt_tokens", 0),
-                completion_tokens=code_stage.get("completion_tokens", 0),
-                total_tokens=code_stage.get("total_tokens", 0),
+        if should_run("code"):
+            self._sleep()
+            state.start_stage("code")
+            code_output, code_calls, code_stage = self._run_evidence_stage(
+                stage_name="code",
+                incident_id=incident_id,
+                incident_path=incident_path,
+                run_fn=lambda: CodeAgent(llm_client=self._get_llm_client()).extract_evidence(incident_path),
+                expected_llm_calls=1,
             )
-        else:
-            state.fail_stage("code", error=code_stage.get("error", "Unknown error"), output=code_output)
-        if code_output:
-            state.add_evidence(code_output)
+            if code_stage.get("status") == STATUS_REUSED:
+                state.mark_cached("code", output=code_output)
+            elif code_stage.get("status") == STATUS_SUCCEEDED:
+                state.complete_stage(
+                    "code",
+                    output=code_output,
+                    llm_calls=code_stage.get("llm_calls", 0),
+                    prompt_tokens=code_stage.get("prompt_tokens", 0),
+                    completion_tokens=code_stage.get("completion_tokens", 0),
+                    total_tokens=code_stage.get("total_tokens", 0),
+                )
+            else:
+                state.fail_stage("code", error=code_stage.get("error", "Unknown error"), output=code_output)
+            if code_output:
+                state.add_evidence(code_output)
+            self._persist(state)
 
         # ── Stage 4: Evidence Fusion ──────────────────────────────────
-        state.start_stage("evidence_fusion")
-        fused = _fuse_evidence(incident_id, logs_output, metrics_output, code_output)
-        fusion_errors = _validate_evidence_fusion(fused)
-        if fusion_errors:
-            err_msg = "; ".join(fusion_errors)
-            state.fail_stage("evidence_fusion", error=err_msg, output=fused)
-            state.fail(error=f"Evidence fusion failed: {err_msg}")
-            return self._build_result_from_state(
-                state=state,
-                pipeline_status=PIPELINE_FAILED,
-                error=f"Evidence fusion failed: {err_msg}",
-            )
-        state.complete_stage("evidence_fusion", output=fused)
-        cache_path = self._stage_cache_path(incident_id, "evidence_fusion")
-        if cache_path:
-            _save_cache(cache_path, fused)
+        if should_run("evidence_fusion"):
+            state.start_stage("evidence_fusion")
+            fused = _fuse_evidence(incident_id, logs_output, metrics_output, code_output)
+            fusion_errors = _validate_evidence_fusion(fused)
+            if fusion_errors:
+                err_msg = "; ".join(fusion_errors)
+                state.fail_stage("evidence_fusion", error=err_msg, output=fused)
+                state.fail(error=f"Evidence fusion failed: {err_msg}")
+                self._persist(state)
+                return self._build_result_from_state(
+                    state=state,
+                    pipeline_status=PIPELINE_FAILED,
+                    error=f"Evidence fusion failed: {err_msg}",
+                )
+            state.complete_stage("evidence_fusion", output=fused)
+            cache_path = self._stage_cache_path(incident_id, "evidence_fusion")
+            if cache_path:
+                _save_cache(cache_path, fused)
+            self._persist(state)
 
         # Require at least some evidence to continue
-        if not fused["evidence"]:
+        if not fused or not fused.get("evidence"):
             state.skip_stage("hypotheses", reason="No evidence collected; cannot generate hypotheses.")
             state.mark_partial()
+            self._persist(state)
             return self._build_result_from_state(
                 state=state,
                 pipeline_status=PIPELINE_PARTIAL,
@@ -391,135 +531,149 @@ class IncidentOrchestrator:
             )
 
         # ── Stage 5: Hypothesis Engine ────────────────────────────────
-        self._sleep()
-        state.start_stage("hypotheses")
-        hyp_cache_path = self._stage_cache_path(incident_id, "hypotheses")
-        hyp_cached = _load_cache(hyp_cache_path, incident_id) if hyp_cache_path else None
-        if hyp_cached is not None:
-            print(f"  [reuse] hypotheses (cached)")
-            hypotheses_output = hyp_cached
-            state.mark_cached("hypotheses", output=hyp_cached)
-            state.add_hypotheses(hypotheses_output)
-        else:
-            hypotheses_output, hyp_calls, hyp_stage = self._run_hypothesis_stage(
-                incident_id=incident_id,
-                logs_output=logs_output,
-                metrics_output=metrics_output,
-                code_output=code_output,
-            )
-            if hyp_stage.get("status") == STATUS_SUCCEEDED:
-                if hyp_cache_path:
-                    _save_cache(hyp_cache_path, hypotheses_output)
-                state.complete_stage(
-                    "hypotheses",
-                    output=hypotheses_output,
-                    llm_calls=hyp_stage.get("llm_calls", 0),
-                    prompt_tokens=hyp_stage.get("prompt_tokens", 0),
-                    completion_tokens=hyp_stage.get("completion_tokens", 0),
-                    total_tokens=hyp_stage.get("total_tokens", 0),
-                )
+        if should_run("hypotheses"):
+            self._sleep()
+            state.start_stage("hypotheses")
+            hyp_cache_path = self._stage_cache_path(incident_id, "hypotheses")
+            hyp_cached = _load_cache(hyp_cache_path, incident_id) if hyp_cache_path else None
+            if hyp_cached is not None:
+                print(f"  [reuse] hypotheses (cached)")
+                hypotheses_output = hyp_cached
+                state.mark_cached("hypotheses", output=hyp_cached)
                 state.add_hypotheses(hypotheses_output)
             else:
-                state.fail_stage("hypotheses", error=hyp_stage.get("error", "Hypothesis stage failed"), output=hypotheses_output)
+                hypotheses_output, hyp_calls, hyp_stage = self._run_hypothesis_stage(
+                    incident_id=incident_id,
+                    logs_output=logs_output,
+                    metrics_output=metrics_output,
+                    code_output=code_output,
+                )
+                if hyp_stage.get("status") == STATUS_SUCCEEDED:
+                    if hyp_cache_path:
+                        _save_cache(hyp_cache_path, hypotheses_output)
+                    state.complete_stage(
+                        "hypotheses",
+                        output=hypotheses_output,
+                        llm_calls=hyp_stage.get("llm_calls", 0),
+                        prompt_tokens=hyp_stage.get("prompt_tokens", 0),
+                        completion_tokens=hyp_stage.get("completion_tokens", 0),
+                        total_tokens=hyp_stage.get("total_tokens", 0),
+                    )
+                    state.add_hypotheses(hypotheses_output)
+                else:
+                    state.fail_stage("hypotheses", error=hyp_stage.get("error", "Hypothesis stage failed"), output=hypotheses_output)
+
+            self._persist(state)
 
         if state.stages.get("hypotheses") and state.stages["hypotheses"].status == STATUS_FAILED:
             state.skip_stage("verification", reason="Hypothesis stage failed; cannot verify.")
             state.mark_partial()
+            self._persist(state)
             return self._build_result_from_state(
                 state=state,
                 pipeline_status=PIPELINE_PARTIAL,
             )
 
         # ── Stage 6: Verification ─────────────────────────────────────
-        state.start_stage("verification")
-        ver_cache_path = self._stage_cache_path(incident_id, "verification")
-        ver_cached = _load_cache(ver_cache_path, incident_id) if ver_cache_path else None
-        if ver_cached is not None:
-            print(f"  [reuse] verification (cached)")
-            verification_output = ver_cached
-            state.mark_cached("verification", output=ver_cached)
-            state.add_verification_results(verification_output)
-        else:
-            verification_output, ver_stage = self._run_verification_stage(
-                incident_id=incident_id,
-                incident_path=incident_path,
-                hypotheses=hypotheses_output,
-                logs_output=logs_output,
-                metrics_output=metrics_output,
-                code_output=code_output,
-            )
-            if ver_stage.get("status") == STATUS_SUCCEEDED:
-                if ver_cache_path:
-                    _save_cache(ver_cache_path, verification_output)
-                state.complete_stage(
-                    "verification",
-                    output=verification_output,
-                    llm_calls=0,
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
-                )
+        if should_run("verification"):
+            state.start_stage("verification")
+            ver_cache_path = self._stage_cache_path(incident_id, "verification")
+            ver_cached = _load_cache(ver_cache_path, incident_id) if ver_cache_path else None
+            if ver_cached is not None:
+                print(f"  [reuse] verification (cached)")
+                verification_output = ver_cached
+                state.mark_cached("verification", output=ver_cached)
                 state.add_verification_results(verification_output)
             else:
-                state.fail_stage("verification", error=ver_stage.get("error", "Verification stage failed"), output=verification_output)
+                verification_output, ver_stage = self._run_verification_stage(
+                    incident_id=incident_id,
+                    incident_path=incident_path,
+                    hypotheses=hypotheses_output,
+                    logs_output=logs_output,
+                    metrics_output=metrics_output,
+                    code_output=code_output,
+                )
+                if ver_stage.get("status") == STATUS_SUCCEEDED:
+                    if ver_cache_path:
+                        _save_cache(ver_cache_path, verification_output)
+                    state.complete_stage(
+                        "verification",
+                        output=verification_output,
+                        llm_calls=0,
+                        prompt_tokens=0,
+                        completion_tokens=0,
+                        total_tokens=0,
+                    )
+                    state.add_verification_results(verification_output)
+                else:
+                    state.fail_stage("verification", error=ver_stage.get("error", "Verification stage failed"), output=verification_output)
+
+            self._persist(state)
 
         if state.stages.get("verification") and state.stages["verification"].status == STATUS_FAILED:
             state.skip_stage("fix_proposals", reason="Verification stage failed; cannot propose fixes.")
             state.mark_partial()
+            self._persist(state)
             return self._build_result_from_state(
                 state=state,
                 pipeline_status=PIPELINE_PARTIAL,
             )
 
         # ── Stage 7: Fix Proposals ────────────────────────────────────
-        self._sleep()
-        state.start_stage("fix_proposals")
-        proposals_bundle, fix_calls, fix_stage = self._run_fix_proposal_stage(
-            incident_id=incident_id,
-            incident_path=incident_path,
-            hypotheses=hypotheses_output,
-            verification=verification_output,
-            logs_output=logs_output,
-            metrics_output=metrics_output,
-            code_output=code_output,
-        )
-        if fix_stage.get("status") == STATUS_REUSED:
-            state.mark_cached("fix_proposals", output=proposals_bundle)
-            state.add_proposals(proposals_bundle)
-        elif fix_stage.get("status") == STATUS_SUCCEEDED:
-            state.complete_stage(
-                "fix_proposals",
-                output=proposals_bundle,
-                llm_calls=fix_stage.get("llm_calls", 0),
-                prompt_tokens=fix_stage.get("prompt_tokens", 0),
-                completion_tokens=fix_stage.get("completion_tokens", 0),
-                total_tokens=fix_stage.get("total_tokens", 0),
+        if should_run("fix_proposals"):
+            self._sleep()
+            state.start_stage("fix_proposals")
+            proposals_bundle, fix_calls, fix_stage = self._run_fix_proposal_stage(
+                incident_id=incident_id,
+                incident_path=incident_path,
+                hypotheses=hypotheses_output,
+                verification=verification_output,
+                logs_output=logs_output,
+                metrics_output=metrics_output,
+                code_output=code_output,
             )
-            state.add_proposals(proposals_bundle)
-        else:
-            state.fail_stage("fix_proposals", error=fix_stage.get("error", "Fix proposal failed"), output=proposals_bundle)
-            if proposals_bundle:
+            if fix_stage.get("status") == STATUS_REUSED:
+                state.mark_cached("fix_proposals", output=proposals_bundle)
                 state.add_proposals(proposals_bundle)
+            elif fix_stage.get("status") == STATUS_SUCCEEDED:
+                state.complete_stage(
+                    "fix_proposals",
+                    output=proposals_bundle,
+                    llm_calls=fix_stage.get("llm_calls", 0),
+                    prompt_tokens=fix_stage.get("prompt_tokens", 0),
+                    completion_tokens=fix_stage.get("completion_tokens", 0),
+                    total_tokens=fix_stage.get("total_tokens", 0),
+                )
+                state.add_proposals(proposals_bundle)
+            else:
+                state.fail_stage("fix_proposals", error=fix_stage.get("error", "Fix proposal failed"), output=proposals_bundle)
+                if proposals_bundle:
+                    state.add_proposals(proposals_bundle)
+
+            self._persist(state)
 
         # ── Stage 8: Human Approval ───────────────────────────────────
-        state.start_stage("approvals")
-        approval_output, approval_stage = self._run_approval_stage(
-            proposals_bundle=proposals_bundle,
-        )
-        if approval_stage.get("status") == STATUS_SUCCEEDED:
-            state.complete_stage(
-                "approvals",
-                output=approval_output,
-                llm_calls=0,
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
+        if should_run("approvals"):
+            state.start_stage("approvals")
+            approval_output, approval_stage = self._run_approval_stage(
+                proposals_bundle=proposals_bundle,
             )
-            state.record_approval(approval_output)
-        else:
-            state.fail_stage("approvals", error=approval_stage.get("error", "Approval stage failed"), output=approval_output)
-            if approval_output:
+            if approval_stage.get("status") == STATUS_SUCCEEDED:
+                state.complete_stage(
+                    "approvals",
+                    output=approval_output,
+                    llm_calls=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                )
                 state.record_approval(approval_output)
+            else:
+                state.fail_stage("approvals", error=approval_stage.get("error", "Approval stage failed"), output=approval_output)
+                if approval_output:
+                    state.record_approval(approval_output)
+
+            self._persist(state)
 
         # ── Build final result ────────────────────────────────────────
         all_failed = all(
@@ -539,6 +693,8 @@ class IncidentOrchestrator:
             state.mark_partial()
         else:
             state.fail()
+
+        self._persist(state)
 
         return self._build_result_from_state(
             state=state,
