@@ -27,7 +27,16 @@
   - Integrated persistence hooks into `IncidentOrchestrator` (`agents/orchestrator.py`) with optional `repository` parameter.
   - Implemented `IncidentOrchestrator.resume(investigation_id, incident_dir)` with deterministic stage discovery and output reinjection.
   - 47 new unit/integration tests in `tests/test_persistence.py` and `tests/test_orchestrator_resume.py` (402/402 total tests passing, 51/51 incident validation passing).
-- [ ] **Mission 04: Structured Investigation Export & Persistent Artefacts** (Upcoming)
+- [x] **Mission 04: Event-Driven Architecture** (2026-09-10)
+  - Created `core/events/` package with `DomainEvent` base, 8 concrete events, `EventBus` ABC, `InMemoryEventBus`, and `EventRecorder`.
+  - Synchronous, FIFO, deterministic in-process event bus with subscriber failure isolation (`strict=False` default).
+  - Added optional `event_bus: Optional[EventBus] = None` to `IncidentOrchestrator.__init__`. Fully backward compatible.
+  - Added `_emit()` helper and `_make_completed_event()` builder to the orchestrator.
+  - Strict lifecycle ordering: **State Mutation → Persistence → Event Publish** enforced at every stage.
+  - Cache hits emit `StageCached` only — never `StageStarted` or `StageCompleted`.
+  - Terminal `InvestigationCompleted` emitted once per run, always last.
+  - 33 new unit/integration tests in `tests/test_events.py` (11) and `tests/test_orchestrator_events.py` (22) (435/435 total tests passing, 51/51 incident validation passing).
+- [ ] **Mission 05: Observability + Metrics Export** (Upcoming)
 
 ---
 

@@ -2,6 +2,47 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission04] - 2026-09-10
+
+### Added
+- **Domain Event Infrastructure (`core/events/`)**:
+  - `DomainEvent` (`core/events/base.py`): Immutable Pydantic V2 base class for all domain events. Fields: `event_id` (auto-generated `evt_<uuid>`), `event_type: str` (Literal discriminator), `timestamp: str` (UTC ISO-8601), `investigation_id: str`. Frozen (`frozen=True`) and strict (`extra="forbid"`).
+  - 8 concrete domain events (`core/events/events.py`):
+    - `InvestigationStarted` — fresh investigation begins.
+    - `InvestigationResumed` — investigation resumed from durable state; carries `resume_stage` and `resumed_from_status`.
+    - `StageStarted` — pipeline stage begins actual execution.
+    - `StageCompleted` — stage completes successfully; carries `llm_calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `item_count`.
+    - `StageFailed` — stage terminates with error; carries `error: str`.
+    - `StageCached` — stage output reused from cache; no LLM calls made.
+    - `StageSkipped` — stage skipped due to upstream failure; carries optional `reason`.
+    - `InvestigationCompleted` — terminal event carrying `status`, `total_llm_calls`, `total_tokens`, `confirmed_hypotheses`, `proposals_generated`, `proposals_approved`, `error`.
+  - `EventBus` abstract interface (`core/events/bus.py`): `publish(event)`, `subscribe(event_type, handler)`, `subscribe_all(handler)`.
+  - `InMemoryEventBus` (`core/events/bus.py`): Synchronous, FIFO, deterministic in-process event bus. Supports `strict=True` mode (re-raises subscriber exceptions) and `strict=False` default (isolates subscriber failures, logs them, continues to remaining subscribers). Exposes `errors` list for inspection.
+  - `EventRecorder` (`core/events/bus.py`): Test and audit helper subscribing to all events and recording them chronologically. Supports `filter(event_type)` and `clear()`.
+  - `core/events/__init__.py` exporting all public symbols.
+
+- **Orchestrator Event Integration (`agents/orchestrator.py`)**:
+  - Added optional `event_bus: Optional[EventBus] = None` parameter to `IncidentOrchestrator.__init__`. Default behavior is fully backward compatible when `event_bus=None`.
+  - Added `_emit(event: DomainEvent)` helper that publishes only if `event_bus` is configured.
+  - Added `_make_completed_event(state, pipeline_status, error)` building `InvestigationCompleted` from live state without mutating state.
+  - Strict lifecycle ordering enforced at every stage: **State Mutation → Persistence → Event Publish**. If persistence fails, the event is never published.
+  - Events emitted by `investigate()`: `InvestigationStarted` immediately after initial state is persisted.
+  - Events emitted by `resume()`: `InvestigationResumed` after state is cleaned up and persisted, before `_run_pipeline()`.
+  - Per-stage emission rules in `_run_pipeline()`:
+    - **Cache hit** (file-system cache): `StageCached` emitted. `StageStarted` and `StageCompleted` are NOT emitted.
+    - **Fresh execution**: `StageStarted` → execute → `complete_stage`/`fail_stage` → `_persist` → `StageCompleted`/`StageFailed`.
+    - **Evidence Fusion failure**: `StageStarted` → `StageFailed` → `InvestigationCompleted(FAILED)`.
+    - **No-evidence partial exit**: `StageSkipped(hypotheses)` → `InvestigationCompleted(PARTIAL)`.
+    - **Hypothesis failure cascade**: `StageFailed(hypotheses)` → `StageSkipped(verification)` → `InvestigationCompleted(PARTIAL)`.
+    - **Verification failure cascade**: `StageFailed(verification)` → `StageSkipped(fix_proposals)` → `InvestigationCompleted(PARTIAL)`.
+    - **Normal completion**: `StageCompleted(approvals)` → `InvestigationCompleted(COMPLETED/PARTIAL/FAILED)`.
+  - Subscriber failures in non-strict bus mode never abort investigations.
+
+- **Test Coverage**:
+  - `tests/test_events.py` (11 tests): event creation, immutability, extra field rejection, unique IDs, JSON serialization round-trips, specific subscriptions, global subscriptions, FIFO registration ordering, subscriber exception isolation, strict mode, and `EventRecorder` filter/clear.
+  - `tests/test_orchestrator_events.py` (22 tests): backward compatibility without bus, full fresh-run event sequence, event field correctness, stage ordering, token telemetry in `StageCompleted`, cache-reuse emits only `StageCached`, stage failure emits `StageFailed`, hypothesis/verification failure cascades, `InvestigationCompleted` status/summary matching, exactly-one terminal event, resume emits `InvestigationResumed`, resume skips already-completed stages, subscriber failure isolation, correct `investigation_id` on all events, unique `event_id`s, event ordering (`InvestigationStarted` first, `InvestigationCompleted` last), zero extra LLM calls from event bus, multiple subscriber FIFO delivery, and evidence fusion failure.
+  - Full test suite passing (435/435 tests) and incident verification passing (51/51 checks).
+
 ## [2.0.0-mission03] - 2026-09-09
 
 ### Added
