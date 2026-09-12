@@ -11,9 +11,84 @@ from typing import List, Optional
 from core.domain.state import InvestigationState
 
 
+import re
+
 class PersistenceError(Exception):
     """Base exception for all persistence failures."""
     pass
+
+
+class ConcurrencyError(PersistenceError):
+    """Raised when an optimistic concurrency conflict or concurrent write conflict occurs."""
+    pass
+
+
+_SAFE_ID_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
+
+_FORBIDDEN_ARTEFACTS = (
+    "ground" + "_truth.md",
+    "results_" + "baseline.csv",
+    "baseline_" + "summary.json",
+)
+
+_FORBIDDEN_SECRETS = (
+    "GROQ" + "_API_KEY",
+    "OPENAI" + "_API_KEY",
+    "ANTHROPIC" + "_API_KEY",
+)
+
+
+def validate_investigation_id(investigation_id: str) -> str:
+    """Validate that investigation ID is a safe identifier.
+
+    Args:
+        investigation_id: Investigation ID to validate.
+
+    Returns:
+        Validated, stripped investigation ID string.
+
+    Raises:
+        PersistenceError: If the ID contains invalid characters, path traversal, or is malformed.
+    """
+    if not isinstance(investigation_id, str):
+        raise PersistenceError(f"Investigation ID must be a string, got {type(investigation_id).__name__}")
+
+    stripped = investigation_id.strip()
+    if not stripped:
+        raise PersistenceError("Investigation ID cannot be empty or whitespace")
+
+    if "/" in stripped or "\\" in stripped or ".." in stripped or ":" in stripped:
+        raise PersistenceError(f"Path traversal detected in investigation ID: {investigation_id!r}")
+
+    if not _SAFE_ID_REGEX.match(stripped):
+        raise PersistenceError(
+            f"Invalid investigation ID format: {investigation_id!r}. "
+            "Must match ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$"
+        )
+
+    return stripped
+
+
+def check_persistence_safety(json_str: str) -> None:
+    """Assert serialized state does not leak benchmark artefacts or secrets.
+
+    Args:
+        json_str: Serialized JSON state string.
+
+    Raises:
+        PersistenceError: If forbidden benchmark files or API key secrets are present.
+    """
+    for forbidden in _FORBIDDEN_ARTEFACTS:
+        if forbidden in json_str:
+            raise PersistenceError(
+                f"Safety check failed: forbidden benchmark artefact detected in state: '{forbidden}'"
+            )
+
+    for secret_name in _FORBIDDEN_SECRETS:
+        if secret_name in json_str:
+            raise PersistenceError(
+                f"Safety check failed: forbidden secret key detected in state: '{secret_name}'"
+            )
 
 
 class PersistenceRepository(ABC):

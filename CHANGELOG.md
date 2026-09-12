@@ -2,6 +2,30 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission05] - 2026-09-12
+
+### Added
+- **InvestigationState Versioning (`core/domain/state.py`)**:
+  - Added `version: int = Field(default=1, ge=1)` to `InvestigationState`.
+  - Fully backward compatible: legacy `state.json` files without a `version` field default to `version = 1`.
+- **PostgresRepository (`core/persistence/postgres.py`)**:
+  - Concrete PostgreSQL implementation of `PersistenceRepository` using `psycopg[binary] >= 3.1.0` and `psycopg-pool >= 3.2.0`.
+  - Single-table hybrid storage (`investigations` table) storing operational metadata in indexed columns and complete domain state in `state_payload JSONB`.
+  - Transactional optimistic concurrency control (OCC) using `version` column; raises typed `ConcurrencyError` on conflicting concurrent saves or inserts.
+  - Same security and safety boundary assertions as `FilesystemRepository` (rejection of path traversal, forbidden benchmark artifacts, and API key secrets).
+  - Efficient `exists()` and `list()` implementations querying only indexed primary keys without fetching JSONB payloads.
+- **PostgreSQL Schema (`core/persistence/sql/001_initial_schema.sql`)**:
+  - Created `investigations` table DDL with indexes on `status`, `current_stage`, and `started_at DESC`.
+- **Repository Factory (`core/persistence/factory.py`)**:
+  - `get_repository()` helper supporting `SENTINEL_PERSISTENCE_BACKEND=filesystem|postgres` (default: `filesystem`).
+- **Filesystem to PostgreSQL Migration Tool (`scripts/migrate_fs_to_postgres.py`)**:
+  - Standalone migration script importing filesystem state into PostgreSQL with full round-trip `state.to_dict()` equality verification.
+- **Local Development Environment (`docker-compose.yml`, `.env.example`)**:
+  - Added PostgreSQL 16 Alpine local Docker Compose service and documented persistence environment variables in `.env.example`.
+- **Contract & Persistence Tests (`tests/test_persistence_contract.py`, `tests/test_postgres_persistence.py`)**:
+  - Shared `PersistenceContractTests` suite verifying identical invariants across both repository implementations.
+  - Comprehensive unit tests (offline/mocked) and integration tests (gracefully skipped when PostgreSQL is unavailable).
+
 ## [2.0.0-mission04] - 2026-09-10
 
 ### Added

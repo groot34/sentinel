@@ -35,8 +35,16 @@
   - Strict lifecycle ordering: **State Mutation → Persistence → Event Publish** enforced at every stage.
   - Cache hits emit `StageCached` only — never `StageStarted` or `StageCompleted`.
   - Terminal `InvestigationCompleted` emitted once per run, always last.
-  - 33 new unit/integration tests in `tests/test_events.py` (11) and `tests/test_orchestrator_events.py` (22) (435/435 total tests passing, 51/51 incident validation passing).
-- [ ] **Mission 05: Observability + Metrics Export** (Upcoming)
+- [x] **Mission 05: PostgreSQL Persistence Architecture** (2026-09-12)
+  - Added `version: int = Field(default=1, ge=1)` to `InvestigationState` for optimistic concurrency control with 100% backward compatibility.
+  - Implemented `PostgresRepository` in `core/persistence/postgres.py` with transactional OCC, single-table hybrid schema, and security assertions.
+  - Created `001_initial_schema.sql` (`investigations` table with indexed `status`, `current_stage`, `started_at`).
+  - Implemented repository factory `get_repository()` in `core/persistence/factory.py`.
+  - Created migration tool `scripts/migrate_fs_to_postgres.py` with round-trip dictionary verification.
+  - Added `docker-compose.yml` and `.env.example` persistence configuration.
+  - Added shared `PersistenceContractTests` in `tests/test_persistence_contract.py` and Postgres unit/integration tests in `tests/test_postgres_persistence.py`.
+  - 472/472 pytest tests passing (20 integration tests gracefully skipped when PostgreSQL is offline), 51/51 incident validation passing.
+- [ ] **Mission 06: Transactional Outbox & Event Delivery** (Upcoming)
 
 ---
 

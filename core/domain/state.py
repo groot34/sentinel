@@ -74,6 +74,7 @@ class InvestigationState(BaseDomainModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     llm_call_count: int = Field(default=0, ge=0)
+    version: int = Field(default=1, ge=1)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("incident_id")
