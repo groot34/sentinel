@@ -1,81 +1,29 @@
-"""Centralized Groq Runtime LLM Client for Sentinel.
+"""Groq LLM provider implementation for Sentinel 2.0.
 
-This module provides the single unified interface for all Sentinel runtime agents.
-Individual agents must never instantiate provider SDKs directly.
-
-Features:
-- Configurable via environment variables (GROQ_API_KEY, GROQ_MODEL).
-- Free-tier rate limit protection with conservative exponential retries.
-- Support for unstructured text and structured JSON responses.
-- Robust secret masking to prevent credentials leaking into logs, traces, or errors.
-- Latency and token usage tracking without fabricated metrics.
+Provides centralized Groq client integration with rate limit backoff,
+structured JSON response extraction, token telemetry, and secret sanitization.
 """
+
+from __future__ import annotations
 
 import json
 import os
 import re
 import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
+from core.llm.base import BaseLLMProvider
+from core.llm.errors import (
+    LLMAPIError,
+    LLMConfigurationError,
+    LLMJSONParseError,
+    LLMRateLimitError,
+)
+from core.llm.models import LLMResponse
+
 # Load local environment if available
 load_dotenv()
-
-
-# ---------------------------------------------------------------------------
-# Custom Exceptions
-# ---------------------------------------------------------------------------
-class LLMError(Exception):
-    """Base exception for all Sentinel LLM errors."""
-    pass
-
-
-class LLMConfigurationError(LLMError):
-    """Raised when required environment variables or configuration values are missing."""
-    pass
-
-
-class LLMAPIError(LLMError):
-    """Raised when an upstream API call fails after retries."""
-    pass
-
-
-class LLMRateLimitError(LLMError):
-    """Raised when rate limits are hit and retry attempts are exhausted."""
-    pass
-
-
-class LLMJSONParseError(LLMError):
-    """Raised when a structured JSON response cannot be parsed."""
-    pass
-
-
-# ---------------------------------------------------------------------------
-# Response Model
-# ---------------------------------------------------------------------------
-@dataclass
-class LLMResponse:
-    """Standardized response payload from LLM generation."""
-    content: str
-    parsed_json: Optional[Dict[str, Any]] = None
-    model: str = ""
-    latency_ms: float = 0.0
-    prompt_tokens: Optional[int] = None
-    completion_tokens: Optional[int] = None
-    total_tokens: Optional[int] = None
-    finish_reason: Optional[str] = None
-
-    def get_structured(self) -> Dict[str, Any]:
-        """Convenience helper to retrieve parsed JSON data."""
-        if self.parsed_json is not None:
-            return self.parsed_json
-        if not self.content:
-            raise LLMJSONParseError("Response content is empty.")
-        try:
-            return json.loads(self.content)
-        except Exception as e:
-            raise LLMJSONParseError(f"Failed to parse content as JSON: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -95,15 +43,17 @@ def _sanitize_message(message: str, secret: Optional[str] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Client Implementation
+# Client / Provider Implementation
 # ---------------------------------------------------------------------------
-class GroqLLMClient:
-    """Unified Groq client for all Sentinel incident investigation agents."""
+class GroqLLMClient(BaseLLMProvider):
+    """Unified Groq client and provider for Sentinel incident investigation agents."""
 
     DEFAULT_MODEL = "openai/gpt-oss-120b"
     DEFAULT_TIMEOUT_SECONDS = 30.0
     DEFAULT_MAX_RETRIES = 2
 
+    provider_name: str = "groq"
+    default_model: str = DEFAULT_MODEL
 
     def __init__(
         self,
@@ -148,7 +98,6 @@ class GroqLLMClient:
         self._session_completion_tokens = 0
         self._session_total_tokens = 0
         self._session_llm_calls = 0
-
 
     def _validate_configuration(self) -> None:
         """Validate API key and model presence without exposing secrets."""
@@ -225,7 +174,7 @@ class GroqLLMClient:
             augmented_system += "\n\nYou MUST respond ONLY with valid JSON."
 
         messages = self._build_messages(prompt, augmented_system)
-        
+
         # Groq supports json_object response format
         response_format = {"type": "json_object"}
         response = self._execute_call(
@@ -316,7 +265,7 @@ class GroqLLMClient:
                 err_str = str(e).lower()
                 is_rate_limit = "rate limit" in err_str or "429" in err_str
                 is_timeout = "timeout" in err_str or "timed out" in err_str
-                
+
                 # If retryable and attempts remaining, apply backoff
                 if (is_rate_limit or is_timeout or "connection" in err_str) and attempts <= self.max_retries:
                     backoff_delay = 1.0 * (2 ** (attempts - 1))
@@ -362,22 +311,5 @@ class GroqLLMClient:
             )
 
 
-# ---------------------------------------------------------------------------
-# Global Factory Helper
-# ---------------------------------------------------------------------------
-_CLIENT_INSTANCE: Optional[GroqLLMClient] = None
-
-
-def get_llm_client(force_new: bool = False) -> GroqLLMClient:
-    """Retrieve or initialize the singleton Groq LLM client.
-
-    Args:
-        force_new: If True, instantiates a fresh client from environment.
-
-    Returns:
-        Configured GroqLLMClient instance.
-    """
-    global _CLIENT_INSTANCE
-    if _CLIENT_INSTANCE is None or force_new:
-        _CLIENT_INSTANCE = GroqLLMClient()
-    return _CLIENT_INSTANCE
+# Compatibility alias
+GroqProvider = GroqLLMClient
