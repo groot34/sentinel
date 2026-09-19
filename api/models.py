@@ -91,6 +91,68 @@ class CreateInvestigationResponse(BaseModel):
     human_approval_notice: str
 
 
+_PROPOSAL_ID_REGEX = re.compile(r"^FIX-[0-9]{3}$")
+
+
+class ApprovalRecordResponse(BaseModel):
+    """Allowlisted projection of a recorded human approval decision."""
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: str
+    status: str
+    decision: str
+    approved_by: str
+    timestamp: str
+    notes: Optional[str] = None
+
+
+class SubmitApprovalRequest(BaseModel):
+    """Request schema for POST /investigations/{id}/approval."""
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: str = Field(..., description="Target fix proposal identifier, e.g. FIX-001")
+    decision: str = Field(..., description="Human decision: 'approved' or 'rejected'")
+    reviewer: str = Field(..., min_length=1, max_length=128, description="Identity of the human reviewer")
+    notes: Optional[str] = Field(default=None, max_length=1000, description="Optional reviewer notes")
+
+    @field_validator("proposal_id")
+    @classmethod
+    def validate_proposal_id(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("proposal_id must be a string")
+        stripped = v.strip()
+        if not _PROPOSAL_ID_REGEX.match(stripped):
+            raise ValueError(f"Invalid proposal_id format: {v!r}. Must match ^FIX-[0-9]{{3}}$")
+        return stripped
+
+    @field_validator("decision")
+    @classmethod
+    def validate_decision(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("decision must be a string")
+        lowered = v.strip().lower()
+        if lowered not in ("approved", "rejected"):
+            raise ValueError("decision must be either 'approved' or 'rejected'")
+        return lowered
+
+    @field_validator("reviewer")
+    @classmethod
+    def validate_reviewer(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("reviewer cannot be empty")
+        return v.strip()
+
+
+class SubmitApprovalResponse(BaseModel):
+    """Response schema for POST /investigations/{id}/approval."""
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str
+    approval: ApprovalRecordResponse
+    status: str
+    human_approval_notice: str
+
+
 class GetInvestigationResponse(BaseModel):
     """Allowlisted response for GET /investigations/{id}."""
     model_config = ConfigDict(extra="forbid")
@@ -104,6 +166,7 @@ class GetInvestigationResponse(BaseModel):
     llm_call_count: int = Field(default=0, ge=0)
     version: int = Field(default=1, ge=1)
     stages: Dict[str, StageSummaryResponse]
+    approvals: List[ApprovalRecordResponse] = Field(default_factory=list)
 
 
 class ListInvestigationsResponse(BaseModel):

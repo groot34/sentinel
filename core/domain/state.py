@@ -521,6 +521,22 @@ class InvestigationState(BaseDomainModel):
                 self.approvals.append(item)
                 seen_ids.add(item.proposal_id)
 
+    def update_approval(
+        self,
+        record: Union[ApprovalRecord, Dict[str, Any]],
+    ) -> None:
+        """Update an existing approval record for a proposal or add it if not present."""
+        if isinstance(record, dict):
+            record = ApprovalRecord.from_dict(record)
+        if not isinstance(record, ApprovalRecord):
+            return
+
+        for idx, a in enumerate(self.approvals):
+            if a.proposal_id == record.proposal_id:
+                self.approvals[idx] = record
+                return
+        self.approvals.append(record)
+
     # -----------------------------------------------------------------------
     # Final Investigation Lifecycle Methods
     # -----------------------------------------------------------------------

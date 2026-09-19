@@ -105,20 +105,51 @@ curl -s -X POST http://127.0.0.1:8000/investigations \
 # List all stored investigation IDs
 curl http://127.0.0.1:8000/investigations
 
-# Retrieve a specific investigation state
+# Retrieve a specific investigation state (including recorded approvals)
 curl http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query
 ```
+
+### Resume an interrupted/failed investigation
+
+```bash
+# Resume from the first incomplete/failed stage (reuses previously succeeded stages)
+curl -s -X POST http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/resume
+```
+
+> **Resume Rules:**
+> - **Allowed statuses:** `FAILED` and `PARTIAL`. Resuming re-injects outputs from previously succeeded stages and executes only remaining stages.
+> - **Disallowed statuses:** `COMPLETED` (returns `409 Conflict`) and `RUNNING` (returns `409 Conflict` because an abandoned or active running process cannot be safely distinguished without active leases).
+
+### Record human approval for a fix proposal
+
+```bash
+# Record an explicit human review decision on a proposed fix
+curl -s -X POST http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/approval \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proposal_id": "FIX-001",
+    "decision": "approved",
+    "reviewer": "oncall-lead",
+    "notes": "Verified root cause in staging environment."
+  }'
+```
+
+> **Approval & Decision Integrity Rules:**
+> - Non-interactive investigation runs generate automated placeholder rejections (`approved_by: "human"` with default rejection note).
+> - Calling `POST /investigations/{id}/approval` records the genuine human decision (`approved` or `rejected`) with reviewer name and optional notes.
+> - **Prior human decisions cannot be overwritten:** If an explicit human review is already recorded, subsequent approval calls return `409 Conflict`.
+> - **Safety Guarantee:** Recording an approval records the decision metadata in durable state only. It **never** automatically applies patches, modifies repository files, executes shell commands, or deploys code.
 
 ### Operational limitations
 
 - **Localhost only by default.** Use `--host` to override (do not expose to the
   network without additional security controls).
-- **Single-process only.** The process-local concurrency guard is not shared across
-  multiple server processes. Do not run multiple instances against the same
-  persistence root.
-- **Synchronous requests.** Each `POST /investigations` occupies the server for the
-  full pipeline duration. Do not send concurrent investigation requests without
-  expecting one to receive a 409 Conflict response.
+- **Single-process concurrency.** Process-local active locking (`_ACTIVE_LOCK`) is
+  not shared across multiple Uvicorn worker processes.
+- **Optimistic Concurrency Control (OCC).** When using the PostgreSQL backend, concurrent
+  state modifications raise `ConcurrencyError` mapped to HTTP `409 Conflict`.
+- **Synchronous requests.** Each investigation occupies the server for the full pipeline
+  duration. Concurrent requests for the same incident return `409 Conflict`.
 
 ---
 
