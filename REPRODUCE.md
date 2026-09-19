@@ -31,6 +31,97 @@ cp .env.example .env
 pytest
 ```
 
+## Starting the API Server
+
+The Sentinel API server exposes the investigation pipeline over HTTP using
+the Starlette/Uvicorn stack (both included in `requirements.txt`).
+
+```bash
+# Start the server with default settings (filesystem backend, localhost:8000)
+python -m api
+
+# Or via Makefile
+make serve
+```
+
+The server binds to `127.0.0.1:8000` by default and is not exposed to the
+network.
+
+### Configuration
+
+The launcher calls `load_dotenv()` before reading any environment variable,
+so values in `.env` are applied automatically if the file exists. Variables
+already set in the shell take precedence (python-dotenv does not override
+them).
+
+Copy `.env.example` to `.env` and configure before starting:
+
+```bash
+cp .env.example .env
+# Required for investigation requests:
+#   GROQ_API_KEY=gsk_your_key_here
+#   GROQ_MODEL=openai/gpt-oss-120b   (already the default)
+#
+# Persistence (filesystem is the default, no extra config needed):
+#   SENTINEL_PERSISTENCE_BACKEND=filesystem
+#   SENTINEL_PERSISTENCE_ROOT=.sentinel_persistence
+#
+# PostgreSQL backend:
+#   SENTINEL_PERSISTENCE_BACKEND=postgres
+#   SENTINEL_DATABASE_URL=postgresql://sentinel:password@localhost:5432/sentinel_db
+```
+
+### CLI options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--host` | `127.0.0.1` | Bind address |
+| `--port` | `8000` | Listen port |
+| `--log-level` | `info` | Uvicorn log level (`debug`, `info`, `warning`, `error`) |
+| `--incidents-root` | `incidents` | Path to incident bundles directory |
+
+### Health check
+
+```bash
+curl http://127.0.0.1:8000/health
+# {"status":"ok","service":"sentinel","version":"2.0"}
+```
+
+### Submit an investigation (synchronous)
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/investigations \
+  -H "Content-Type: application/json" \
+  -d '{"incident_id": "inc_01_n_plus_one_query"}'
+```
+
+> **Note:** `POST /investigations` blocks until the full pipeline completes.
+> Ensure `GROQ_API_KEY` is set and the incident directory exists under `incidents/`.
+> The human approval gate is always active; proposed patches are never applied automatically.
+
+### List and retrieve investigations
+
+```bash
+# List all stored investigation IDs
+curl http://127.0.0.1:8000/investigations
+
+# Retrieve a specific investigation state
+curl http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query
+```
+
+### Operational limitations
+
+- **Localhost only by default.** Use `--host` to override (do not expose to the
+  network without additional security controls).
+- **Single-process only.** The process-local concurrency guard is not shared across
+  multiple server processes. Do not run multiple instances against the same
+  persistence root.
+- **Synchronous requests.** Each `POST /investigations` occupies the server for the
+  full pipeline duration. Do not send concurrent investigation requests without
+  expecting one to receive a 409 Conflict response.
+
+---
+
 ## Running Logs Agent (Evidence Only)
 ```bash
 # Incident 01 — deterministic log tools + one Groq summarisation call
