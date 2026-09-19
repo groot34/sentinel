@@ -20,6 +20,8 @@ from api.routes import (
     get_investigation,
     health,
     list_investigations,
+    resume_investigation,
+    submit_approval,
 )
 from core.llm.base import BaseLLMProvider
 from core.persistence import (
@@ -50,6 +52,8 @@ def create_app(
         Route("/investigations", endpoint=create_investigation, methods=["POST"]),
         Route("/investigations", endpoint=list_investigations, methods=["GET"]),
         Route("/investigations/{investigation_id}", endpoint=get_investigation, methods=["GET"]),
+        Route("/investigations/{investigation_id}/resume", endpoint=resume_investigation, methods=["POST"]),
+        Route("/investigations/{investigation_id}/approval", endpoint=submit_approval, methods=["POST"]),
     ]
 
     exception_handlers = {
