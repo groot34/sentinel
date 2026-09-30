@@ -361,6 +361,7 @@ class TestPostgresRepositoryIntegration(PersistenceContractTests):
         """Initialize schema on test database."""
         with PostgresRepository(PG_URL) as r:
             r.initialize_schema()
+            r.initialize_outbox_schema()
 
     @pytest.fixture
     def repo(self):
@@ -373,6 +374,7 @@ class TestPostgresRepositoryIntegration(PersistenceContractTests):
                 with conn.transaction():
                     with conn.cursor() as cur:
                         cur.execute("DELETE FROM investigations WHERE investigation_id LIKE 'contract_%' OR investigation_id LIKE 'int_test_%';")
+                        cur.execute("DELETE FROM event_outbox WHERE investigation_id LIKE 'contract_%' OR investigation_id LIKE 'int_test_%';")
         except Exception:
             pass
         r.close()
@@ -418,6 +420,124 @@ class TestPostgresRepositoryIntegration(PersistenceContractTests):
         assert fresh.version == 2
         assert "metrics" in fresh.stages
         assert "code" not in fresh.stages
+
+    def test_outbox_save_unique_event_id(self, repo: PostgresRepository):
+        """Outbox enforces unique event_id constraint."""
+        from core.events.events import InvestigationStarted
+
+        event = InvestigationStarted(investigation_id="int_test_unique", initial_stage="logs")
+
+        # First save should succeed
+        repo.save_event(event)
+
+        # Second save with same event_id should be idempotent (no error)
+        repo.save_event(event)
+
+        # Verify only one event exists
+        pending = repo.fetch_pending()
+        matching = [e for e in pending if e.event_id == event.event_id]
+        assert len(matching) == 1
+
+    def test_atomic_state_and_event_persistence(self, repo: PostgresRepository):
+        """State and events are persisted atomically in same transaction."""
+        from core.events.events import InvestigationStarted, StageCompleted
+
+        inv_id = "int_test_atomic"
+        state = InvestigationState(incident_id=inv_id)
+        state.start_stage("logs")
+        state.complete_stage("logs", output={"stage": "logs"})
+
+        events = [
+            InvestigationStarted(investigation_id=inv_id, initial_stage="logs"),
+            StageCompleted(
+                investigation_id=inv_id,
+                stage="logs",
+                llm_calls=1,
+                prompt_tokens=100,
+                completion_tokens=25,
+                total_tokens=125,
+            ),
+        ]
+
+        # Save state and events atomically
+        repo.save(state, events=events)
+
+        # Verify state persisted
+        loaded_state = repo.load(inv_id)
+        assert loaded_state is not None
+        assert loaded_state.status.value == "RUNNING"
+        assert "logs" in loaded_state.stages
+
+        # Verify events persisted
+        pending = repo.fetch_pending()
+        matching = [e for e in pending if e.investigation_id == inv_id]
+        assert len(matching) == 2
+        assert matching[0].event_type == "InvestigationStarted"
+        assert matching[1].event_type == "StageCompleted"
+
+    def test_outbox_fetch_pending_ordered_by_created_at(self, repo: PostgresRepository):
+        """Pending events are fetched in created_at order."""
+        from core.events.events import InvestigationStarted, StageCompleted
+
+        inv_id = "int_test_ordering"
+        repo.save_event(InvestigationStarted(investigation_id=inv_id, initial_stage="logs"))
+        repo.save_event(StageCompleted(
+            investigation_id=inv_id,
+            stage="logs",
+            llm_calls=1,
+            prompt_tokens=100,
+            completion_tokens=25,
+            total_tokens=125,
+        ))
+
+        pending = repo.fetch_pending()
+        assert len(pending) == 2
+        assert pending[0].event_type == "InvestigationStarted"
+        assert pending[1].event_type == "StageCompleted"
+
+    def test_outbox_mark_processed(self, repo: PostgresRepository):
+        """Mark event as processed removes it from pending."""
+        from core.events.events import InvestigationStarted
+
+        event = InvestigationStarted(investigation_id="int_test_processed", initial_stage="logs")
+        repo.save_event(event)
+
+        repo.mark_processed(event.event_id)
+
+        pending = repo.fetch_pending()
+        matching = [e for e in pending if e.event_id == event.event_id]
+        assert len(matching) == 0
+
+    def test_outbox_mark_failed(self, repo: PostgresRepository):
+        """Mark event as failed with error message."""
+        from core.events.events import InvestigationStarted
+
+        event = InvestigationStarted(investigation_id="int_test_failed", initial_stage="logs")
+        repo.save_event(event)
+
+        repo.mark_failed(event.event_id, "Test delivery failure")
+
+        pending = repo.fetch_pending()
+        matching = [e for e in pending if e.event_id == event.event_id]
+        assert len(matching) == 0
+
+        # Verify event is marked failed (by checking it's not in pending)
+        # We can't easily fetch failed events without a dedicated method,
+        # but the fact it's not in pending confirms the state change
+
+    def test_outbox_increment_retry(self, repo: PostgresRepository):
+        """Increment retry count for event."""
+        from core.events.events import InvestigationStarted
+
+        event = InvestigationStarted(investigation_id="int_test_retry", initial_stage="logs")
+        repo.save_event(event)
+
+        repo.increment_retry(event.event_id)
+
+        pending = repo.fetch_pending()
+        matching = [e for e in pending if e.event_id == event.event_id]
+        assert len(matching) == 1
+        assert matching[0].retry_count == 1
 
     def test_real_transaction_rollback_on_error(self, repo: PostgresRepository):
         """Verify transaction rollback: partial failure leaves database state untouched."""

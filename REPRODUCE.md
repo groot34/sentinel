@@ -87,6 +87,31 @@ curl http://127.0.0.1:8000/health
 # {"status":"ok","service":"sentinel","version":"2.0"}
 ```
 
+## Event Delivery Worker
+
+The event delivery worker polls the transactional outbox for pending events
+and delivers them through the EventBus. This requires PostgreSQL persistence.
+
+```bash
+# Start the event worker (requires PostgreSQL backend configured)
+python -m api.event_worker
+
+# The worker will:
+# 1. Poll for pending events every 5 seconds (configurable)
+# 2. Deliver events to in-memory EventBus subscribers
+# 3. Mark successful deliveries as processed
+# 4. Retry failed events up to 5 times with exponential backoff
+# 5. Mark permanently failed events with error message
+```
+
+**Configuration:**
+- `SENTINEL_DATABASE_URL` must be set (PostgreSQL required)
+- Worker uses the same `event_outbox` table as the API server
+- No additional environment variables needed
+
+**Note:** The worker is optional. If not running, events will accumulate in the
+outbox table and can be delivered later when the worker starts.
+
 ### Submit an investigation (synchronous)
 
 ```bash

@@ -16,6 +16,8 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from core.domain.state import InvestigationState
+from core.events.base import DomainEvent
+from core.persistence.outbox import OutboxEvent, OutboxRepository
 from core.persistence.repository import (
     ConcurrencyError,
     PersistenceError,
@@ -120,11 +122,27 @@ class PostgresRepository(PersistenceRepository):
         except psycopg.Error as e:
             raise PersistenceError(f"Failed to initialize PostgreSQL schema: {e}") from e
 
-    def save(self, state: InvestigationState) -> None:
+    def initialize_outbox_schema(self) -> None:
+        """Execute the outbox schema migration script. Idempotent."""
+        outbox_schema_file = Path(__file__).parent / "sql" / "002_outbox_schema.sql"
+        if not outbox_schema_file.is_file():
+            raise PersistenceError(f"Outbox schema file not found at '{outbox_schema_file}'")
+
+        sql = outbox_schema_file.read_text(encoding="utf-8")
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(sql)
+        except psycopg.Error as e:
+            raise PersistenceError(f"Failed to initialize outbox schema: {e}") from e
+
+    def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
         """Persist InvestigationState transactionally with optimistic concurrency control.
 
         Args:
             state: Valid InvestigationState instance.
+            events: Optional list of DomainEvents to persist atomically in the same transaction.
 
         Raises:
             ConcurrencyError: If an optimistic concurrency conflict or concurrent insert occurs.
@@ -249,6 +267,35 @@ class PostgresRepository(PersistenceRepository):
                                     f"Row was modified concurrently (expected version {expected_version})."
                                 )
                             state.version = update_row[0]
+
+                        # Insert events into outbox table within the same transaction
+                        if events:
+                            for event in events:
+                                outbox_event = OutboxEvent.from_domain_event(event)
+                                try:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO event_outbox (
+                                            event_id, investigation_id, event_type, payload,
+                                            status, created_at, retry_count
+                                        ) VALUES (
+                                            %s, %s, %s, %s,
+                                            %s, %s, %s
+                                        );
+                                        """,
+                                        (
+                                            outbox_event.event_id,
+                                            outbox_event.investigation_id,
+                                            outbox_event.event_type,
+                                            Jsonb(outbox_event.payload),
+                                            outbox_event.status,
+                                            outbox_event.created_at,
+                                            outbox_event.retry_count,
+                                        ),
+                                    )
+                                except psycopg.errors.UniqueViolation as uv_err:
+                                    # Event already exists - skip silently (idempotent)
+                                    pass
         except ConcurrencyError:
             raise
         except psycopg.Error as e:
@@ -364,3 +411,179 @@ class PostgresRepository(PersistenceRepository):
                     return [row[0] for row in cur.fetchall()]
         except psycopg.Error as e:
             raise PersistenceError(f"Database error listing investigations: {e}") from e
+
+    # -----------------------------------------------------------------------
+    # Outbox Event Persistence Methods
+    # -----------------------------------------------------------------------
+
+    def save_event(self, event: DomainEvent) -> None:
+        """Persist a single domain event to the outbox.
+
+        Args:
+            event: DomainEvent to persist.
+
+        Raises:
+            PersistenceError: If save fails.
+        """
+        self.save_events([event])
+
+    def save_events(self, events: List[DomainEvent]) -> None:
+        """Persist multiple domain events to the outbox.
+
+        Args:
+            events: List of DomainEvents to persist.
+
+        Raises:
+            PersistenceError: If save fails.
+        """
+        if not events:
+            return
+
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        for event in events:
+                            outbox_event = OutboxEvent.from_domain_event(event)
+                            try:
+                                cur.execute(
+                                    """
+                                    INSERT INTO event_outbox (
+                                        event_id, investigation_id, event_type, payload,
+                                        status, created_at, retry_count
+                                    ) VALUES (
+                                        %s, %s, %s, %s,
+                                        %s, %s, %s
+                                    );
+                                    """,
+                                    (
+                                        outbox_event.event_id,
+                                        outbox_event.investigation_id,
+                                        outbox_event.event_type,
+                                        Jsonb(outbox_event.payload),
+                                        outbox_event.status,
+                                        outbox_event.created_at,
+                                        outbox_event.retry_count,
+                                    ),
+                                )
+                            except psycopg.errors.UniqueViolation:
+                                # Event already exists - skip silently (idempotent)
+                                pass
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error saving events to outbox: {e}") from e
+
+    def fetch_pending(self, limit: int = 100) -> List[OutboxEvent]:
+        """Fetch pending events for delivery.
+
+        Args:
+            limit: Maximum number of events to fetch.
+
+        Returns:
+            List of pending OutboxEvents in created_at order.
+        """
+        try:
+            with self._pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT event_id, investigation_id, event_type, payload,
+                               status, created_at, processed_at, retry_count, error_message
+                        FROM event_outbox
+                        WHERE status = 'pending'
+                        ORDER BY created_at ASC
+                        LIMIT %s;
+                        """,
+                        (limit,),
+                    )
+                    rows = cur.fetchall()
+                    events = []
+                    for row in rows:
+                        events.append(
+                            OutboxEvent(
+                                event_id=row[0],
+                                investigation_id=row[1],
+                                event_type=row[2],
+                                payload=dict(row[3]) if isinstance(row[3], dict) else row[3],
+                                status=row[4],
+                                created_at=row[5].isoformat() if row[5] else "",
+                                processed_at=row[6].isoformat() if row[6] else None,
+                                retry_count=row[7],
+                                error_message=row[8],
+                            )
+                        )
+                    return events
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error fetching pending events: {e}") from e
+
+    def mark_processed(self, event_id: str) -> None:
+        """Mark an event as successfully processed.
+
+        Args:
+            event_id: Event ID to mark.
+
+        Raises:
+            PersistenceError: If update fails.
+        """
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE event_outbox
+                            SET status = 'processed', processed_at = NOW()
+                            WHERE event_id = %s;
+                            """,
+                            (event_id,),
+                        )
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error marking event processed: {e}") from e
+
+    def mark_failed(self, event_id: str, error_message: str) -> None:
+        """Mark an event as failed with error message.
+
+        Args:
+            event_id: Event ID to mark.
+            error_message: Error description.
+
+        Raises:
+            PersistenceError: If update fails.
+        """
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE event_outbox
+                            SET status = 'failed', error_message = %s, processed_at = NOW()
+                            WHERE event_id = %s;
+                            """,
+                            (error_message, event_id),
+                        )
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error marking event failed: {e}") from e
+
+    def increment_retry(self, event_id: str) -> None:
+        """Increment retry count for an event.
+
+        Args:
+            event_id: Event ID to increment.
+
+        Raises:
+            PersistenceError: If update fails.
+        """
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE event_outbox
+                            SET retry_count = retry_count + 1
+                            WHERE event_id = %s;
+                            """,
+                            (event_id,),
+                        )
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error incrementing retry count: {e}") from e

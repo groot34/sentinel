@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from core.domain.state import InvestigationState
+from core.events.base import DomainEvent
 
 
 import re
@@ -95,11 +96,12 @@ class PersistenceRepository(ABC):
     """Abstract repository for persisting and loading InvestigationState."""
 
     @abstractmethod
-    def save(self, state: InvestigationState) -> None:
+    def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
         """Persist investigation state idempotently.
 
         Args:
             state: Valid InvestigationState instance.
+            events: Optional list of DomainEvents to persist atomically (outbox pattern).
 
         Raises:
             PersistenceError: If serialization, validation, or writing fails.

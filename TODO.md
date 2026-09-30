@@ -44,7 +44,14 @@
   - Added `docker-compose.yml` and `.env.example` persistence configuration.
   - Added shared `PersistenceContractTests` in `tests/test_persistence_contract.py` and Postgres unit/integration tests in `tests/test_postgres_persistence.py`.
   - 472/472 pytest tests passing (20 integration tests gracefully skipped when PostgreSQL is offline), 51/51 incident validation passing.
-- [ ] **Mission 06: Transactional Outbox & Event Delivery** (Upcoming)
+- [x] **Mission 06: Transactional Outbox & Event Delivery** (2026-09-30)
+  - Added `event_outbox` table schema (`core/persistence/sql/002_outbox_schema.sql`).
+  - Implemented `OutboxRepository` abstract interface (`core/persistence/outbox.py`).
+  - Integrated outbox persistence into `PostgresRepository.save(state, events)` for atomic state+event persistence.
+  - Modified `IncidentOrchestrator` to collect events in `_pending_events` and persist atomically with state.
+  - Implemented `EventDeliveryWorker` background worker for polling and delivering outbox events to EventBus.
+  - Added outbox and worker tests: unique event_id, atomic persistence, delivery, retry logic, idempotency.
+  - Backward compatible: without repository, events publish directly to EventBus as before.
 
 ---
 

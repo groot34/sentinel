@@ -301,6 +301,7 @@ class IncidentOrchestrator:
         self._result_schema = _load_result_schema()
         self.state: Optional[InvestigationState] = None
         self.last_state: Optional[InvestigationState] = None
+        self._pending_events: List[DomainEvent] = []
 
     def _persist(self, state: InvestigationState) -> None:
         """Persist investigation state if repository is configured.
@@ -308,15 +309,28 @@ class IncidentOrchestrator:
         Never swallows persistence exceptions.
         """
         if self._repository is not None:
-            self._repository.save(state)
+            # Pass pending events to repository for atomic persistence
+            events = list(self._pending_events) if self._pending_events else None
+            self._repository.save(state, events=events)
+            # After successful persistence, publish events to EventBus for backward compatibility
+            if self._event_bus is not None and events:
+                for event in events:
+                    self._event_bus.publish(event)
+            # Clear pending events after successful persistence
+            self._pending_events.clear()
 
     def _emit(self, event: DomainEvent) -> None:
-        """Publish a domain event if an EventBus is configured.
+        """Collect a domain event for atomic persistence with state.
 
-        Subscriber failures are handled by the EventBus itself; this helper
-        never suppresses them — callers should not wrap _emit() in try/except.
+        Events are accumulated in _pending_events and persisted atomically
+        with state in _persist(). If no repository is configured, events are
+        published directly to EventBus for backward compatibility.
         """
-        if self._event_bus is not None:
+        if self._repository is not None:
+            # Collect event for atomic persistence with state
+            self._pending_events.append(event)
+        elif self._event_bus is not None:
+            # Backward compatibility: publish directly to EventBus
             self._event_bus.publish(event)
 
     def _make_completed_event(
@@ -396,12 +410,14 @@ class IncidentOrchestrator:
         state = InvestigationState(incident_id=incident_id)
         self.state = state
         self.last_state = state
-        self._persist(state)
-        # Emit InvestigationStarted AFTER state is created and persisted
+        # Clear any pending events from previous investigation
+        self._pending_events.clear()
+        # Emit InvestigationStarted before first persistence so it's in the first outbox batch
         self._emit(InvestigationStarted(
             investigation_id=incident_id,
             initial_stage="logs",
         ))
+        self._persist(state)
 
         return self._run_pipeline(incident_path=incident_path, state=state, resume_stage="logs")
 
@@ -445,17 +461,20 @@ class IncidentOrchestrator:
 
         self.state = state
         self.last_state = state
+        # Clear any pending events from previous investigation
+        self._pending_events.clear()
 
         resume_stage = self._find_resume_stage(state)
 
-        # Persist the cleaned-up resume state BEFORE emitting InvestigationResumed
-        self._persist(state)
         resumed_from_status = status_val if isinstance(status_val, str) else status_val.value
+        # Emit InvestigationResumed before persistence so it's in the outbox batch
         self._emit(InvestigationResumed(
             investigation_id=investigation_id,
             resume_stage=resume_stage,
             resumed_from_status=resumed_from_status,
         ))
+        # Persist the cleaned-up resume state with the InvestigationResumed event
+        self._persist(state)
 
         return self._run_pipeline(incident_path=incident_path, state=state, resume_stage=resume_stage)
 
@@ -503,8 +522,8 @@ class IncidentOrchestrator:
                 state.mark_cached("logs", output=logs_output)
                 if logs_output:
                     state.add_evidence(logs_output)
-                self._persist(state)
                 self._emit(StageCached(investigation_id=incident_id, stage="logs"))
+                self._persist(state)
             elif logs_stage.get("status") == STATUS_SUCCEEDED:
                 state.start_stage("logs")
                 self._emit(StageStarted(investigation_id=incident_id, stage="logs"))
@@ -518,7 +537,6 @@ class IncidentOrchestrator:
                 )
                 if logs_output:
                     state.add_evidence(logs_output)
-                self._persist(state)
                 self._emit(StageCompleted(
                     investigation_id=incident_id,
                     stage="logs",
@@ -527,18 +545,19 @@ class IncidentOrchestrator:
                     completion_tokens=logs_stage.get("completion_tokens", 0),
                     total_tokens=logs_stage.get("total_tokens", 0),
                 ))
+                self._persist(state)
             else:
                 state.start_stage("logs")
                 self._emit(StageStarted(investigation_id=incident_id, stage="logs"))
                 state.fail_stage("logs", error=logs_stage.get("error", "Unknown error"), output=logs_output)
                 if logs_output:
                     state.add_evidence(logs_output)
-                self._persist(state)
                 self._emit(StageFailed(
                     investigation_id=incident_id,
                     stage="logs",
                     error=logs_stage.get("error", "Unknown error"),
                 ))
+                self._persist(state)
 
         # ── Stage 2: Metrics ──────────────────────────────────────────
         if should_run("metrics"):
@@ -554,8 +573,8 @@ class IncidentOrchestrator:
                 state.mark_cached("metrics", output=metrics_output)
                 if metrics_output:
                     state.add_evidence(metrics_output)
-                self._persist(state)
                 self._emit(StageCached(investigation_id=incident_id, stage="metrics"))
+                self._persist(state)
             elif metrics_stage.get("status") == STATUS_SUCCEEDED:
                 state.start_stage("metrics")
                 self._emit(StageStarted(investigation_id=incident_id, stage="metrics"))
@@ -569,7 +588,6 @@ class IncidentOrchestrator:
                 )
                 if metrics_output:
                     state.add_evidence(metrics_output)
-                self._persist(state)
                 self._emit(StageCompleted(
                     investigation_id=incident_id,
                     stage="metrics",
@@ -578,18 +596,19 @@ class IncidentOrchestrator:
                     completion_tokens=metrics_stage.get("completion_tokens", 0),
                     total_tokens=metrics_stage.get("total_tokens", 0),
                 ))
+                self._persist(state)
             else:
                 state.start_stage("metrics")
                 self._emit(StageStarted(investigation_id=incident_id, stage="metrics"))
                 state.fail_stage("metrics", error=metrics_stage.get("error", "Unknown error"), output=metrics_output)
                 if metrics_output:
                     state.add_evidence(metrics_output)
-                self._persist(state)
                 self._emit(StageFailed(
                     investigation_id=incident_id,
                     stage="metrics",
                     error=metrics_stage.get("error", "Unknown error"),
                 ))
+                self._persist(state)
 
         # ── Stage 3: Code ─────────────────────────────────────────────
         if should_run("code"):
@@ -605,8 +624,8 @@ class IncidentOrchestrator:
                 state.mark_cached("code", output=code_output)
                 if code_output:
                     state.add_evidence(code_output)
-                self._persist(state)
                 self._emit(StageCached(investigation_id=incident_id, stage="code"))
+                self._persist(state)
             elif code_stage.get("status") == STATUS_SUCCEEDED:
                 state.start_stage("code")
                 self._emit(StageStarted(investigation_id=incident_id, stage="code"))
@@ -620,7 +639,6 @@ class IncidentOrchestrator:
                 )
                 if code_output:
                     state.add_evidence(code_output)
-                self._persist(state)
                 self._emit(StageCompleted(
                     investigation_id=incident_id,
                     stage="code",
@@ -629,18 +647,19 @@ class IncidentOrchestrator:
                     completion_tokens=code_stage.get("completion_tokens", 0),
                     total_tokens=code_stage.get("total_tokens", 0),
                 ))
+                self._persist(state)
             else:
                 state.start_stage("code")
                 self._emit(StageStarted(investigation_id=incident_id, stage="code"))
                 state.fail_stage("code", error=code_stage.get("error", "Unknown error"), output=code_output)
                 if code_output:
                     state.add_evidence(code_output)
-                self._persist(state)
                 self._emit(StageFailed(
                     investigation_id=incident_id,
                     stage="code",
                     error=code_stage.get("error", "Unknown error"),
                 ))
+                self._persist(state)
 
         # ── Stage 4: Evidence Fusion ──────────────────────────────────
         if should_run("evidence_fusion"):
@@ -652,13 +671,13 @@ class IncidentOrchestrator:
                 err_msg = "; ".join(fusion_errors)
                 state.fail_stage("evidence_fusion", error=err_msg, output=fused)
                 state.fail(error=f"Evidence fusion failed: {err_msg}")
-                self._persist(state)
                 self._emit(StageFailed(
                     investigation_id=incident_id,
                     stage="evidence_fusion",
                     error=err_msg,
                 ))
                 self._emit(self._make_completed_event(state, PIPELINE_FAILED, error=f"Evidence fusion failed: {err_msg}"))
+                self._persist(state)
                 return self._build_result_from_state(
                     state=state,
                     pipeline_status=PIPELINE_FAILED,
@@ -668,20 +687,20 @@ class IncidentOrchestrator:
             cache_path = self._stage_cache_path(incident_id, "evidence_fusion")
             if cache_path:
                 _save_cache(cache_path, fused)
-            self._persist(state)
             self._emit(StageCompleted(investigation_id=incident_id, stage="evidence_fusion"))
+            self._persist(state)
 
         # Require at least some evidence to continue
         if not fused or not fused.get("evidence"):
             state.skip_stage("hypotheses", reason="No evidence collected; cannot generate hypotheses.")
             state.mark_partial()
-            self._persist(state)
             self._emit(StageSkipped(
                 investigation_id=incident_id,
                 stage="hypotheses",
                 reason="No evidence collected; cannot generate hypotheses.",
             ))
             self._emit(self._make_completed_event(state, PIPELINE_PARTIAL, error="No evidence extracted from any source."))
+            self._persist(state)
             return self._build_result_from_state(
                 state=state,
                 pipeline_status=PIPELINE_PARTIAL,
@@ -698,8 +717,8 @@ class IncidentOrchestrator:
                 hypotheses_output = hyp_cached
                 state.mark_cached("hypotheses", output=hyp_cached)
                 state.add_hypotheses(hypotheses_output)
-                self._persist(state)
                 self._emit(StageCached(investigation_id=incident_id, stage="hypotheses"))
+                self._persist(state)
             else:
                 state.start_stage("hypotheses")
                 self._emit(StageStarted(investigation_id=incident_id, stage="hypotheses"))
@@ -721,7 +740,6 @@ class IncidentOrchestrator:
                         total_tokens=hyp_stage.get("total_tokens", 0),
                     )
                     state.add_hypotheses(hypotheses_output)
-                    self._persist(state)
                     self._emit(StageCompleted(
                         investigation_id=incident_id,
                         stage="hypotheses",
@@ -730,25 +748,26 @@ class IncidentOrchestrator:
                         completion_tokens=hyp_stage.get("completion_tokens", 0),
                         total_tokens=hyp_stage.get("total_tokens", 0),
                     ))
+                    self._persist(state)
                 else:
                     state.fail_stage("hypotheses", error=hyp_stage.get("error", "Hypothesis stage failed"), output=hypotheses_output)
-                    self._persist(state)
                     self._emit(StageFailed(
                         investigation_id=incident_id,
                         stage="hypotheses",
                         error=hyp_stage.get("error", "Hypothesis stage failed"),
                     ))
+                    self._persist(state)
 
         if state.stages.get("hypotheses") and state.stages["hypotheses"].status == STATUS_FAILED:
             state.skip_stage("verification", reason="Hypothesis stage failed; cannot verify.")
             state.mark_partial()
-            self._persist(state)
             self._emit(StageSkipped(
                 investigation_id=incident_id,
                 stage="verification",
                 reason="Hypothesis stage failed; cannot verify.",
             ))
             self._emit(self._make_completed_event(state, PIPELINE_PARTIAL))
+            self._persist(state)
             return self._build_result_from_state(
                 state=state,
                 pipeline_status=PIPELINE_PARTIAL,
@@ -763,8 +782,8 @@ class IncidentOrchestrator:
                 verification_output = ver_cached
                 state.mark_cached("verification", output=ver_cached)
                 state.add_verification_results(verification_output)
-                self._persist(state)
                 self._emit(StageCached(investigation_id=incident_id, stage="verification"))
+                self._persist(state)
             else:
                 state.start_stage("verification")
                 self._emit(StageStarted(investigation_id=incident_id, stage="verification"))
@@ -788,27 +807,27 @@ class IncidentOrchestrator:
                         total_tokens=0,
                     )
                     state.add_verification_results(verification_output)
-                    self._persist(state)
                     self._emit(StageCompleted(investigation_id=incident_id, stage="verification"))
+                    self._persist(state)
                 else:
                     state.fail_stage("verification", error=ver_stage.get("error", "Verification stage failed"), output=verification_output)
-                    self._persist(state)
                     self._emit(StageFailed(
                         investigation_id=incident_id,
                         stage="verification",
                         error=ver_stage.get("error", "Verification stage failed"),
                     ))
+                    self._persist(state)
 
         if state.stages.get("verification") and state.stages["verification"].status == STATUS_FAILED:
             state.skip_stage("fix_proposals", reason="Verification stage failed; cannot propose fixes.")
             state.mark_partial()
-            self._persist(state)
             self._emit(StageSkipped(
                 investigation_id=incident_id,
                 stage="fix_proposals",
                 reason="Verification stage failed; cannot propose fixes.",
             ))
             self._emit(self._make_completed_event(state, PIPELINE_PARTIAL))
+            self._persist(state)
             return self._build_result_from_state(
                 state=state,
                 pipeline_status=PIPELINE_PARTIAL,
@@ -829,8 +848,8 @@ class IncidentOrchestrator:
             if fix_stage.get("status") == STATUS_REUSED:
                 state.mark_cached("fix_proposals", output=proposals_bundle)
                 state.add_proposals(proposals_bundle)
-                self._persist(state)
                 self._emit(StageCached(investigation_id=incident_id, stage="fix_proposals"))
+                self._persist(state)
             elif fix_stage.get("status") == STATUS_SUCCEEDED:
                 state.start_stage("fix_proposals")
                 self._emit(StageStarted(investigation_id=incident_id, stage="fix_proposals"))
@@ -843,7 +862,6 @@ class IncidentOrchestrator:
                     total_tokens=fix_stage.get("total_tokens", 0),
                 )
                 state.add_proposals(proposals_bundle)
-                self._persist(state)
                 self._emit(StageCompleted(
                     investigation_id=incident_id,
                     stage="fix_proposals",
@@ -852,18 +870,19 @@ class IncidentOrchestrator:
                     completion_tokens=fix_stage.get("completion_tokens", 0),
                     total_tokens=fix_stage.get("total_tokens", 0),
                 ))
+                self._persist(state)
             else:
                 state.start_stage("fix_proposals")
                 self._emit(StageStarted(investigation_id=incident_id, stage="fix_proposals"))
                 state.fail_stage("fix_proposals", error=fix_stage.get("error", "Fix proposal failed"), output=proposals_bundle)
                 if proposals_bundle:
                     state.add_proposals(proposals_bundle)
-                self._persist(state)
                 self._emit(StageFailed(
                     investigation_id=incident_id,
                     stage="fix_proposals",
                     error=fix_stage.get("error", "Fix proposal failed"),
                 ))
+                self._persist(state)
 
         # ── Stage 8: Human Approval ───────────────────────────────────
         if should_run("approvals"):
@@ -882,18 +901,18 @@ class IncidentOrchestrator:
                     total_tokens=0,
                 )
                 state.record_approval(approval_output)
-                self._persist(state)
                 self._emit(StageCompleted(investigation_id=incident_id, stage="approvals"))
+                self._persist(state)
             else:
                 state.fail_stage("approvals", error=approval_stage.get("error", "Approval stage failed"), output=approval_output)
                 if approval_output:
                     state.record_approval(approval_output)
-                self._persist(state)
                 self._emit(StageFailed(
                     investigation_id=incident_id,
                     stage="approvals",
                     error=approval_stage.get("error", "Approval stage failed"),
                 ))
+                self._persist(state)
 
         # ── Build final result ────────────────────────────────────────
         all_failed = all(
@@ -914,9 +933,9 @@ class IncidentOrchestrator:
         else:
             state.fail()
 
-        self._persist(state)
-        # Emit terminal InvestigationCompleted AFTER state is finalized and persisted
+        # Emit terminal InvestigationCompleted before persistence for outbox pattern
         self._emit(self._make_completed_event(state, pipeline_status))
+        self._persist(state)
 
         return self._build_result_from_state(
             state=state,

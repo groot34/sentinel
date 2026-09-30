@@ -276,9 +276,9 @@ def test_orchestrator_saves_initial_stage_completion_and_final_state(tmp_path: P
     saved_statuses = []
     original_save = repo.save
 
-    def tracking_save(st):
+    def tracking_save(st, events=None):
         saved_statuses.append(st.status)
-        return original_save(st)
+        return original_save(st, events=events)
 
     with patch.object(repo, "save", side_effect=tracking_save):
         with _patch_pipeline_agents():

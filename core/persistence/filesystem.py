@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Union
 
 from core.domain.state import InvestigationState
+from core.events.base import DomainEvent
 from core.persistence.repository import PersistenceError, PersistenceRepository
 
 # Allowed investigation ID pattern: alphanumeric, underscores, hyphens
@@ -101,11 +102,12 @@ class FilesystemRepository(PersistenceRepository):
                     f"Safety check failed: forbidden secret key detected in state: '{secret_name}'"
                 )
 
-    def save(self, state: InvestigationState) -> None:
+    def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
         """Persist InvestigationState atomically to state.json.
 
         Args:
             state: InvestigationState instance to save.
+            events: Optional list of DomainEvents (ignored for filesystem backend).
 
         Raises:
             PersistenceError: If validation, serialization, or write fails.
