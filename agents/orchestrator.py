@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
@@ -281,6 +282,8 @@ class IncidentOrchestrator:
         output_dir: Optional[Path] = None,
         repository: Optional[PersistenceRepository] = None,
         event_bus: Optional[EventBus] = None,
+        worker_id: Optional[str] = None,
+        lease_ttl: int = 300,
     ) -> None:
         """
         Args:
@@ -290,6 +293,8 @@ class IncidentOrchestrator:
             output_dir: Directory for caching per-stage outputs (enables resumability).
             repository: Optional PersistenceRepository for durable InvestigationState persistence.
             event_bus: Optional EventBus for domain event publication. Defaults to None (disabled).
+            worker_id: Unique worker/process ID for execution leasing.
+            lease_ttl: Execution lease duration in seconds (default 300).
         """
         self._llm_client = llm_client
         self.sleep_between_stages = float(sleep_between_stages)
@@ -298,6 +303,8 @@ class IncidentOrchestrator:
         self.repository = repository
         self._repository = repository
         self._event_bus = event_bus
+        self._worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
+        self._lease_ttl = int(lease_ttl)
         self._result_schema = _load_result_schema()
         self.state: Optional[InvestigationState] = None
         self.last_state: Optional[InvestigationState] = None
@@ -309,6 +316,10 @@ class IncidentOrchestrator:
         Never swallows persistence exceptions.
         """
         if self._repository is not None:
+            # Renew execution lease if investigation is active
+            status_val = state.status if isinstance(state.status, str) else state.status.value
+            if status_val in (IncidentStatus.RUNNING, "RUNNING"):
+                state.renew_lease(owner_id=self._worker_id, ttl_seconds=self._lease_ttl)
             # Pass pending events to repository for atomic persistence
             events = list(self._pending_events) if self._pending_events else None
             self._repository.save(state, events=events)
@@ -412,6 +423,8 @@ class IncidentOrchestrator:
         self.last_state = state
         # Clear any pending events from previous investigation
         self._pending_events.clear()
+        # Acquire execution lease
+        state.acquire_lease(owner_id=self._worker_id, ttl_seconds=self._lease_ttl)
         # Emit InvestigationStarted before first persistence so it's in the first outbox batch
         self._emit(InvestigationStarted(
             investigation_id=incident_id,
@@ -453,9 +466,19 @@ class IncidentOrchestrator:
         if status_val in (IncidentStatus.COMPLETED, "COMPLETED"):
             raise PersistenceError(f"Cannot resume completed investigation '{investigation_id}'")
 
+        if state.is_lease_active() and state.lease_owner != self._worker_id:
+            raise PersistenceError(
+                f"Cannot resume investigation '{investigation_id}': active lease held by '{state.lease_owner}'"
+            )
+
+        if not state.acquire_lease(owner_id=self._worker_id, ttl_seconds=self._lease_ttl):
+            raise PersistenceError(
+                f"Failed to acquire lease for investigation '{investigation_id}'"
+            )
+
         # Reset active stage and error state for clean resumption
         state.current_stage = None
-        if status_val in (IncidentStatus.FAILED, IncidentStatus.PARTIAL, "FAILED", "PARTIAL"):
+        if status_val in (IncidentStatus.FAILED, IncidentStatus.PARTIAL, "FAILED", "PARTIAL", IncidentStatus.RUNNING, "RUNNING"):
             state.status = IncidentStatus.RUNNING
             state.error = None
 

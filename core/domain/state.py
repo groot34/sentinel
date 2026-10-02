@@ -7,7 +7,7 @@ Does NOT store raw incident bundles, log files, ground_truth.md, or baseline out
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import Field, field_validator
@@ -75,6 +75,8 @@ class InvestigationState(BaseDomainModel):
     error: Optional[str] = None
     llm_call_count: int = Field(default=0, ge=0)
     version: int = Field(default=1, ge=1)
+    lease_owner: Optional[str] = None
+    lease_expires_at: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("incident_id")
@@ -83,6 +85,84 @@ class InvestigationState(BaseDomainModel):
         if not v or not v.strip():
             raise ValueError("incident_id cannot be empty")
         return v.strip()
+
+    # -----------------------------------------------------------------------
+    # Execution Lease Management
+    # -----------------------------------------------------------------------
+
+    def is_lease_active(self, now: Optional[datetime] = None) -> bool:
+        """Check whether the current lease is set and not expired."""
+        if self.lease_expires_at is None:
+            return False
+        try:
+            exp = datetime.fromisoformat(self.lease_expires_at)
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            cur = now if now is not None else datetime.now(timezone.utc)
+            if cur.tzinfo is None:
+                cur = cur.replace(tzinfo=timezone.utc)
+            return cur < exp
+        except (ValueError, TypeError):
+            return False
+
+    def acquire_lease(self, owner_id: str, ttl_seconds: int = 300) -> bool:
+        """Acquire an execution lease for the specified owner if not actively held by another.
+
+        Args:
+            owner_id: Unique identifier of the acquiring worker / process.
+            ttl_seconds: Lease duration in seconds (must be positive).
+
+        Returns:
+            True if lease acquired, False if active lease held by a different owner.
+        """
+        if not owner_id or not str(owner_id).strip():
+            raise ValueError("owner_id cannot be empty")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+
+        if self.is_lease_active() and self.lease_owner != owner_id:
+            return False
+
+        self.lease_owner = str(owner_id).strip()
+        exp_dt = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        self.lease_expires_at = exp_dt.isoformat()
+        return True
+
+    def renew_lease(self, owner_id: str, ttl_seconds: int = 300) -> bool:
+        """Renew the lease duration if owned by owner_id or if current lease is expired.
+
+        Args:
+            owner_id: Unique identifier of the renewing worker / process.
+            ttl_seconds: New lease duration in seconds (must be positive).
+
+        Returns:
+            True if renewed, False if active lease held by another owner.
+        """
+        if not owner_id or not str(owner_id).strip():
+            raise ValueError("owner_id cannot be empty")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+
+        if self.lease_owner is not None and self.lease_owner != owner_id and self.is_lease_active():
+            return False
+
+        self.lease_owner = str(owner_id).strip()
+        exp_dt = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        self.lease_expires_at = exp_dt.isoformat()
+        return True
+
+    def release_lease(self, owner_id: Optional[str] = None) -> None:
+        """Release the current execution lease.
+
+        Args:
+            owner_id: If provided, only releases if current lease_owner matches.
+        """
+        if owner_id is not None and self.lease_owner is not None and self.lease_owner != owner_id:
+            if self.is_lease_active():
+                return
+
+        self.lease_owner = None
+        self.lease_expires_at = None
 
     # -----------------------------------------------------------------------
     # Stage Lifecycle Methods
@@ -548,6 +628,7 @@ class InvestigationState(BaseDomainModel):
         self.status = IncidentStatus.COMPLETED
         self.completed_at = completed_at or _utcnow_iso()
         self.current_stage = None
+        self.release_lease()
 
     def mark_partial(self, completed_at: Optional[str] = None) -> None:
         """Transition investigation state to PARTIAL (degraded or partial run)."""
@@ -556,6 +637,7 @@ class InvestigationState(BaseDomainModel):
         self.status = IncidentStatus.PARTIAL
         self.completed_at = completed_at or _utcnow_iso()
         self.current_stage = None
+        self.release_lease()
 
     def fail(self, error: Optional[str] = None, completed_at: Optional[str] = None) -> None:
         """Transition investigation state to FAILED."""
@@ -564,3 +646,4 @@ class InvestigationState(BaseDomainModel):
         self.current_stage = None
         if error:
             self.error = error
+        self.release_lease()

@@ -165,6 +165,8 @@ class GetInvestigationResponse(BaseModel):
     error: Optional[str] = None
     llm_call_count: int = Field(default=0, ge=0)
     version: int = Field(default=1, ge=1)
+    lease_owner: Optional[str] = None
+    lease_expires_at: Optional[str] = None
     stages: Dict[str, StageSummaryResponse]
     approvals: List[ApprovalRecordResponse] = Field(default_factory=list)
 

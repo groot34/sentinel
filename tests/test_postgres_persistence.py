@@ -596,3 +596,35 @@ class TestPostgresRepositoryIntegration(PersistenceContractTests):
         loaded = repo.load(inv_id)
         assert loaded is not None
         assert loaded.version == 2
+
+    def test_real_postgres_occ_lease_race(self, repo: PostgresRepository):
+        """Verify on real PostgreSQL: two workers attempting lease acquisition on version N
+        results in one succeeding (version N+1) and the other failing with ConcurrencyError.
+        """
+        inv_id = "int_test_lease_race"
+        state = InvestigationState(incident_id=inv_id, status=IncidentStatus.RUNNING)
+        repo.save(state)
+        assert state.version == 1
+
+        # Worker A and Worker B both load version 1
+        worker_a_state = repo.load(inv_id)
+        worker_b_state = repo.load(inv_id)
+        assert worker_a_state.version == 1
+        assert worker_b_state.version == 1
+
+        # Worker A acquires lease and saves -> succeeds (version 2)
+        assert worker_a_state.acquire_lease(owner_id="worker-A", ttl_seconds=60) is True
+        repo.save(worker_a_state)
+        assert worker_a_state.version == 2
+
+        # Worker B acquires lease on its stale version 1 object and attempts save -> raises ConcurrencyError
+        assert worker_b_state.acquire_lease(owner_id="worker-B", ttl_seconds=60) is True
+        with pytest.raises(ConcurrencyError) as exc_info:
+            repo.save(worker_b_state)
+
+        assert "Optimistic concurrency conflict" in str(exc_info.value)
+
+        # Database state reflects Worker A's ownership
+        final_state = repo.load(inv_id)
+        assert final_state.lease_owner == "worker-A"
+        assert final_state.version == 2

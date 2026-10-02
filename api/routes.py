@@ -82,11 +82,20 @@ def _claim_investigation(
                         detail=f"Investigation '{incident_id}' is already completed and cannot be resumed.",
                     )
                 if status_str in ("RUNNING", "running"):
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Investigation '{incident_id}' has status 'RUNNING' and cannot be safely resumed.",
-                    )
-                if status_str not in ("FAILED", "failed", "PARTIAL", "partial"):
+                    if existing_state.is_lease_active():
+                        lease_owner = getattr(existing_state, "lease_owner", None) or "another worker"
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Investigation '{incident_id}' has status 'RUNNING' with active lease held by '{lease_owner}' and cannot be resumed.",
+                        )
+                elif status_str in ("FAILED", "failed", "PARTIAL", "partial"):
+                    if existing_state.is_lease_active():
+                        lease_owner = getattr(existing_state, "lease_owner", None) or "another worker"
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Investigation '{incident_id}' has status '{status_str}' with active lease held by '{lease_owner}' and cannot be resumed.",
+                        )
+                else:
                     raise HTTPException(
                         status_code=409,
                         detail=f"Investigation '{incident_id}' has status '{status_str}' which cannot be resumed.",
@@ -317,6 +326,12 @@ def submit_approval(request: Request) -> JSONResponse:
     if state is None:
         return error_json_response(404, "investigation_not_found", f"Investigation '{safe_id}' not found.")
 
+    if state.is_lease_active():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot record approval while investigation is actively running under an active lease.",
+        )
+
     # Confirm proposal exists in this investigation
     matching_proposal = next(
         (p for p in state.proposals if hasattr(p, "proposal_id") and p.proposal_id == req_model.proposal_id),
@@ -482,6 +497,8 @@ def get_investigation(request: Request) -> JSONResponse:
         error=sanitize_error_message(state.error) if state.error else None,
         llm_call_count=state.llm_call_count,
         version=state.version,
+        lease_owner=getattr(state, "lease_owner", None),
+        lease_expires_at=getattr(state, "lease_expires_at", None),
         stages=stages_projected,
         approvals=approvals_projected,
     )
