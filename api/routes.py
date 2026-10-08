@@ -16,9 +16,12 @@ from agents.orchestrator import IncidentOrchestrator
 from api.errors import error_json_response, sanitize_error_message
 from api.models import (
     _SAFE_ID_REGEX,
+    _project_event_payload,
     ApprovalRecordResponse,
     CreateInvestigationRequest,
     CreateInvestigationResponse,
+    EventHistoryItemResponse,
+    EventHistoryResponse,
     GetInvestigationResponse,
     HealthResponse,
     InvestigationSummaryResponse,
@@ -514,3 +517,87 @@ def list_investigations(request: Request) -> JSONResponse:
     ids = repository.list()
     resp_model = ListInvestigationsResponse(investigations=ids)
     return JSONResponse(status_code=200, content=resp_model.model_dump())
+
+
+def list_investigation_events(request: Request) -> JSONResponse:
+    """GET /investigations/{investigation_id}/events - Return durable event history.
+
+    Returns all domain events recorded in the outbox for the given
+    investigation, ordered chronologically (created_at ASC, event_id ASC).
+    Events are returned regardless of delivery status (pending/processed/failed).
+
+    When the active backend does not durably store outbox events (e.g.
+    FilesystemRepository) the response includes an empty ``events`` list and
+    ``backend_supports_event_history: false`` so callers know the empty list
+    does NOT imply the investigation produced zero events.
+    """
+    raw_id = request.path_params.get("investigation_id", "")
+    try:
+        safe_id = _validate_id_param(raw_id)
+    except HTTPException as he:
+        return error_json_response(he.status_code, "invalid_investigation_id", str(he.detail))
+
+    repository = getattr(request.app.state, "repository", None)
+    if repository is None:
+        return error_json_response(
+            503,
+            "persistence_unavailable",
+            "Persistence repository is not configured.",
+        )
+
+    # Confirm the investigation exists before returning (potentially empty)
+    # event history so callers can distinguish 404 from a genuine empty log.
+    # We use the existing repository.exists() path to avoid a new DB query.
+    if not repository.exists(safe_id):
+        return error_json_response(
+            404,
+            "investigation_not_found",
+            f"Investigation '{safe_id}' not found.",
+        )
+
+    # Determine whether this backend supports durable event history.
+    backend_supports = getattr(repository, "supports_event_history", True)
+
+    try:
+        outbox_events = repository.list_events(safe_id)
+    except Exception as exc:
+        # Re-raise PersistenceErrors through the existing handler; sanitize
+        # anything else to avoid leaking internal details.
+        from core.persistence import PersistenceError as PE
+        if isinstance(exc, PE):
+            raise
+        return error_json_response(
+            500,
+            "event_history_error",
+            "An error occurred retrieving event history.",
+        )
+
+    projected: List[Dict[str, Any]] = []
+    for ev in outbox_events:
+        raw_payload = ev.payload if isinstance(ev.payload, dict) else {}
+        safe_payload = _project_event_payload(raw_payload)
+        # Prefer the domain-event timestamp from the payload; fall back to
+        # the outbox row's created_at when absent.
+        timestamp = safe_payload.get("timestamp") or ev.created_at or None
+        projected.append(
+            EventHistoryItemResponse(
+                event_id=ev.event_id,
+                investigation_id=ev.investigation_id,
+                event_type=ev.event_type,
+                timestamp=timestamp,
+                created_at=ev.created_at,
+                processed_at=ev.processed_at,
+                status=ev.status,
+                retry_count=ev.retry_count,
+                error_message=ev.error_message,
+                payload=safe_payload,
+            ).model_dump()
+        )
+
+    resp = EventHistoryResponse(
+        investigation_id=safe_id,
+        total=len(projected),
+        events=projected,
+        backend_supports_event_history=bool(backend_supports),
+    )
+    return JSONResponse(status_code=200, content=resp.model_dump())

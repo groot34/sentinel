@@ -43,6 +43,17 @@ class OutboxEvent:
 class OutboxRepository:
     """Abstract interface for outbox event persistence."""
 
+    @property
+    def supports_event_history(self) -> bool:
+        """Return True if this backend durably persists event history.
+
+        Backends that do not store outbox events (e.g. FilesystemRepository)
+        should override this to return False so callers can surface the
+        limitation to API consumers rather than returning a misleading empty
+        list.
+        """
+        return True
+
     def save_event(self, event: DomainEvent) -> None:
         """Persist a domain event to the outbox.
 
@@ -107,5 +118,26 @@ class OutboxRepository:
 
         Raises:
             PersistenceError: If update fails.
+        """
+        raise NotImplementedError
+
+    def list_events(
+        self, investigation_id: str, limit: int = 200
+    ) -> List[OutboxEvent]:
+        """Return all durable events for an investigation in chronological order.
+
+        Returns events regardless of delivery status (pending, processed, failed).
+        This is an audit-history query, not a delivery-queue query.
+
+        Args:
+            investigation_id: Investigation whose events to retrieve.
+            limit: Maximum number of events to return (default 200).
+
+        Returns:
+            List of OutboxEvents ordered by created_at ASC, event_id ASC.
+
+        Raises:
+            PersistenceError: If the investigation ID is invalid or a database
+                error occurs.
         """
         raise NotImplementedError

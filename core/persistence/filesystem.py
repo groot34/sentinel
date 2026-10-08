@@ -15,6 +15,7 @@ from typing import Any, List, Optional, Union
 
 from core.domain.state import InvestigationState
 from core.events.base import DomainEvent
+from core.persistence.outbox import OutboxEvent
 from core.persistence.repository import PersistenceError, PersistenceRepository
 
 # Allowed investigation ID pattern: alphanumeric, underscores, hyphens
@@ -37,7 +38,13 @@ _FORBIDDEN_SECRETS = (
 
 
 class FilesystemRepository(PersistenceRepository):
-    """Local filesystem implementation of PersistenceRepository."""
+    """Local filesystem implementation of PersistenceRepository.
+
+    NOTE: This backend does not persist domain events to an outbox.  The
+    ``list_events()`` method always returns an empty list because no events
+    are durably stored by this backend.  If you need a complete event
+    history, use PostgresRepository.
+    """
 
     def __init__(self, persistence_root: Union[str, Path]) -> None:
         """Initialize repository with persistence root directory.
@@ -278,3 +285,35 @@ class FilesystemRepository(PersistenceRepository):
             raise PersistenceError(f"Failed to list investigations in '{self.persistence_root}': {e}") from e
 
         return sorted(ids)
+
+    # -----------------------------------------------------------------------
+    # OutboxRepository compatibility
+    # -----------------------------------------------------------------------
+
+    @property
+    def supports_event_history(self) -> bool:
+        """Filesystem backend does not store outbox events."""
+        return False
+
+    def list_events(
+        self, investigation_id: str, limit: int = 200
+    ) -> List[OutboxEvent]:
+        """Return an empty list — filesystem backend has no event store.
+
+        This backend does not write events to a durable outbox, so no
+        historical events are available.  The investigation ID is still
+        validated to preserve security invariants.
+
+        Args:
+            investigation_id: Identifier to validate.
+            limit: Ignored for this backend.
+
+        Returns:
+            Always an empty list.
+
+        Raises:
+            PersistenceError: If the investigation ID format is invalid.
+        """
+        # Validate ID so callers cannot bypass security checks on this path.
+        self._validate_investigation_id(investigation_id)
+        return []

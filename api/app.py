@@ -19,6 +19,7 @@ from api.routes import (
     create_investigation,
     get_investigation,
     health,
+    list_investigation_events,
     list_investigations,
     resume_investigation,
     submit_approval,
@@ -52,6 +53,7 @@ def create_app(
         Route("/investigations", endpoint=create_investigation, methods=["POST"]),
         Route("/investigations", endpoint=list_investigations, methods=["GET"]),
         Route("/investigations/{investigation_id}", endpoint=get_investigation, methods=["GET"]),
+        Route("/investigations/{investigation_id}/events", endpoint=list_investigation_events, methods=["GET"]),
         Route("/investigations/{investigation_id}/resume", endpoint=resume_investigation, methods=["POST"]),
         Route("/investigations/{investigation_id}/approval", endpoint=submit_approval, methods=["POST"]),
     ]

@@ -184,3 +184,108 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: str
+
+
+# ---------------------------------------------------------------------------
+# Event-history safe payload allowlist
+#
+# Domain events never carry secrets, baseline artefacts, or filesystem paths,
+# but we still project an explicit allowlist rather than exposing the raw DB
+# JSON blob.  Keys are derived from inspecting every concrete DomainEvent
+# subtype in core/events/events.py:
+#
+#   InvestigationStarted  : initial_stage
+#   InvestigationResumed  : resume_stage, resumed_from_status
+#   StageStarted          : stage
+#   StageCompleted        : stage, llm_calls, prompt_tokens,
+#                           completion_tokens, total_tokens, item_count
+#   StageFailed           : stage, error
+#   StageCached           : stage
+#   StageSkipped          : stage, reason
+#   InvestigationCompleted: status, total_llm_calls, total_tokens,
+#                           confirmed_hypotheses, proposals_generated,
+#                           proposals_approved, error
+#
+# Base DomainEvent fields (event_id, event_type, timestamp, investigation_id)
+# are also included so the payload is self-contained for consumers.
+# ---------------------------------------------------------------------------
+
+_SAFE_EVENT_PAYLOAD_KEYS: frozenset[str] = frozenset({
+    # Base DomainEvent fields
+    "event_id",
+    "event_type",
+    "timestamp",
+    "investigation_id",
+    # Stage identity
+    "stage",
+    # InvestigationStarted
+    "initial_stage",
+    # InvestigationResumed
+    "resume_stage",
+    "resumed_from_status",
+    # StageCompleted metrics
+    "llm_calls",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "item_count",
+    # StageFailed / InvestigationCompleted
+    "error",
+    # StageSkipped
+    "reason",
+    # InvestigationCompleted
+    "status",
+    "total_llm_calls",
+    "confirmed_hypotheses",
+    "proposals_generated",
+    "proposals_approved",
+})
+
+
+def _project_event_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of *raw* containing only allowlisted keys.
+
+    Any key absent from _SAFE_EVENT_PAYLOAD_KEYS is silently stripped.
+    Values are accepted as-is (str, int, float, None) — no nested objects
+    exist in the current event model.
+    """
+    return {k: v for k, v in raw.items() if k in _SAFE_EVENT_PAYLOAD_KEYS}
+
+
+class EventHistoryItemResponse(BaseModel):
+    """Allowlisted projection of a single outbox event for the history API.
+
+    Represents one domain event emitted during an investigation.  The
+    ``payload`` field is explicitly projected through an allowlist; it never
+    contains secrets, baseline artefacts, or internal filesystem paths.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    investigation_id: str
+    event_type: str
+    # ``timestamp`` is the domain-event creation time embedded in the payload.
+    # ``created_at`` is the outbox row insertion time (ISO-8601 string).
+    timestamp: Optional[str] = None
+    created_at: str
+    processed_at: Optional[str] = None
+    status: str                             # pending | processed | failed
+    retry_count: int = Field(default=0, ge=0)
+    error_message: Optional[str] = None     # delivery error, not event error
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EventHistoryResponse(BaseModel):
+    """Response for GET /investigations/{investigation_id}/events.
+
+    ``backend_supports_event_history`` is False when the persistence backend
+    does not durably store domain events (e.g. FilesystemRepository).  In
+    that case ``events`` will always be an empty list and consumers should
+    not infer that the investigation produced zero events.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str
+    total: int = Field(default=0, ge=0)
+    events: List[EventHistoryItemResponse] = Field(default_factory=list)
+    backend_supports_event_history: bool = True

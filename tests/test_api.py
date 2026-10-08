@@ -42,6 +42,18 @@ class MockRepository(PersistenceRepository):
     def list(self) -> List[str]:
         return sorted(self._states.keys())
 
+    # ------------------------------------------------------------------
+    # OutboxRepository compatibility (in-memory stub — no event storage)
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_event_history(self) -> bool:
+        return True  # mock defaults to True; override per-test when needed
+
+    def list_events(self, investigation_id: str, limit: int = 200) -> List:
+        return []
+
+
 
 @pytest.fixture(autouse=True)
 def clean_active_registry():

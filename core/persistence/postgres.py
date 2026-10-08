@@ -587,3 +587,62 @@ class PostgresRepository(PersistenceRepository):
                         )
         except psycopg.Error as e:
             raise PersistenceError(f"Database error incrementing retry count: {e}") from e
+
+    def list_events(
+        self, investigation_id: str, limit: int = 200
+    ) -> List[OutboxEvent]:
+        """Return all durable events for an investigation in chronological order.
+
+        Queries the event_outbox table for all events belonging to the
+        investigation, regardless of delivery status.  Results are ordered
+        deterministically by (created_at ASC, event_id ASC).
+
+        Args:
+            investigation_id: Validated investigation identifier.
+            limit: Maximum events to return (default 200).
+
+        Returns:
+            List of OutboxEvents in ascending chronological order.
+
+        Raises:
+            PersistenceError: If investigation_id is invalid or a database
+                error occurs.
+        """
+        safe_id = validate_investigation_id(investigation_id)
+
+        try:
+            with self._pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT event_id, investigation_id, event_type, payload,
+                               status, created_at, processed_at, retry_count,
+                               error_message
+                        FROM event_outbox
+                        WHERE investigation_id = %s
+                        ORDER BY created_at ASC, event_id ASC
+                        LIMIT %s;
+                        """,
+                        (safe_id, limit),
+                    )
+                    rows = cur.fetchall()
+                    events: List[OutboxEvent] = []
+                    for row in rows:
+                        events.append(
+                            OutboxEvent(
+                                event_id=row[0],
+                                investigation_id=row[1],
+                                event_type=row[2],
+                                payload=dict(row[3]) if isinstance(row[3], dict) else row[3],
+                                status=row[4],
+                                created_at=row[5].isoformat() if row[5] else "",
+                                processed_at=row[6].isoformat() if row[6] else None,
+                                retry_count=row[7],
+                                error_message=row[8],
+                            )
+                        )
+                    return events
+        except psycopg.Error as e:
+            raise PersistenceError(
+                f"Database error listing events for investigation '{safe_id}': {e}"
+            ) from e
