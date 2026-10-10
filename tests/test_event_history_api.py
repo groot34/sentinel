@@ -21,7 +21,7 @@ No LLM calls, no Groq, no network.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 from starlette.testclient import TestClient
@@ -111,10 +111,27 @@ class MockRepository(PersistenceRepository):
     def supports_event_history(self) -> bool:
         return self._supports_history
 
-    def list_events(self, investigation_id: str, limit: int = 200) -> List[OutboxEvent]:
+    def list_events(
+        self,
+        investigation_id: str,
+        limit: int = 200,
+        after_cursor: Optional[Tuple[str, str]] = None,
+    ) -> List[OutboxEvent]:
         if self._raise_on_list_events is not None:
             raise self._raise_on_list_events
-        return self._events.get(investigation_id, [])[:limit]
+        events = self._events.get(investigation_id, [])
+        if after_cursor is not None:
+            c_ts, c_eid = after_cursor
+            events = [
+                e
+                for e in events
+                if (
+                    e.created_at.isoformat() if hasattr(e.created_at, "isoformat") else str(e.created_at),
+                    e.event_id,
+                )
+                > (c_ts, c_eid)
+            ]
+        return events[:limit]
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from core.domain.state import InvestigationState
 from core.events.base import DomainEvent
@@ -296,7 +296,10 @@ class FilesystemRepository(PersistenceRepository):
         return False
 
     def list_events(
-        self, investigation_id: str, limit: int = 200
+        self,
+        investigation_id: str,
+        limit: int = 200,
+        after_cursor: Optional[Tuple[str, str]] = None,
     ) -> List[OutboxEvent]:
         """Return an empty list — filesystem backend has no event store.
 
@@ -307,6 +310,7 @@ class FilesystemRepository(PersistenceRepository):
         Args:
             investigation_id: Identifier to validate.
             limit: Ignored for this backend.
+            after_cursor: Ignored for this backend.
 
         Returns:
             Always an empty list.

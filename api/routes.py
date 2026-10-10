@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import threading
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from agents.approval_gate import _build_approval_record
 from agents.orchestrator import IncidentOrchestrator
 from api.errors import error_json_response, sanitize_error_message
 from api.models import (
     _SAFE_ID_REGEX,
+    _format_sse_event,
     _project_event_payload,
     ApprovalRecordResponse,
     CreateInvestigationRequest,
@@ -32,6 +36,7 @@ from api.models import (
 )
 from core.domain.models import ApprovalRecord, IncidentStatus
 from core.persistence import ConcurrencyError, PersistenceError, PersistenceRepository
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Process-local atomic active investigation registry
@@ -517,19 +522,187 @@ def list_investigations(request: Request) -> JSONResponse:
     ids = repository.list()
     resp_model = ListInvestigationsResponse(investigations=ids)
     return JSONResponse(status_code=200, content=resp_model.model_dump())
+async def _stream_investigation_events(
+    request: Request,
+    safe_id: str,
+    repository: Any,
+    poll_interval: float = 0.5,
+    keepalive_interval: float = 15.0,
+    page_size: int = 200,
+):
+    """Async generator streaming durable outbox events as Server-Sent Events (SSE).
+
+    Conforms to W3C Server-Sent Events standard and handles:
+    - Keyset pagination over canonical order (created_at ASC, event_id ASC).
+    - Cursor resolution from Last-Event-ID header (or last_event_id query param)
+      by paging bounded chunks against stored history.
+    - Delivery of historical events and live-polling in bounded pages without
+      loading unbounded history into memory.
+    - Periodic keep-alive comments (: keep-alive\\n\\n).
+    - Draining all persisted events prior to clean closure on terminal states,
+      closing only when a subsequent query confirms there are no remaining events.
+    - Honest behaviour when event history is unsupported by the persistence backend.
+    - Graceful cleanup on client disconnection / cancellation.
+    """
+    backend_supports = getattr(repository, "supports_event_history", True)
+    if not backend_supports:
+        notice_data = {
+            "error": "event_history_unsupported",
+            "detail": "Active persistence backend does not support durable event history.",
+            "backend_supports_event_history": False,
+        }
+        yield _format_sse_event(event_type="notice", data=notice_data)
+        return
+
+    # Extract cursor from header or query parameter
+    last_event_id = request.headers.get("last-event-id") or request.query_params.get("last_event_id")
+
+    # Allow application state to configure intervals and page size dynamically
+    poll_interval = float(getattr(request.app.state, "sse_poll_interval", poll_interval))
+    keepalive_interval = float(getattr(request.app.state, "sse_keepalive_interval", keepalive_interval))
+    page_size = int(getattr(request.app.state, "sse_page_size", page_size))
+
+    def event_key(ev: Any) -> Tuple[str, str]:
+        c_at = getattr(ev, "created_at", None)
+        c_at_str = c_at.isoformat() if hasattr(c_at, "isoformat") else str(c_at or "")
+        return (c_at_str, str(getattr(ev, "event_id", "") or ""))
+
+    def project_sse(ev: Any) -> str:
+        raw_payload = ev.payload if isinstance(ev.payload, dict) else {}
+        safe_payload = _project_event_payload(raw_payload)
+        timestamp = safe_payload.get("timestamp") or ev.created_at or None
+        data = {
+            "event_id": ev.event_id,
+            "investigation_id": ev.investigation_id,
+            "event_type": ev.event_type,
+            "timestamp": timestamp,
+            "created_at": ev.created_at,
+            "processed_at": ev.processed_at,
+            "status": ev.status,
+            "retry_count": ev.retry_count,
+            "error_message": ev.error_message,
+            "payload": safe_payload,
+        }
+        return _format_sse_event(event_type=ev.event_type, data=data, event_id=ev.event_id)
+
+    last_cursor: Optional[Tuple[str, str]] = None
+
+    if last_event_id:
+        # Search stored history page-by-page to resolve the cursor event
+        search_cursor: Optional[Tuple[str, str]] = None
+        cursor_found = False
+        while True:
+            try:
+                batch = repository.list_events(safe_id, limit=page_size, after_cursor=search_cursor)
+            except Exception as exc:
+                logger.warning("Error resolving cursor for investigation %s: %s", safe_id, exc)
+                yield _format_sse_event(
+                    event_type="error",
+                    data={"error": "event_history_error", "detail": "Failed to resolve event cursor."},
+                )
+                return
+
+            if not batch:
+                break
+
+            match = next((ev for ev in batch if ev.event_id == last_event_id), None)
+            if match is not None:
+                cursor_found = True
+                last_cursor = event_key(match)
+                break
+
+            search_cursor = event_key(batch[-1])
+            if len(batch) < page_size:
+                break
+
+        if not cursor_found:
+            # Cursor could not be resolved in stored history.
+            # Emit explicit notice and deliver from beginning so no events are lost.
+            yield f": notice: cursor '{last_event_id}' could not be resolved; delivering from beginning\n\n"
+            last_cursor = None
+
+    last_keepalive = time.monotonic()
+    max_polls = getattr(request.app.state, "sse_max_polls", None)
+    poll_count = 0
+    first_fetch = True
+
+    try:
+        while True:
+            # 1. Detect client disconnect
+            if await request.is_disconnected():
+                break
+
+            # 2. Query next bounded page strictly after last_cursor
+            query_succeeded = False
+            try:
+                events_page = repository.list_events(safe_id, limit=page_size, after_cursor=last_cursor)
+                query_succeeded = True
+            except Exception as exc:
+                logger.warning("Error fetching events for investigation %s: %s", safe_id, exc)
+                if first_fetch:
+                    yield _format_sse_event(
+                        event_type="error",
+                        data={"error": "event_history_error", "detail": "Failed to retrieve initial event history."},
+                    )
+                    return
+                events_page = []
+            first_fetch = False
+
+            # 3. Emit each event in canonical order and advance cursor
+            for ev in events_page:
+                yield project_sse(ev)
+                last_cursor = event_key(ev)
+
+            # 4. Check current investigation status for terminal states
+            state = repository.load(safe_id)
+            is_terminal = False
+            if state is not None:
+                st = state.status.value if hasattr(state.status, "value") else str(state.status)
+                if st in ("COMPLETED", "FAILED", "PARTIAL"):
+                    is_terminal = True
+
+            # 5. If this page was full, immediately continue to fetch subsequent pages
+            if len(events_page) == page_size:
+                continue
+
+            # 6. Terminal stream handling:
+            # If investigation is terminal and this query confirmed 0 remaining events, close cleanly.
+            if is_terminal and query_succeeded and len(events_page) == 0:
+                break
+
+            # If investigation is terminal but events were delivered, immediately loop to confirm empty.
+            if is_terminal and len(events_page) > 0:
+                continue
+
+            # 7. Check max_polls limit (used in tests for non-terminal streams)
+            poll_count += 1
+            if max_polls is not None and poll_count > max_polls:
+                break
+
+            # 8. Periodic keep-alive comments
+            now = time.monotonic()
+            if now - last_keepalive >= keepalive_interval:
+                yield ": keep-alive\n\n"
+                last_keepalive = now
+
+            # 9. Sleep between polling cycles (releasing DB connection)
+            await asyncio.sleep(poll_interval)
+
+    except (asyncio.CancelledError, GeneratorExit):
+        return
 
 
-def list_investigation_events(request: Request) -> JSONResponse:
-    """GET /investigations/{investigation_id}/events - Return durable event history.
+def list_investigation_events(request: Request) -> Union[JSONResponse, StreamingResponse]:
+    """GET /investigations/{investigation_id}/events - Return event history or live stream.
 
-    Returns all domain events recorded in the outbox for the given
-    investigation, ordered chronologically (created_at ASC, event_id ASC).
-    Events are returned regardless of delivery status (pending/processed/failed).
+    Supports HTTP content negotiation:
+    - Accept: text/event-stream -> Returns Server-Sent Events (SSE) live stream
+    - Accept: application/json (or default) -> Returns JSON snapshot (EventHistoryResponse)
 
     When the active backend does not durably store outbox events (e.g.
-    FilesystemRepository) the response includes an empty ``events`` list and
-    ``backend_supports_event_history: false`` so callers know the empty list
-    does NOT imply the investigation produced zero events.
+    FilesystemRepository):
+    - JSON: returns an empty ``events`` list with ``backend_supports_event_history: false``
+    - SSE: streams an informative notice event and closes cleanly
     """
     raw_id = request.path_params.get("investigation_id", "")
     try:
@@ -546,8 +719,7 @@ def list_investigation_events(request: Request) -> JSONResponse:
         )
 
     # Confirm the investigation exists before returning (potentially empty)
-    # event history so callers can distinguish 404 from a genuine empty log.
-    # We use the existing repository.exists() path to avoid a new DB query.
+    # event history or starting SSE stream so callers receive 404 on missing investigations.
     if not repository.exists(safe_id):
         return error_json_response(
             404,
@@ -555,14 +727,34 @@ def list_investigation_events(request: Request) -> JSONResponse:
             f"Investigation '{safe_id}' not found.",
         )
 
-    # Determine whether this backend supports durable event history.
+    accept_header = request.headers.get("accept", "").lower()
+    if "text/event-stream" in accept_header:
+        poll_interval = float(getattr(request.app.state, "sse_poll_interval", 0.5))
+        keepalive_interval = float(getattr(request.app.state, "sse_keepalive_interval", 15.0))
+        page_size = int(getattr(request.app.state, "sse_page_size", 200))
+        return StreamingResponse(
+            _stream_investigation_events(
+                request=request,
+                safe_id=safe_id,
+                repository=repository,
+                poll_interval=poll_interval,
+                keepalive_interval=keepalive_interval,
+                page_size=page_size,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # JSON Snapshot Response (Mission 12B)
     backend_supports = getattr(repository, "supports_event_history", True)
 
     try:
         outbox_events = repository.list_events(safe_id)
     except Exception as exc:
-        # Re-raise PersistenceErrors through the existing handler; sanitize
-        # anything else to avoid leaking internal details.
         from core.persistence import PersistenceError as PE
         if isinstance(exc, PE):
             raise
@@ -576,8 +768,6 @@ def list_investigation_events(request: Request) -> JSONResponse:
     for ev in outbox_events:
         raw_payload = ev.payload if isinstance(ev.payload, dict) else {}
         safe_payload = _project_event_payload(raw_payload)
-        # Prefer the domain-event timestamp from the payload; fall back to
-        # the outbox row's created_at when absent.
         timestamp = safe_payload.get("timestamp") or ev.created_at or None
         projected.append(
             EventHistoryItemResponse(

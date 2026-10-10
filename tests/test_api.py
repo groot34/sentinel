@@ -50,7 +50,12 @@ class MockRepository(PersistenceRepository):
     def supports_event_history(self) -> bool:
         return True  # mock defaults to True; override per-test when needed
 
-    def list_events(self, investigation_id: str, limit: int = 200) -> List:
+    def list_events(
+        self,
+        investigation_id: str,
+        limit: int = 200,
+        after_cursor: Optional[Any] = None,
+    ) -> List:
         return []
 
 

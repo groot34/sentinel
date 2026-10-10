@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -589,17 +589,24 @@ class PostgresRepository(PersistenceRepository):
             raise PersistenceError(f"Database error incrementing retry count: {e}") from e
 
     def list_events(
-        self, investigation_id: str, limit: int = 200
+        self,
+        investigation_id: str,
+        limit: int = 200,
+        after_cursor: Optional[Tuple[str, str]] = None,
     ) -> List[OutboxEvent]:
         """Return all durable events for an investigation in chronological order.
 
         Queries the event_outbox table for all events belonging to the
-        investigation, regardless of delivery status.  Results are ordered
-        deterministically by (created_at ASC, event_id ASC).
+        investigation, optionally resuming after a keyset cursor
+        (created_at, event_id). Results are ordered deterministically by
+        (created_at ASC, event_id ASC).
 
         Args:
             investigation_id: Validated investigation identifier.
             limit: Maximum events to return (default 200).
+            after_cursor: Optional (created_at, event_id) keyset cursor to
+                retrieve only events strictly after this point in canonical
+                order (created_at ASC, event_id ASC).
 
         Returns:
             List of OutboxEvents in ascending chronological order.
@@ -613,18 +620,36 @@ class PostgresRepository(PersistenceRepository):
         try:
             with self._pool.connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT event_id, investigation_id, event_type, payload,
-                               status, created_at, processed_at, retry_count,
-                               error_message
-                        FROM event_outbox
-                        WHERE investigation_id = %s
-                        ORDER BY created_at ASC, event_id ASC
-                        LIMIT %s;
-                        """,
-                        (safe_id, limit),
-                    )
+                    if after_cursor is not None:
+                        cursor_created_at, cursor_event_id = after_cursor
+                        safe_ts = cursor_created_at or "1970-01-01T00:00:00Z"
+                        safe_eid = cursor_event_id or ""
+                        cur.execute(
+                            """
+                            SELECT event_id, investigation_id, event_type, payload,
+                                   status, created_at, processed_at, retry_count,
+                                   error_message
+                            FROM event_outbox
+                            WHERE investigation_id = %s
+                              AND (created_at > %s::timestamptz OR (created_at = %s::timestamptz AND event_id > %s))
+                            ORDER BY created_at ASC, event_id ASC
+                            LIMIT %s;
+                            """,
+                            (safe_id, safe_ts, safe_ts, safe_eid, limit),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT event_id, investigation_id, event_type, payload,
+                                   status, created_at, processed_at, retry_count,
+                                   error_message
+                            FROM event_outbox
+                            WHERE investigation_id = %s
+                            ORDER BY created_at ASC, event_id ASC
+                            LIMIT %s;
+                            """,
+                            (safe_id, limit),
+                        )
                     rows = cur.fetchall()
                     events: List[OutboxEvent] = []
                     for row in rows:

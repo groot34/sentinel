@@ -7,6 +7,7 @@ are never serialized or exposed.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -289,3 +290,24 @@ class EventHistoryResponse(BaseModel):
     total: int = Field(default=0, ge=0)
     events: List[EventHistoryItemResponse] = Field(default_factory=list)
     backend_supports_event_history: bool = True
+
+
+def _format_sse_event(
+    event_type: str,
+    data: Dict[str, Any],
+    event_id: Optional[str] = None,
+) -> str:
+    """Format domain event dictionary into an SSE message block.
+
+    Follows W3C Server-Sent Events wire format:
+        [id: <event_id>\\n]
+        event: <event_type>\\n
+        data: <json_string>\\n\\n
+    """
+    lines: List[str] = []
+    if event_id:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event_type}")
+    data_str = json.dumps(data, separators=(",", ":"))
+    lines.append(f"data: {data_str}")
+    return "\n".join(lines) + "\n\n"

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.events.base import DomainEvent
 from core.persistence.repository import PersistenceError, validate_investigation_id
@@ -122,7 +122,10 @@ class OutboxRepository:
         raise NotImplementedError
 
     def list_events(
-        self, investigation_id: str, limit: int = 200
+        self,
+        investigation_id: str,
+        limit: int = 200,
+        after_cursor: Optional[Tuple[str, str]] = None,
     ) -> List[OutboxEvent]:
         """Return all durable events for an investigation in chronological order.
 
@@ -132,6 +135,9 @@ class OutboxRepository:
         Args:
             investigation_id: Investigation whose events to retrieve.
             limit: Maximum number of events to return (default 200).
+            after_cursor: Optional (created_at, event_id) keyset cursor to
+                retrieve only events strictly after this point in canonical
+                order (created_at ASC, event_id ASC).
 
         Returns:
             List of OutboxEvents ordered by created_at ASC, event_id ASC.
