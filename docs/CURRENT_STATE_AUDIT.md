@@ -1,69 +1,133 @@
 # Sentinel Repository State Audit
 
-**Audit Date**: 2026-08-29  
-**Branch**: `main`  
-**Latest Commit**: `a2185ef` (*feat: complete synthetic incident dataset (10 scenarios) and validation suite*)
+**Audit Date**: 2026-10-13<br>
+**Branch**: `main`<br>
+**Current HEAD Commit**: `1506904` (*feat: add live SSE investigation event streaming*)<br>
+**Working Tree Status**: Clean (no uncommitted tracked or untracked changes)
 
 ---
 
-## 1. Specification Compliance Matrix
+## 1. Executive Summary & Verification Baseline
 
-| # | Specification Requirement | Status | Current State | Required State | Exact Files | Recommended Fix / Action |
-|:---|:---|:---|:---|:---|:---|:---|
-| 1 | **Exact Project Problem** | **PASS** | Clearly defined in README & schemas: eliminating plausible-but-wrong AI diagnoses via executable verification. | Grounded in verification & falsification. | [README.md](file:///d:/Assignemt/sentinel-incident-investigator/README.md), [schemas/report_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/report_schema.json) | None (Aligned). |
-| 2 | **Baseline Definition** | **PARTIAL** | Schema defined (`baseline_schema.json`) and stub exists in `baseline/baseline_agent.py`. | Single-call LLM prompt without tools or verification checks. | [baseline/baseline_agent.py](file:///d:/Assignemt/sentinel-incident-investigator/baseline/baseline_agent.py), [schemas/baseline_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/baseline_schema.json) | Implement `BaselineAgent.diagnose()` using `core/llm.py` in next phase. |
-| 3 | **Ten Canonical Incidents** | **PASS** | All 10 incidents implemented with logs, metrics, code diffs, ground truth, and tests. 51/51 pytest checks passing. | Exactly 10 canonical failure modes with incident 10 as multi-symptom cascade. | [incidents/](file:///d:/Assignemt/sentinel-incident-investigator/incidents), [tests/validate_incidents.py](file:///d:/Assignemt/sentinel-incident-investigator/tests/validate_incidents.py) | None (Fully compliant & verified). |
-| 4 | **Groq-Only Runtime** | **PARTIAL** | Configured in `.env.example` and `requirements.txt`. `core/llm.py` not yet created. | Centralized Groq client wrapper; agents must not import provider libraries directly. | [.env.example](file:///d:/Assignemt/sentinel-incident-investigator/.env.example), [requirements.txt](file:///d:/Assignemt/sentinel-incident-investigator/requirements.txt) | Create `core/llm.py` wrapping Groq client with rate-limit protection. |
-| 5 | **Agent Architecture** | **PARTIAL** | Clean skeleton modules exist for Orchestrator, Logs, Metrics, Code, Hypothesis, Verification, and Fix Proposal agents. | Modular agents with deterministic analysis tools + structured JSON contracts. | [agents/](file:///d:/Assignemt/sentinel-incident-investigator/agents) | Implement agent logic and deterministic analysis tools in upcoming phases. |
-| 6 | **Evidence Requirements** | **PASS** | Formal JSON schema requiring unique `EV-...` IDs, source types (`logs`, `metrics`, `code`, `config`), and $\ge 2$ independent items for final diagnosis. | Falsifiable evidence items with IDs. | [schemas/evidence_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/evidence_schema.json), [schemas/report_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/report_schema.json) | None (Enforced by schema). |
-| 7 | **Hypothesis Requirements** | **PASS** | Schema requires 1–4 hypotheses, mandatory evidence IDs, falsification criteria, and verification plan. | 1–4 falsifiable hypotheses with attached evidence IDs. | [schemas/hypothesis_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/hypothesis_schema.json) | None (Enforced by schema). |
-| 8 | **Verification Requirements** | **PARTIAL** | Schema specifies `CONFIRMED`, `REJECTED`, `INCONCLUSIVE` statuses and check execution output. Verification agent is currently a stub. | Executable checks verifying code/metric invariants programmatically. | [schemas/verification_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/verification_schema.json), [agents/verification_agent.py](file:///d:/Assignemt/sentinel-incident-investigator/agents/verification_agent.py) | Implement programmatic check execution in `verification_agent.py`. |
-| 9 | **Human Approval Gate** | **PASS** | Enforced in `report_schema.json` and `FixProposalAgent.HUMAN_APPROVAL_NOTICE`. Automatic apply/deploy strictly prohibited. | Clear safety notice: `"AWAITING HUMAN APPROVAL — this fix has not been applied."` | [agents/fix_proposal_agent.py](file:///d:/Assignemt/sentinel-incident-investigator/agents/fix_proposal_agent.py), [schemas/report_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/report_schema.json) | None (Strictly enforced). |
-| 10 | **Ground-Truth Isolation** | **PASS** | `ground_truth.md` is strictly partitioned for evaluation. Agent interfaces and schemas do not ingest or expose ground truth. | Agents must not see `ground_truth.md` during normal investigation. | [schemas/orchestrator_schema.json](file:///d:/Assignemt/sentinel-incident-investigator/schemas/orchestrator_schema.json), [agents/orchestrator.py](file:///d:/Assignemt/sentinel-incident-investigator/agents/orchestrator.py) | Maintain isolation during pipeline implementation. |
-| 11 | **Evaluation Fairness** | **PASS** | Evaluation harness (`eval/run_eval.py` and `eval/rubric.md`) runs Baseline and Sentinel on identical 10 incident bundles. | Exact same incident bundles evaluated across both systems. | [eval/run_eval.py](file:///d:/Assignemt/sentinel-incident-investigator/eval/run_eval.py), [eval/rubric.md](file:///d:/Assignemt/sentinel-incident-investigator/eval/rubric.md) | None (Framework in place). |
-| 12 | **Evaluation Metrics** | **PASS** | Rubric defines Root Cause Accuracy, Evidence Grounding, Verification Rigor, and Fix Safety. Zero fake scores recorded. | Quantitative multidimensional scoring rubric. | [eval/rubric.md](file:///d:/Assignemt/sentinel-incident-investigator/eval/rubric.md) | Populate actual scores after evaluation runs. |
-| 13 | **Reproducibility** | **PARTIAL** | `REPRODUCE.md`, `Makefile`, `pytest.ini`, and `requirements.txt` created and functional. End-to-end run commands pending agent implementation. | Clear commands to replicate setup and run benchmark. | [REPRODUCE.md](file:///d:/Assignemt/sentinel-incident-investigator/REPRODUCE.md), [Makefile](file:///d:/Assignemt/sentinel-incident-investigator/Makefile) | Finalize CLI run instructions once evaluation runner executes. |
-| 14 | **Trajectory / Disclosure** | **PASS** | `trajectories/DISCLOSURE.md` records coding agents used; `trajectories/_TEMPLATE.md` defines structure. | Complete traceability of coding tools and runtime models. | [trajectories/DISCLOSURE.md](file:///d:/Assignemt/sentinel-incident-investigator/trajectories/DISCLOSURE.md), [trajectories/_TEMPLATE.md](file:///d:/Assignemt/sentinel-incident-investigator/trajectories/_TEMPLATE.md) | Record agent sessions during development. |
-| 15 | **Changelog Sync** | **PASS** | `CHANGELOG.md` documents `0.1.0` (Skeleton + 10 Incidents Dataset) and outlines upcoming phases accurately. | Reflects real progress without hallucinated results. | [CHANGELOG.md](file:///d:/Assignemt/sentinel-incident-investigator/CHANGELOG.md) | Keep synchronized at each git checkpoint. |
-| 16 | **README Status** | **PASS** | Contains problem, user, bottleneck, solution, architecture diagram, evaluation outline, and hot take. | Comprehensive overview matching hackathon brief. | [README.md](file:///d:/Assignemt/sentinel-incident-investigator/README.md) | None (Fully aligned). |
-| 17 | **Git Checkpoints** | **PASS** | Commits `b4720d3` and `a2185ef` are clean, descriptive, and pushed to remote origin main. | Clean git history with traceable checkpoints. | Git Log | Continue making atomic commits per phase. |
+This audit establishes the verified state of the Sentinel repository following the completion and verification of Sentinel 2.0 Mission 12C. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
+
+### Current Test Suite & Verification Results
+
+- **Pytest Suite**: **609 passed, 32 skipped, 1 warning** (641 collected in ~13s).
+- **Incident Dataset Integrity Suite** (`tests/validate_incidents.py`): **51 / 51 passed** (100%).
+- **Total Passing Automated Checks**: **660 passed**.
+
+#### Explanation of Skipped Tests & Warnings
+1. **Windows Symlink Security Tests (2 skipped)**: `tests/test_api.py::test_create_investigation_symlink_attack_rejected` and `test_symlink_security_in_api` are skipped because standard Windows user accounts without Developer Mode cannot create filesystem symbolic links.
+2. **PostgreSQL Live Integration Tests (30 skipped)**: `tests/test_persistence_contract.py`, `tests/test_postgres_persistence.py`, and `tests/test_outbox.py` skip 30 integration test cases because `SENTINEL_DATABASE_URL` is unset in the test execution environment. Unit tests using mocks and transaction abstractions pass completely (47+ tests).
+3. **Deprecation Warning (1 warning)**: Starlette deprecation notice in `tests/test_api.py` regarding `httpx` integration with `starlette.testclient.TestClient`.
 
 ---
 
-## 2. Deep Dive on Special Focus Items (A through J)
+## 2. Implemented Capabilities: Sentinel 1.0 vs. Sentinel 2.0
 
-- **A. CHANGELOG Accuracy**: **PASS**. CHANGELOG records only completed work (v0.1.0). No fake numbers or unbuilt features are claimed.
-- **B. Canonical Incidents Match**: **PASS**. All 10 incidents match the exact canonical domains and failure modes (N+1 query, cache stampede, consumer lag, memory leak, race condition, connection leak, retry storm, cascading timeout, dropped index, and multi-symptom cascade).
-- **C. Baseline Implementation Status**: **PARTIAL**. Schema is ready; Python class in `baseline_agent.py` is a stub waiting for `core/llm.py`.
-- **D. Groq-only Runtime Isolation**: **PARTIAL**. Dependencies and `.env.example` specify Groq (`llama-3.3-70b-versatile`); `core/llm.py` needs to be created.
-- **E. Ground Truth Isolation**: **PASS**. Zero leakages of ground truth into agent inputs.
-- **F. Verification Executable Checks**: **PARTIAL**. Verification schema supports executable checks; engine execution logic is queued for Phase 5.
-- **G. Verified Evidence for Final Root Cause**: **PASS**. Enforced by schema contract (`minItems: 2`, `status: CONFIRMED`).
-- **H. Trajectories Recording**: **PASS**. Templates and disclosure ledger are established.
-- **I. Documentation Synchronization**: **PASS**. `README.md`, `CHANGELOG.md`, and `REPRODUCE.md` are aligned with the repository's current state.
-- **J. Zero Fake Data / Results**: **PASS**. No fabricated benchmark numbers exist.
+### Sentinel 1.0: Deterministic Multi-Agent Verification Pipeline
+Sentinel 1.0 established the multi-agent incident diagnosis and verification framework:
+- **8-Stage Pipeline**: Logs Agent, Metrics Agent, Code Agent, Evidence Fusion, Hypothesis Engine, Verification Agent, Fix Proposal Agent, and Human Approval Gate coordinated by `agents/orchestrator.py`.
+- **Deterministic Falsification**: The Verification Agent executes zero LLM calls, using pure Python AST analysis, log scanning, metric anomaly checks, and invariant evaluation to confirm or reject hypotheses.
+- **Human Approval Safety Boundary**: The Approval Gate enforces a strict state machine (`PROPOSED → PENDING_APPROVAL → APPROVED | REJECTED`). Non-interactive runs auto-reject by default. Approval records the decision ONLY; patches are never automatically applied.
+- **Benchmark Performance (Milestone 10)**:
+  - Evaluated against a single-shot baseline across 10 canonical incidents using locked `openai/gpt-oss-120b` (Groq API).
+  - Diagnostic Accuracy: Baseline 10/10 (100%), Sentinel 10/10 (100%).
+  - Verified Root Causes: Baseline 0/10 (0%), Sentinel 10/10 (100%).
+  - Hypotheses: 31 generated, 30 CONFIRMED, 1 REJECTED.
+  - LLM Calls: 58 benchmark calls across all 10 incidents.
+  - **Documented Incident 10 Limitation**: In `inc_10_multi_symptom_cascade`, diagnosis and verification succeeded (4 CONFIRMED hypotheses), but the fix-proposal stage was rate-limited on the Groq free-tier daily token limit, yielding 0 fix proposals with an overall pipeline status of `PARTIAL`.
+
+### Sentinel 2.0: Enterprise Distributed & Event-Driven Architecture
+Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distributed investigation platform across Missions 01 through 12C:
+
+| Mission | Commit | Date | Core Deliverables & Implemented Modules |
+|---|---|---|---|
+| **Mission 01** | `888c35f` | 2026-09-05 | `InvestigationState`, typed domain models (`core/domain/models.py`), bidirectional `.to_dict()`/`.from_dict()` serialization. |
+| **Mission 02** | `cc1e0c8` | 2026-09-07 | Orchestrator migration to `InvestigationState`; stage lifecycle tracking (`start_stage`, `complete_stage`, etc.), token telemetry propagation. |
+| **Mission 03** | `72d9983` | 2026-09-09 | `PersistenceRepository` ABC, `FilesystemRepository` with atomic `.tmp` + `os.replace` writes and safety validations, `orchestrator.resume()`. |
+| **Mission 04** | `10b4e30` | 2026-09-10 | Domain Event Infrastructure (`core/events/`): 8 immutable events, `InMemoryEventBus`, `EventRecorder`. Enforced invariant: State Mutation → Persistence → Event Emission. |
+| **Mission 05** | `db7dd83` | 2026-09-12 | `PostgresRepository` (`core/persistence/postgres.py`), hybrid single-table schema (`001_initial_schema.sql`), OCC with integer `version`, repository factory. |
+| **Mission 06** | `9c28339` | 2026-09-13 | Tool Abstraction Layer (`core/tools/`): ToolRegistry, tool models, execution context, path safety, and builtin log/metric/code tools. |
+| **Mission 07** | `31baaeb` | 2026-09-17 | LLM Provider Abstraction Layer (`core/llm/`): BaseLLMClient interface, GroqLLMClient, factory, model configs, token telemetry. |
+| **Mission 08** | `c6f6926` | 2026-09-17 | API layer (`api/app.py`, `api/routes.py`, `api/models.py`, `api/errors.py`) with Starlette: `POST /investigations`, `GET /investigations`, `GET /investigations/{id}`. |
+| **Mission 09** | `d7a7d96`, `59f9100` | 2026-09-19 | CLI server entry point (`api/__main__.py` in `d7a7d96`); `Makefile` launcher targets (`make serve`, `make worker`) and documentation in `REPRODUCE.md` (`59f9100`). |
+| **Mission 10** | `c3a4db5`, `c58c9de` | 2026-09-19 | Investigation Resume & Human Approval API: route mounting in `api/app.py` (`c3a4db5`); endpoint handlers (`api/routes.py`), request models (`api/models.py`), domain state methods (`core/domain/state.py`), and documentation in `c58c9de`. |
+| **Mission 11** | `a7291bc` | 2026-09-30 | Transactional Outbox & Event Delivery: `002_outbox_schema.sql`, atomic state+event transactions, `OutboxRepository`, `EventDeliveryWorker` background service (`api/event_worker/`). |
+| **Mission 12A**| `7ce43bc` | 2026-10-02 | Execution Leasing & Crash Recovery: `lease_owner`, `lease_expires_at`, OCC lease claims, `is_lease_active()`, safe recovery of crashed `RUNNING` investigations. |
+| **Mission 12B**| `ac676ed` | 2026-10-08 | Investigation Event History API: `GET /investigations/{id}/events` with `Accept: application/json`, payload allowlisting, truthful `backend_supports_event_history=False` on filesystem. |
+| **Mission 12C**| `1506904` | 2026-10-10 | Live Investigation Event Streaming via SSE: `GET /investigations/{id}/events` with `Accept: text/event-stream`, keyset pagination `(created_at ASC, event_id ASC)`, `Last-Event-ID` resume, keepalives, terminal stream draining. |
 
 ---
 
-## 3. Issue Prioritization
+## 3. Subsystem Architecture & Current Behaviour
 
-### P0 (Blocking next execution):
-- *None.* The repository is completely healthy and all existing tests pass.
+### 3.1 Persistence & Optimistic Concurrency Control (OCC)
+- **Filesystem Backend**: Persists state as formatted JSON in `.sentinel/<investigation_id>/state.json` via atomic rename. Process-local locking only. Does not support outbox or durable event history (`backend_supports_event_history: false`).
+- **PostgreSQL Backend**: Uses `psycopg-pool` to manage PostgreSQL connections. Stores relational operational metadata alongside `state_payload JSONB`. OCC ensures that updates match `version = %s` and increment `version = version + 1`, raising `ConcurrencyError` on conflicting writes. Supports durable outbox and reports `backend_supports_event_history: true`.
 
-### P1 (Next immediate development tasks):
-1. Create `core/llm.py` with Groq API client abstraction and rate-limit guardrails.
-2. Implement `baseline/baseline_agent.py` single-call diagnosis.
-3. Wire `eval/run_eval.py` to execute baseline against the 10 incident bundles.
+### 3.2 Transactional Outbox & Event Delivery Worker
+- State updates and outbox events are committed in a single atomic database transaction via `PostgresRepository.save(state, events)`.
+- The `EventDeliveryWorker` (`python -m api.event_worker` or `make worker`) polls `event_outbox` for records with `processed_at IS NULL AND retry_count < max_retries`, ordered by `created_at ASC, id ASC`. It dispatches events to registered event buses, marks success with `processed_at = NOW()`, or records `last_error` with exponential backoff on delivery failure.
 
-### P2 (Subsequent pipeline implementation):
-1. Build deterministic tool layer for Logs, Metrics, and Code extraction.
-2. Implement Hypothesis Engine and Verification Agent check execution.
-3. Wire Orchestrator end-to-end and run comparative evaluation benchmark.
+### 3.3 Execution Leasing & Crash Recovery
+- Investigations carry lease metadata: `lease_owner: Optional[str]` and `lease_expires_at: Optional[datetime]`.
+- Active leases protect investigations from conflicting concurrent runs or premature resumes (`is_lease_active()` returns true → `409 Conflict`).
+- If a server worker crashes during an investigation, its lease expires after the TTL (default 300s). Once expired, `is_lease_active()` evaluates to false, allowing any worker to acquire the lease via OCC, restore state, and resume from the first incomplete stage.
+
+### 3.4 API Endpoints Summary
+
+| Endpoint | Method | Status Codes | Description |
+|---|---|---|---|
+| `/health` | `GET` | 200 | Returns system status, persistence backend, and outbox queue stats. |
+| `/investigations` | `POST` | 201, 400, 500 | Creates and runs an investigation synchronously for an incident identifier (`incident_id`). |
+| `/investigations` | `GET` | 200 | Paginated list of investigations with optional status filter. |
+| `/investigations/{id}` | `GET` | 200, 404 | Retrieves complete investigation state and summary. |
+| `/investigations/{id}/resume` | `POST` | 200, 400, 404, 409 | Resumes an interrupted investigation. Rejects active leases with 409 Conflict. |
+| `/investigations/{id}/approval` | `POST` | 200, 400, 404 | Records human approval/rejection decision. Patch is never auto-applied. |
+| `/investigations/{id}/events` | `GET` | 200, 400, 404 | Dual-mode: JSON snapshot (`application/json`) or live SSE stream (`text/event-stream`). |
+
+### 3.5 Event History & SSE Streaming Semantics
+- **Content Negotiation**: Driven strictly by the `Accept` request header.
+- **JSON Snapshot**: Returns `InvestigationEventsResponse` with events ordered by `(created_at ASC, event_id ASC)`. Filesystem returns `backend_supports_event_history: false` and empty event list.
+- **Live SSE Streaming**:
+  - Delivers real-time events formatted as `id: ...\nevent: ...\ndata: ...\n\n`.
+  - Keyset cursor pagination supports `Last-Event-ID` header or `?last_event_id` query parameter. Unresolvable cursor IDs return HTTP 200 with an SSE comment notice and restart streaming from the beginning so no events are lost (never HTTP 400).
+  - Polls PostgreSQL outbox at 0.5s intervals, sending periodic `: keep-alive\n\n` comments every 15s to maintain proxy connections.
+  - On terminal states (`COMPLETED`, `FAILED`, `PARTIAL`), ensures all pending persisted events in the outbox are drained before closing cleanly without emitting synthetic frames.
+  - Checks `request.is_disconnected()` to terminate streams cleanly when clients disconnect.
 
 ---
 
-## 4. Tests Status
+## 4. Documentation Discrepancies Resolved in this Audit
 
-- `tests/test_schemas.py`: **11 / 11 PASSED** (All 6 JSON schemas valid and functional).
-- `tests/validate_incidents.py`: **51 / 51 PASSED** (All 10 incident bundles structurally and mathematically valid).
-- **Total Passing Tests**: **62 / 62 (100%)**.
+Prior to this reconciliation, documentation had drifted significantly across the repository:
+1. **ARCHITECTURE.md**: Stopped at Sentinel 1.0 specifications; completely lacked documentation for Sentinel 2.0 domain state, OCC versioning, transactional outbox, execution leasing, HTTP API, and SSE streaming.
+2. **CURRENT_STATE_AUDIT.md**: Dated 2026-08-29, referencing commit `a2185ef`, 62 tests, and reporting implemented components as "PARTIAL" or "stubs".
+3. **README.md**: Reported a stale test count of 315 tests (actual: 609 passed, 32 skipped) and omitted all Sentinel 2.0 API, outbox, and SSE streaming capabilities.
+4. **CHANGELOG.md**: Stopped at Mission 05 (`2.0.0-mission05`), missing 9 major completed milestones (Missions 06 through 12C), and retained an obsolete `[Unreleased]` block from 1.0.
+5. **REPRODUCE.md**: Stated that running investigations could not be distinguished from interrupted ones without leasing (superseded by Mission 12A leasing), and omitted the events API / SSE streaming curl commands.
+6. **TODO.md**: Mistakenly labelled Transactional Outbox as "Mission 06" and omitted tracking for Missions 07 through 12C.
+
+---
+
+## 5. Remaining Engineering Work (Post-Mission 12C)
+
+The following work represents genuine upcoming engineering tasks, clearly separated from documentation reconciliation:
+1. **Asynchronous HTTP Dispatch & Background Worker Queue**: The current `POST /investigations` endpoint executes the orchestrator synchronously within the request-response cycle. Converting this to asynchronous job submission (`202 Accepted`) backed by a distributed task runner or message broker remains an open enhancement.
+2. **External Event Bus Integrations**: `EventDeliveryWorker` currently publishes to the in-memory bus; integrating Redis, Kafka, or webhook publishers for external consumer systems.
+3. **Live PostgreSQL CI/CD Automation**: Configuring automated PostgreSQL containers in CI workflows so the 30 skipped database integration tests run on every push.
+
+---
+
+## 6. Historical Reference: Audit from 2026-08-29 (Commit `a2185ef`)
+
+*(Preserved for historical traceability)*
+
+At commit `a2185ef` (2026-08-29), the repository contained:
+- Initial repository skeleton with 6 JSON Schema contracts (`schemas/*.json`).
+- Synthetic incident dataset of 10 scenarios with `tests/validate_incidents.py` (51 tests passing).
+- Stubs for agents and baseline investigator.
+- 62 total passing tests (11 schema tests + 51 incident checks).
+- No LLM client, orchestrator pipeline, persistence layer, or API server had yet been built.

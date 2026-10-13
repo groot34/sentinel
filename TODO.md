@@ -7,27 +7,27 @@
 ---
 
 ## Sentinel 2.0 Milestones
-- [x] **Mission 01: Domain Model + Investigation State** (2026-09-05)
+- [x] **Mission 01: Domain Model + Investigation State** (2026-09-05, `888c35f`)
   - Created `core/domain/models.py` with typed Pydantic V2 domain models and enums.
   - Created `core/domain/state.py` with `InvestigationState` and `StageTransition`.
   - Created `core/domain/__init__.py` exporting domain classes.
   - Bidirectional `.from_dict()` and `.to_dict()` round-trip serialization.
   - Zero agent/orchestrator runtime changes (isolated foundation).
   - 32 new unit tests in `tests/test_domain_models.py` and `tests/test_investigation_state.py` (347/347 total passing).
-- [x] **Mission 02: Orchestrator Migration to Investigation State** (2026-09-07)
+- [x] **Mission 02: Orchestrator Migration to Investigation State** (2026-09-07, `cc1e0c8`)
   - Integrated `InvestigationState` as internal source of truth for `IncidentOrchestrator`.
   - Stage lifecycle tracking (`start_stage`, `complete_stage`, `fail_stage`, `skip_stage`, `mark_cached`).
   - Stage execution order strictly maintained across 8 stages.
   - Token telemetry propagation (`prompt_tokens`, `completion_tokens`, `total_tokens`, `llm_calls`).
   - ID deduplication for evidence, hypotheses, proposals, and approvals.
   - Backward-compatible `OrchestratorResult` output dictionary via `_build_result_from_state`.
-- [x] **Mission 03: Persistence + Resume** (2026-09-09)
+- [x] **Mission 03: Persistence + Resume** (2026-09-09, `72d9983`)
   - Created `core/persistence/repository.py` defining `PersistenceRepository` ABC and `PersistenceError`.
   - Created `core/persistence/filesystem.py` implementing `FilesystemRepository` with atomic write (`.tmp` + `os.replace`), ID traversal security, and safety assertions against benchmark/secret leakage.
   - Integrated persistence hooks into `IncidentOrchestrator` (`agents/orchestrator.py`) with optional `repository` parameter.
   - Implemented `IncidentOrchestrator.resume(investigation_id, incident_dir)` with deterministic stage discovery and output reinjection.
   - 47 new unit/integration tests in `tests/test_persistence.py` and `tests/test_orchestrator_resume.py` (402/402 total tests passing, 51/51 incident validation passing).
-- [x] **Mission 04: Event-Driven Architecture** (2026-09-10)
+- [x] **Mission 04: Event-Driven Architecture** (2026-09-10, `10b4e30`)
   - Created `core/events/` package with `DomainEvent` base, 8 concrete events, `EventBus` ABC, `InMemoryEventBus`, and `EventRecorder`.
   - Synchronous, FIFO, deterministic in-process event bus with subscriber failure isolation (`strict=False` default).
   - Added optional `event_bus: Optional[EventBus] = None` to `IncidentOrchestrator.__init__`. Fully backward compatible.
@@ -35,7 +35,7 @@
   - Strict lifecycle ordering: **State Mutation → Persistence → Event Publish** enforced at every stage.
   - Cache hits emit `StageCached` only — never `StageStarted` or `StageCompleted`.
   - Terminal `InvestigationCompleted` emitted once per run, always last.
-- [x] **Mission 05: PostgreSQL Persistence Architecture** (2026-09-12)
+- [x] **Mission 05: PostgreSQL Persistence Architecture** (2026-09-12, `db7dd83`)
   - Added `version: int = Field(default=1, ge=1)` to `InvestigationState` for optimistic concurrency control with 100% backward compatibility.
   - Implemented `PostgresRepository` in `core/persistence/postgres.py` with transactional OCC, single-table hybrid schema, and security assertions.
   - Created `001_initial_schema.sql` (`investigations` table with indexed `status`, `current_stage`, `started_at`).
@@ -44,14 +44,64 @@
   - Added `docker-compose.yml` and `.env.example` persistence configuration.
   - Added shared `PersistenceContractTests` in `tests/test_persistence_contract.py` and Postgres unit/integration tests in `tests/test_postgres_persistence.py`.
   - 472/472 pytest tests passing (20 integration tests gracefully skipped when PostgreSQL is offline), 51/51 incident validation passing.
-- [x] **Mission 06: Transactional Outbox & Event Delivery** (2026-09-30)
+- [x] **Mission 06: Tool Abstraction Layer** (2026-09-13, `9c28339`)
+  - Implemented `core/tools/` package: `BaseTool`, `ToolRegistry`, `ToolContext`, `ToolResult`, `ToolMetadata`.
+  - Builtin tools for logs (`core/tools/builtin/logs.py`) and code diffs (`core/tools/builtin/code.py`).
+  - Path safety engine enforcing incident root boundaries, rejecting path traversal attempts, and blocking symlink escapes.
+  - 32 unit tests in `tests/test_tools.py` verifying registration, execution, schemas, and safety boundaries.
+- [x] **Mission 07: LLM Provider Abstraction Layer** (2026-09-17, `31baaeb`)
+  - Created `core/llm/` package with `BaseLLMClient` interface (`core/llm/base.py`).
+  - Implemented `GroqLLMClient` (`core/llm/groq.py`) supporting unstructured text and schema-enforced structured generation.
+  - Centralized provider factory (`core/llm/factory.py`), session token tracking, backoff retries, and secret masking.
+  - 17 unit tests in `tests/test_llm_provider.py`.
+- [x] **Mission 08: Complete HTTP API Layer** (2026-09-17, `c6f6926`)
+  - Implemented Starlette API server (`api/app.py`, `api/routes.py`, `api/models.py`, `api/errors.py`).
+  - Endpoints: `GET /health`, `POST /investigations`, `GET /investigations`, `GET /investigations/{id}`.
+  - Strict input validation rejecting path traversal attacks, non-existent directories, and malformed identifiers.
+  - 30+ tests in `tests/test_api.py`.
+- [x] **Mission 09: CLI Server Launcher & Entry Point** (2026-09-19, `d7a7d96`, `59f9100`)
+  - `d7a7d96`: Implemented CLI server entry point `api/__main__.py` with argument parsing (`--host`, `--port`, `--reload`, `--log-level`) and Uvicorn runner with graceful shutdown.
+  - `59f9100`: Added `make serve` and `make worker` launcher targets to `Makefile` and updated reproduction documentation in `REPRODUCE.md`.
+- [x] **Mission 10: Investigation Resume & Human Approval Endpoints** (2026-09-19, `c3a4db5`, `c58c9de`)
+  - `c3a4db5`: Wired `/investigations/{id}/resume` and `/investigations/{id}/approval` route endpoints in `api/app.py`.
+  - `c58c9de`: Implemented endpoint handlers in `api/routes.py`, request models in `api/models.py`, domain state approval methods in `core/domain/state.py`, reproduction docs in `REPRODUCE.md`, and API tests in `tests/test_api.py`.
+  - Strict Safety Boundary: recording approval **NEVER** applies code patches to disk or modifies git state.
+- [x] **Mission 11: Transactional Outbox & Event Delivery** (2026-09-30, `a7291bc`)
   - Added `event_outbox` table schema (`core/persistence/sql/002_outbox_schema.sql`).
-  - Implemented `OutboxRepository` abstract interface (`core/persistence/outbox.py`).
-  - Integrated outbox persistence into `PostgresRepository.save(state, events)` for atomic state+event persistence.
-  - Modified `IncidentOrchestrator` to collect events in `_pending_events` and persist atomically with state.
-  - Implemented `EventDeliveryWorker` background worker for polling and delivering outbox events to EventBus.
-  - Added outbox and worker tests: unique event_id, atomic persistence, delivery, retry logic, idempotency.
-  - Backward compatible: without repository, events publish directly to EventBus as before.
+  - Implemented `OutboxRepository` interface (`core/persistence/outbox.py`).
+  - Integrated atomic persistence into `PostgresRepository.save(state, events)`: single transaction commits state and outbox events.
+  - Created `EventDeliveryWorker` (`api/event_worker/`) for reliable polling, dispatch, retry backoff, and deduplication.
+  - 22 tests in `tests/test_outbox.py` and `tests/test_event_worker.py` (offline/unit tested; 30 live PostgreSQL integration tests skipped when `SENTINEL_DATABASE_URL` is unset).
+- [x] **Mission 12A: Crash Recovery & Execution Leasing** (2026-10-02, `7ce43bc`)
+  - Added execution leasing to `InvestigationState`: `lease_owner: Optional[str]`, `lease_expires_at: Optional[datetime]`.
+  - Atomic OCC lease acquisition and renewal in `PostgresRepository`.
+  - Active lease protection: competing resume requests return `409 Conflict`.
+  - Automatic crash recovery: crashed `RUNNING` investigations with expired leases can be safely re-acquired and resumed from the last completed stage.
+  - 26 tests in `tests/test_investigation_leasing.py`.
+- [x] **Mission 12B: Investigation Event History API** (2026-10-08, `ac676ed`)
+  - Added `GET /investigations/{id}/events` in JSON mode (`Accept: application/json`).
+  - Deterministic event ordering strictly adhering to `(created_at ASC, event_id ASC)`.
+  - Explicit event payload projection allowlisting via typed Pydantic models in `api/models.py`.
+  - Backend capability reporting: `backend_supports_event_history: true` on PostgreSQL, `false` with empty event list on Filesystem.
+  - 15 tests in `tests/test_event_history_api.py`.
+- [x] **Mission 12C: Live SSE Investigation Event Streaming** (2026-10-10, `1506904`)
+  - Added `GET /investigations/{id}/events` in SSE mode (`Accept: text/event-stream`).
+  - Keyset cursor pagination in `(created_at ASC, event_id ASC)` canonical order supporting `Last-Event-ID` header and `last_event_id` query parameter.
+  - Unknown cursor handling: returns HTTP 200, emits an SSE comment notice, and restarts streaming from the beginning so no events are lost (never HTTP 400).
+  - Keepalive comments (`: keep-alive\n\n`) emitted every 15s during idle polling.
+  - Bounded pagination loop (200-event pages) with complete draining of pending persisted events before closing cleanly on terminal states (`COMPLETED`, `FAILED`, `PARTIAL`) without emitting synthetic frames.
+  - Client disconnect detection via `request.is_disconnected()`.
+  - 22 tests in `tests/test_event_streaming_api.py`.
+
+---
+
+## Post-Mission 12C Remaining Engineering Work
+- [ ] **Asynchronous HTTP Dispatch & Background Worker Queue**:
+  - Convert synchronous `POST /investigations` execution into background job submission returning `202 Accepted` with a polling/task status endpoint.
+- [ ] **External Event Bus Streaming Connectors**:
+  - Extend `EventDeliveryWorker` to publish outbox events to external messaging brokers (Redis Streams, Apache Kafka, or HTTP Webhook consumers).
+- [ ] **Containerized PostgreSQL Test Harness in CI**:
+  - Configure GitHub Actions workflow with an automated PostgreSQL 16 container service to run the 30 skipped database integration tests on every pull request.
 
 ---
 

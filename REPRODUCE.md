@@ -27,8 +27,19 @@ cp .env.example .env
 
 ## Running Tests (No API Key Required)
 ```bash
-# Run full test suite — zero real Groq API calls
+# Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
+# Verified outcome: 609 passed, 32 skipped, 1 warning in ~13s
+# (32 skipped: 30 integration tests requiring a live PostgreSQL instance skipped when
+#  SENTINEL_DATABASE_URL is unset; 2 symlink tests skipped on Windows without developer mode)
+
+# Run the 51 incident dataset invariant validation checks
+python tests/validate_incidents.py
+# Verified outcome: 51 passed in ~0.5s
+
+# (Optional) Run live PostgreSQL integration tests (requires running PostgreSQL 16+ instance):
+SENTINEL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sentinel_db \
+  pytest tests/test_postgres_persistence.py tests/test_outbox.py tests/test_persistence_contract.py
 ```
 
 ## Starting the API Server
@@ -141,9 +152,11 @@ curl http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query
 curl -s -X POST http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/resume
 ```
 
-> **Resume Rules:**
-> - **Allowed statuses:** `FAILED` and `PARTIAL`. Resuming re-injects outputs from previously succeeded stages and executes only remaining stages.
-> - **Disallowed statuses:** `COMPLETED` (returns `409 Conflict`) and `RUNNING` (returns `409 Conflict` because an abandoned or active running process cannot be safely distinguished without active leases).
+> **Resume Rules & Lease-Based Crash Recovery:**
+> - **Allowed statuses:** `FAILED`, `PARTIAL`, `PENDING`, and crashed `RUNNING` investigations whose execution lease has expired (`now >= lease_expires_at`).
+> - **Preservation of Progress:** Resuming re-injects outputs from previously succeeded stages and executes only remaining stages.
+> - **Active Lease Protection:** If an investigation is `RUNNING` and holds an active unexpired lease (`is_lease_active() == True`), resume returns `409 Conflict`.
+> - **Terminal Conflict:** Investigations in `COMPLETED` status return `409 Conflict` (already concluded).
 
 ### Record human approval for a fix proposal
 
@@ -164,6 +177,82 @@ curl -s -X POST http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/app
 > - Calling `POST /investigations/{id}/approval` records the genuine human decision (`approved` or `rejected`) with reviewer name and optional notes.
 > - **Prior human decisions cannot be overwritten:** If an explicit human review is already recorded, subsequent approval calls return `409 Conflict`.
 > - **Safety Guarantee:** Recording an approval records the decision metadata in durable state only. It **never** automatically applies patches, modifies repository files, executes shell commands, or deploys code.
+
+### Investigation Event History & Live SSE Streaming
+
+The `GET /investigations/{id}/events` endpoint provides deterministic access to investigation domain events via HTTP content negotiation (`Accept` header):
+
+#### 1. JSON History Snapshot (`Accept: application/json`)
+
+```bash
+# Fetch complete historical event log as a JSON snapshot
+curl -s http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events \
+  -H "Accept: application/json"
+```
+
+**JSON Response Schema (`EventHistoryResponse`):**
+```json
+{
+  "investigation_id": "inc_01_n_plus_one_query",
+  "total": 5,
+  "events": [
+    {
+      "event_id": "evt_01J9XABCDEF1234567890",
+      "investigation_id": "inc_01_n_plus_one_query",
+      "event_type": "InvestigationStarted",
+      "timestamp": "2026-10-10T12:00:00Z",
+      "created_at": "2026-10-10T12:00:00Z",
+      "processed_at": "2026-10-10T12:00:01Z",
+      "status": "processed",
+      "retry_count": 0,
+      "error_message": null,
+      "payload": {
+        "event_id": "evt_01J9XABCDEF1234567890",
+        "event_type": "InvestigationStarted",
+        "timestamp": "2026-10-10T12:00:00Z",
+        "investigation_id": "inc_01_n_plus_one_query",
+        "initial_stage": "logs"
+      }
+    }
+  ],
+  "backend_supports_event_history": true
+}
+```
+
+> **Backend Capability Note:**
+> - When using `SENTINEL_PERSISTENCE_BACKEND=postgres`, event history is read from `event_outbox` in deterministic `(created_at ASC, event_id ASC)` order (`backend_supports_event_history: true`).
+> - When using `SENTINEL_PERSISTENCE_BACKEND=filesystem`, the endpoint truthfully returns `backend_supports_event_history: false` and an empty `events: []` list.
+
+#### 2. Live Server-Sent Events (SSE) Stream (`Accept: text/event-stream`)
+
+```bash
+# Connect to live SSE event stream
+curl -N http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events \
+  -H "Accept: text/event-stream"
+
+# Resume SSE stream after a previously seen event cursor
+curl -N http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events \
+  -H "Accept: text/event-stream" \
+  -H "Last-Event-ID: evt_01J9XABCDEF1234567890"
+
+# Or via query parameter:
+curl -N "http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events?last_event_id=evt_01J9XABCDEF1234567890" \
+  -H "Accept: text/event-stream"
+```
+
+**Wire Protocol & Stream Semantics:**
+- **Wire Format**:
+  ```
+  id: evt_01J9XABCDEF1234567890
+  event: StageCompleted
+  data: {"event_id":"evt_01J9X...","event_type":"StageCompleted","stage":"logs","llm_calls":1,...}
+
+  ```
+- **Cursor Resolution & Keyset Pagination**: Uses keyset pagination querying batches of 200 events strictly after `(created_at, event_id)`. If an unresolvable cursor ID is supplied, the server returns HTTP 200, emits an explicit SSE comment notice, and restarts streaming from the beginning so no events are lost (never failing with HTTP 400).
+- **Keepalives**: Emits periodic `: keep-alive\n\n` comments every 15s during idle polling intervals (0.5s default poll) to prevent intermediate proxy timeouts.
+- **Terminal Stream Draining**: When an investigation transitions to a terminal state (`COMPLETED`, `FAILED`, `PARTIAL`), the stream continuously polls until all pending persisted events are drained, then closes the stream cleanly without emitting synthetic frames.
+- **Client Disconnection**: The streaming generator actively checks `request.is_disconnected()` between polling cycles to release database connections and terminate gracefully.
+- **Filesystem Backend**: If called when filesystem persistence is active, streams an informative notice comment and closes cleanly.
 
 ### Operational limitations
 

@@ -2,6 +2,113 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission12c] - 2026-10-10
+
+### Added
+- **Live SSE Investigation Event Streaming (`api/routes.py`, `api/models.py`)**:
+  - Implemented real-time Server-Sent Events (SSE) streaming on `GET /investigations/{investigation_id}/events` when requested with `Accept: text/event-stream`.
+  - Built using Starlette `StreamingResponse` polling the durable PostgreSQL `event_outbox` table.
+  - Keyset cursor pagination strictly ordered by `(created_at ASC, event_id ASC)` supporting both `Last-Event-ID` header and `last_event_id` query parameter.
+  - Resolved cursor validation: unresolvable cursors return HTTP 200 with an informative SSE comment notice and restart streaming from the beginning (never failing with HTTP 400).
+  - Keyset pagination loop queries bounded pages of 200 events without buffering unbounded history in memory.
+  - Periodic keepalive comments (`: keep-alive\n\n`) emitted every 15s during idle polling periods.
+  - Complete terminal draining: ensures all pending persisted events are drained before cleanly closing the stream upon reaching `COMPLETED`, `FAILED`, or `PARTIAL` states (no synthetic frames emitted).
+  - Client disconnect safety: detects `request.is_disconnected()` to terminate streaming loops cleanly.
+- **Unit & Streaming Tests (`tests/test_event_streaming_api.py`)**:
+  - 22 comprehensive tests covering SSE content negotiation, frame formatting, cursor resolution, keyset pagination beyond 200 events, keepalives, terminal draining, and disconnect handling.
+
+## [2.0.0-mission12b] - 2026-10-08
+
+### Added
+- **Investigation Event History API (`api/routes.py`, `api/models.py`)**:
+  - Implemented `GET /investigations/{investigation_id}/events` endpoint returning JSON event history snapshots with `Accept: application/json`.
+  - Deterministic event ordering strictly adhering to `(created_at ASC, event_id ASC)`.
+  - Explicit event payload allowlisting via typed Pydantic models (`InvestigationEventPayload`, `InvestigationEventItem`, `InvestigationEventsResponse`), preventing raw internal leakages.
+  - Truthful backend capability reporting: returns `backend_supports_event_history: true` on PostgreSQL and `backend_supports_event_history: false` with empty event list on Filesystem.
+  - Added `list_events(investigation_id)` to `PersistenceRepository`, `FilesystemRepository`, and `PostgresRepository`.
+- **Unit Tests (`tests/test_event_history_api.py`)**:
+  - 15 tests verifying event retrieval, payload shape, ordering guarantees, error responses on unknown IDs, and backend capability flags.
+
+## [2.0.0-mission12a] - 2026-10-02
+
+### Added
+- **Execution Leasing & Crash Recovery (`core/domain/state.py`, `core/persistence/postgres.py`)**:
+  - Added distributed execution leases to `InvestigationState`: `lease_owner: Optional[str]`, `lease_expires_at: Optional[datetime]`.
+  - Lease lifecycle methods: `acquire_lease(owner, ttl_seconds)`, `renew_lease(owner, ttl_seconds)`, `release_lease(owner)`, and `is_lease_active(now)`.
+  - Optimistic concurrency control (OCC) guarded lease acquisition and renewal in `PostgresRepository`.
+  - Concurrency protection: active, unexpired leases prevent competing workers from resuming or executing the same investigation, returning `409 Conflict`.
+  - Automatic crash recovery: crashed `RUNNING` investigations whose lease has expired (`now >= lease_expires_at`) can be safely re-acquired and resumed from their last completed stage without re-running earlier stages.
+- **Unit & Integration Tests (`tests/test_investigation_leasing.py`)**:
+  - 26 tests covering lease state transitions, OCC contention, expiry recovery, and API conflict handling.
+
+## [2.0.0-mission11] - 2026-09-30
+
+### Added
+- **Transactional Outbox Persistence (`core/persistence/outbox.py`, `core/persistence/sql/002_outbox_schema.sql`)**:
+  - Created `event_outbox` table schema for reliable, at-least-once event delivery.
+  - Defined `OutboxRepository` interface and integrated outbox persistence into `PostgresRepository.save(state, events)`.
+  - Atomic transactions: state mutations in `investigations` and domain events in `event_outbox` are committed within the same database transaction, eliminating dual-write inconsistency.
+- **Event Delivery Worker (`api/event_worker/`)**:
+  - Implemented `EventDeliveryWorker` background service polling pending outbox records (`processed_at IS NULL AND retry_count < max_retries`), ordered by `created_at ASC, id ASC`.
+  - Dispatches events to `EventBus` subscribers with deduplication by unique `event_id`.
+  - Exponential backoff retry handler recording `last_error` and incrementing `retry_count`.
+  - CLI runner `python -m api.event_worker` and `make worker`.
+- **Unit & Integration Tests (`tests/test_outbox.py`, `tests/test_event_worker.py`)**:
+  - 22 tests verifying atomic outbox writes, batch fetching, retry incrementing, processed timestamp updates, worker loop dispatch, and error handling.
+
+## [2.0.0-mission10] - 2026-09-19
+
+### Added
+- **Investigation Resume & Approval Endpoints (`api/routes.py`, `api/models.py`)**:
+  - `POST /investigations/{id}/resume`: resumes interrupted investigations from durable storage, executing only remaining stages.
+  - `POST /investigations/{id}/approval`: records human review decisions (`decision: APPROVED | REJECTED`, `approver`, `notes`) into `ApprovalRecord`.
+  - Strict Safety Boundary: recording approval **NEVER** applies code patches to disk or executes modifications; it records the human decision exclusively.
+  - Input validation: rejects invalid decisions and ensures investigation exists.
+- **Unit Tests (`tests/test_api.py`)**:
+  - Extended API test suite covering resume state transitions, approval validation, and safety invariants.
+
+## [2.0.0-mission09] - 2026-09-19
+
+### Added
+- **API Server Launcher & CLI Entry Point (`api/__main__.py`, `Makefile`)**:
+  - Added CLI launcher supporting `--host`, `--port`, `--reload`, and `--log-level` arguments.
+  - Added `make serve` and `make worker` convenience targets in `Makefile`.
+  - Integrated Uvicorn ASGI server execution with graceful shutdown handling.
+
+## [2.0.0-mission08] - 2026-09-17
+
+### Added
+- **Complete HTTP API Layer (`api/app.py`, `api/routes.py`, `api/models.py`, `api/errors.py`)**:
+  - Starlette application framework with structured JSON routing and error middleware.
+  - `GET /health`: system health check, persistence backend status, and queue metrics.
+  - `POST /investigations`: synchronous investigation initiation for a target `incident_id` with input validation.
+  - `GET /investigations`: paginated investigation listing with status filters.
+  - `GET /investigations/{id}`: single investigation retrieval.
+  - Strict input validation rejecting path traversal attacks, non-existent directories, and malformed identifiers.
+- **API Test Suite (`tests/test_api.py`)**:
+  - 30+ tests verifying route contracts, pagination, status filtering, error mappings, and security boundaries.
+
+## [2.0.0-mission07] - 2026-09-17
+
+### Added
+- **LLM Provider Abstraction Layer (`core/llm/`)**:
+  - Created `BaseLLMClient` abstract interface (`core/llm/base.py`).
+  - Implemented `GroqLLMClient` (`core/llm/groq.py`) with support for unstructured generation and schema-enforced structured generation.
+  - Provider factory (`core/llm/factory.py`) with environment-based configuration.
+  - Rate-limit backoff handling, secret sanitization, and session token telemetry.
+- **Unit Tests (`tests/test_llm_provider.py`)**:
+  - 17 unit tests verifying provider abstraction, factory instantiation, error wrapping, and token usage accounting.
+
+## [2.0.0-mission06] - 2026-09-13
+
+### Added
+- **Tool Abstraction Layer (`core/tools/`)**:
+  - Created `BaseTool` abstract base class, `ToolRegistry`, `ToolContext`, and `ToolResult` (`core/tools/`).
+  - Builtin tool implementations for log parsing (`core/tools/builtin/logs.py`) and code analysis (`core/tools/builtin/code.py`).
+  - Path safety engine enforcing incident root boundaries, rejecting path traversal attempts, and blocking symlink escapes.
+- **Unit Tests (`tests/test_tools.py`)**:
+  - 32 tests verifying tool registration, deterministic execution, schema conformance, and boundary isolation.
+
 ## [2.0.0-mission05] - 2026-09-12
 
 ### Added
@@ -445,8 +552,8 @@ All notable changes and iterative improvements to the Sentinel project will be d
 ## [Unreleased]
 
 ### Planned Next
-- Fix Proposal Agent and Human Approval Gate (strict "AWAITING HUMAN APPROVAL" notice; auto-apply strictly forbidden).
-- Orchestrator: end-to-end multi-agent pipeline wiring (Logs → Metrics → Code → Hypotheses → Verification → Report).
-- Comparative Sentinel evaluation benchmark (Baseline 10/10 vs. Advanced) across all 10 incidents with Root Cause Accuracy + Verification Rigor scores.
+- Asynchronous investigation execution and background task queue (`202 Accepted`) for non-blocking HTTP investigation submissions.
+- External event bus publisher plugins (Redis Streams, Apache Kafka, outgoing Webhooks) for `EventDeliveryWorker`.
+- Containerized PostgreSQL test harness automation for running the 30 skipped database integration tests in CI.
 
 
