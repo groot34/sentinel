@@ -2,20 +2,20 @@
 
 **Audit Date**: 2026-10-13<br>
 **Branch**: `main`<br>
-**Current HEAD Commit**: `1506904` (*feat: add live SSE investigation event streaming*)<br>
-**Working Tree Status**: Clean (no uncommitted tracked or untracked changes)
+**Base Commit**: `dfee61a` (*docs: reconcile Sentinel 2.0 architecture and project status*)<br>
+**Working Tree Status**: Active implementation of Mission 13 (Async Investigation Dispatch)
 
 ---
 
 ## 1. Executive Summary & Verification Baseline
 
-This audit establishes the verified state of the Sentinel repository following the completion and verification of Sentinel 2.0 Mission 12C. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
+This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 13 (Async Investigation Dispatch & Background Execution). All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
 
 ### Current Test Suite & Verification Results
 
-- **Pytest Suite**: **609 passed, 32 skipped, 1 warning** (641 collected in ~13s).
+- **Pytest Suite**: **652 passed, 32 skipped, 1 warning** (685 collected in ~14s).
 - **Incident Dataset Integrity Suite** (`tests/validate_incidents.py`): **51 / 51 passed** (100%).
-- **Total Passing Automated Checks**: **660 passed**.
+- **Total Passing Automated Checks**: **703 passed**.
 
 #### Explanation of Skipped Tests & Warnings
 1. **Windows Symlink Security Tests (2 skipped)**: `tests/test_api.py::test_create_investigation_symlink_attack_rejected` and `test_symlink_security_in_api` are skipped because standard Windows user accounts without Developer Mode cannot create filesystem symbolic links.
@@ -58,6 +58,7 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 | **Mission 12A**| `7ce43bc` | 2026-10-02 | Execution Leasing & Crash Recovery: `lease_owner`, `lease_expires_at`, OCC lease claims, `is_lease_active()`, safe recovery of crashed `RUNNING` investigations. |
 | **Mission 12B**| `ac676ed` | 2026-10-08 | Investigation Event History API: `GET /investigations/{id}/events` with `Accept: application/json`, payload allowlisting, truthful `backend_supports_event_history=False` on filesystem. |
 | **Mission 12C**| `1506904` | 2026-10-10 | Live Investigation Event Streaming via SSE: `GET /investigations/{id}/events` with `Accept: text/event-stream`, keyset pagination `(created_at ASC, event_id ASC)`, `Last-Event-ID` resume, keepalives, terminal stream draining. |
+| **Mission 13** | Pending commit | 2026-10-13 | Async Investigation Dispatch & Background Execution: opt-in `Prefer: respond-async` / `?async=true` returning `202 Accepted` with `AcceptedInvestigationResponse`, immediate queryability and SSE connectivity, durable lease ownership acquired before 202 acceptance with PostgreSQL OCC protection (`ConcurrencyError` -> 409), continuous worker ID ownership throughout dispatch and execution, Starlette `BackgroundTask` execution, process-local slot registry, and failure state handling. |
 
 ---
 
@@ -81,12 +82,12 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 | Endpoint | Method | Status Codes | Description |
 |---|---|---|---|
 | `/health` | `GET` | 200 | Returns system status, persistence backend, and outbox queue stats. |
-| `/investigations` | `POST` | 201, 400, 500 | Creates and runs an investigation synchronously for an incident identifier (`incident_id`). |
+| `/investigations` | `POST` | 200, 202, 400, 409, 500 | Runs an investigation for an `incident_id`. Default: synchronous (`200 OK`). Opt-in async via `Prefer: respond-async` or `?async=true` (`202 Accepted`). |
 | `/investigations` | `GET` | 200 | Paginated list of investigations with optional status filter. |
-| `/investigations/{id}` | `GET` | 200, 404 | Retrieves complete investigation state and summary. |
-| `/investigations/{id}/resume` | `POST` | 200, 400, 404, 409 | Resumes an interrupted investigation. Rejects active leases with 409 Conflict. |
-| `/investigations/{id}/approval` | `POST` | 200, 400, 404 | Records human approval/rejection decision. Patch is never auto-applied. |
-| `/investigations/{id}/events` | `GET` | 200, 400, 404 | Dual-mode: JSON snapshot (`application/json`) or live SSE stream (`text/event-stream`). |
+| `/investigations/{id}` | `GET` | 200, 404 | Retrieves complete investigation state and summary. Immediately queryable after 202 acceptance. |
+| `/investigations/{id}/resume` | `POST` | 200, 202, 400, 404, 409 | Resumes an interrupted investigation. Rejects active leases with 409 Conflict. Default: synchronous (`200 OK`). Opt-in async (`202 Accepted`). |
+| `/investigations/{id}/approval` | `POST` | 200, 400, 404, 409 | Records human approval/rejection decision. Patch is never auto-applied. |
+| `/investigations/{id}/events` | `GET` | 200, 400, 404 | Dual-mode: JSON snapshot (`application/json`) or live SSE stream (`text/event-stream`). Immediately connectable after 202 acceptance. |
 
 ### 3.5 Event History & SSE Streaming Semantics
 - **Content Negotiation**: Driven strictly by the `Accept` request header.
@@ -112,10 +113,10 @@ Prior to this reconciliation, documentation had drifted significantly across the
 
 ---
 
-## 5. Remaining Engineering Work (Post-Mission 12C)
+## 5. Remaining Engineering Work (Post-Mission 13)
 
 The following work represents genuine upcoming engineering tasks, clearly separated from documentation reconciliation:
-1. **Asynchronous HTTP Dispatch & Background Worker Queue**: The current `POST /investigations` endpoint executes the orchestrator synchronously within the request-response cycle. Converting this to asynchronous job submission (`202 Accepted`) backed by a distributed task runner or message broker remains an open enhancement.
+1. **Distributed Task Queue Integration**: Mission 13 implemented in-process asynchronous dispatch via Starlette `BackgroundTask`. Extending this to durable external queues (e.g. Celery, Redis Streams, Temporal, or BullMQ) across distributed worker pools remains an optional future enterprise enhancement.
 2. **External Event Bus Integrations**: `EventDeliveryWorker` currently publishes to the in-memory bus; integrating Redis, Kafka, or webhook publishers for external consumer systems.
 3. **Live PostgreSQL CI/CD Automation**: Configuring automated PostgreSQL containers in CI workflows so the 30 skipped database integration tests run on every push.
 

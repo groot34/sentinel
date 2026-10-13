@@ -29,7 +29,7 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome: 609 passed, 32 skipped, 1 warning in ~13s
+# Verified outcome: 652 passed, 32 skipped, 1 warning in ~14s
 # (32 skipped: 30 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset; 2 symlink tests skipped on Windows without developer mode)
 
@@ -131,9 +131,51 @@ curl -s -X POST http://127.0.0.1:8000/investigations \
   -d '{"incident_id": "inc_01_n_plus_one_query"}'
 ```
 
-> **Note:** `POST /investigations` blocks until the full pipeline completes.
+> **Note:** Synchronous `POST /investigations` blocks until the full pipeline completes.
 > Ensure `GROQ_API_KEY` is set and the incident directory exists under `incidents/`.
 > The human approval gate is always active; proposed patches are never applied automatically.
+
+### Submit an investigation (asynchronous)
+
+Clients can opt into asynchronous investigation execution by supplying the standard
+RFC 7240 `Prefer: respond-async` request header or `?async=true` query parameter:
+
+```bash
+# Opt-in via Prefer: respond-async header
+curl -i -X POST http://127.0.0.1:8000/investigations \
+  -H "Content-Type: application/json" \
+  -H "Prefer: respond-async" \
+  -d '{"incident_id": "inc_01_n_plus_one_query"}'
+
+# Or via query parameter
+curl -i -X POST "http://127.0.0.1:8000/investigations?async=true" \
+  -H "Content-Type: application/json" \
+  -d '{"incident_id": "inc_01_n_plus_one_query"}'
+```
+
+**202 Accepted Response:**
+```http
+HTTP/1.1 202 Accepted
+Preference-Applied: respond-async
+Location: http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query
+Content-Type: application/json
+
+{
+  "investigation_id": "inc_01_n_plus_one_query",
+  "status": "RUNNING",
+  "message": "Investigation 'inc_01_n_plus_one_query' accepted for asynchronous execution. Poll status_url or connect to events_url to track progress.",
+  "status_url": "http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query",
+  "events_url": "http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events"
+}
+```
+
+> **Async Dispatch & Lifecycle Guarantees:**
+> - Initial `InvestigationState` is durably persisted and execution lease acquired under a unique `worker_id` before returning `202 Accepted`.
+> - On async resume, durable execution lease is acquired under PostgreSQL OCC before returning `202 Accepted`; competing resume claims return `409 Conflict`, never `202`.
+> - The investigation is immediately queryable via `status_url` (`GET /investigations/{id}`).
+> - Clients can immediately connect to `events_url` (`GET /investigations/{id}/events` with `Accept: text/event-stream`) without race conditions.
+> - Background work executes via Starlette `BackgroundTask` in the server thread pool under the matching `worker_id`, preserving completed stages.
+> - If an unhandled exception occurs in the background, state transitions to `FAILED`, the lease is released, and diagnostic errors are persisted.
 
 ### List and retrieve investigations
 
@@ -148,8 +190,12 @@ curl http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query
 ### Resume an interrupted/failed investigation
 
 ```bash
-# Resume from the first incomplete/failed stage (reuses previously succeeded stages)
+# Synchronous resume (default): blocks until resumed pipeline finishes
 curl -s -X POST http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/resume
+
+# Asynchronous resume (opt-in): returns 202 Accepted immediately and runs in background
+curl -i -X POST http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/resume \
+  -H "Prefer: respond-async"
 ```
 
 > **Resume Rules & Lease-Based Crash Recovery:**

@@ -362,13 +362,28 @@ To prevent multiple server workers from executing or resuming the same investiga
 
 The Sentinel 2.0 API is built on Starlette and served via Uvicorn (`api/app.py`, `api/routes.py`, `api/models.py`):
 - `GET /health`: Returns service health, persistence backend in use (`filesystem` or `postgres`), and outbox backlog status.
-- `POST /investigations`: Initiates an investigation given an `incident_id`. Validates input paths and returns `201 Created` with full investigation state.
+- `POST /investigations`: Initiates an investigation given an `incident_id`. Validates input paths.
+  - **Synchronous Mode (Default)**: Blocks until pipeline completes, returning `200 OK` with full investigation state.
+  - **Asynchronous Mode (`Prefer: respond-async` or `?async=true`)**: Validates input, persists initial `RUNNING` state with lease, schedules execution in a background task, and returns `202 Accepted` with `AcceptedInvestigationResponse` (`investigation_id`, `status: RUNNING`, `message`, `status_url`, `events_url`) and `Location` header.
 - `GET /investigations`: Lists investigations with pagination (`limit`, `offset`) and optional status filters.
-- `GET /investigations/{id}`: Retrieves complete state and summary for a single investigation (`200 OK` or `404 Not Found`).
+- `GET /investigations/{id}`: Retrieves complete state and summary for a single investigation (`200 OK` or `404 Not Found`). Immediately queryable following 202 acceptance.
 - `POST /investigations/{id}/resume`: Re-enters an interrupted or incomplete investigation (`PENDING`, `PARTIAL`, `FAILED`, or `RUNNING` with an expired lease). Rejects active unexpired leases with `409 Conflict`.
+  - Supports synchronous execution (`200 OK`) and opt-in async execution (`202 Accepted` with `Prefer: respond-async` or `?async=true`).
 - `POST /investigations/{id}/approval`: Records a human decision (`decision: APPROVED | REJECTED`, `approver`, `notes`).
   > **Crucial Safety Rule**: Approval records the human decision in `ApprovalRecord` **ONLY**. It **NEVER** applies code patches to disk or modifies git state.
 - `GET /investigations/{id}/events`: Content-negotiated event retrieval endpoint supporting JSON snapshots and live SSE streaming.
+
+#### Asynchronous Dispatch Lifecycle & Limitations
+1. **Durable Ownership & Persistence Pre-Condition (Before `202 Accepted`)**:
+   - **Async Creation**: Sentinel atomically registers a process-local slot, generates a unique worker identifier (`worker_id`), acquires an execution lease on `initial_state`, and durably persists `status = RUNNING` before returning `202 Accepted`. The exact same `worker_id` is passed directly to the background `IncidentOrchestrator`, ensuring continuous agreement across persisted lease, active registry, and executing worker with zero handoff race window.
+   - **Async Resume**: Sentinel validates resumability, acquires durable execution ownership in the repository under PostgreSQL optimistic concurrency control (OCC via `version` token assertion), transitions state to `RUNNING`, and saves the updated lease before returning `202 Accepted`. Competing resume requests across processes on PostgreSQL encounter `ConcurrencyError` and return `409 Conflict`, never `202`. If persistence or lease acquisition fails, the process-local registry slot is immediately cleared and an error response (`409`, `503`, or `500`) is returned.
+   - **Immediate Queryability & Streaming**: Because durable ownership and state are committed before the response, clients can immediately query `status_url` (`GET /investigations/{id}`) and connect to `events_url` (`GET /investigations/{id}/events` via SSE) without race conditions.
+2. **Background Execution**: Investigation work executes via Starlette `BackgroundTask` running within the server thread pool under the matching worker ID, preserving all previously completed stages. Process-local registry slots are released in a strict `finally` block upon completion or failure.
+3. **Failure State Transition**: Unhandled exceptions in background tasks persist `status = FAILED` and release the execution lease, preventing orphaned `RUNNING` states.
+4. **Process-Exit Boundary & Backend Concurrency Guarantees**:
+   - In-process background tasks do not constitute an external distributed task queue. If the API process terminates unexpectedly during execution, the investigation lease naturally expires after its TTL (default 300s). Once expired, the investigation can be safely resumed via `POST /investigations/{id}/resume`.
+   - **PostgreSQL**: Guarantees cross-process mutual exclusion via row-level locks and OCC `version` increments on lease acquisition and state save.
+   - **Filesystem**: Guarantees atomic file writes and in-process mutual exclusion via threading locks, but cannot provide cross-process OCC race protection.
 
 ### 3.7 JSON Event History Snapshot & Live SSE Streaming
 

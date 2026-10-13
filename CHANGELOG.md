@@ -2,6 +2,24 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission13] - Unreleased
+
+### Added
+- **Async Investigation Dispatch & Background Execution (`api/routes.py`, `api/models.py`)**:
+  - Implemented opt-in asynchronous investigation execution on `POST /investigations` and `POST /investigations/{id}/resume` via standard RFC 7240 `Prefer: respond-async` request header or `?async=true` query parameter.
+  - Synchronous execution remains default and returns `200 OK` upon pipeline completion.
+  - Added strictly validated `AcceptedInvestigationResponse` model returning `202 Accepted` with `investigation_id`, `status: "RUNNING"`, `message`, `status_url`, and `events_url`.
+  - Emits standard `Preference-Applied: respond-async` and `Location: <status_url>` response headers on 202 acceptance.
+  - Enforced pre-acceptance durable state persistence and lease acquisition: on async creation, `initial_state` is leased with a unique `worker_id` and saved before returning 202; the matching `worker_id` is passed directly to the background orchestrator, guaranteeing continuous agreement across persisted lease, active registry, and executing worker.
+  - Enforced pre-202 durable ownership on async resume: state is loaded and leased under PostgreSQL optimistic concurrency control (OCC) before returning 202; competing resume claims raise `ConcurrencyError` mapped to `409 Conflict`, ensuring competing workers across processes cannot both be accepted.
+  - Immediate queryability and connectivity: clients can immediately poll `status_url` and stream from `events_url` (SSE / JSON) with zero handoff race window.
+  - Background pipeline execution managed cleanly via Starlette `BackgroundTask` under the acquired `worker_id`, preserving completed stages.
+  - Process-local concurrency protection via atomic slot registry, preventing duplicate concurrent runs in the same process and safely releasing claims in `finally` blocks.
+  - Safe error recovery: unhandled background pipeline exceptions automatically transition state to `status = FAILED`, release the execution lease, and clear the process-local slot, ensuring investigations are not stranded in false `RUNNING` status.
+  - Documented in-process background execution boundary: process termination relies on execution lease TTL expiry (default 300s) for subsequent resume.
+- **Unit & Concurrency Tests (`tests/test_async_dispatch.py`)**:
+  - 43 deterministic tests verifying 202 response schema, header assertions, immediate state queryability, SSE stream connectivity, duplicate execution rejection (persisted and in-process), synchronous fallback preservation, async resume, completed stage preservation, consistent worker ID lease ownership, pre-202 durable ownership on resume, OCC conflict handling (409 mapping), persistence failure error handling (503 mapping), lease release, and failure state transitions.
+
 ## [2.0.0-mission12c] - 2026-10-10
 
 ### Added

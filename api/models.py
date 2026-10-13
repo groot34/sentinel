@@ -92,6 +92,31 @@ class CreateInvestigationResponse(BaseModel):
     human_approval_notice: str
 
 
+# Opt-in header value for asynchronous investigation dispatch (RFC 7240).
+PREFER_ASYNC_HEADER_VALUE = "respond-async"
+
+
+class AcceptedInvestigationResponse(BaseModel):
+    """Response schema for 202 Accepted async investigation dispatch.
+
+    Returned when the client sends ``Prefer: respond-async`` on
+    POST /investigations or POST /investigations/{id}/resume.
+
+    Guarantees:
+    - The initial investigation state is persisted before this response is sent.
+    - The investigation is immediately queryable via ``status_url``.
+    - The SSE stream is immediately connectable via ``events_url`` and will
+      replay any already-persisted events followed by live events.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str = Field(..., description="Unique investigation identifier")
+    status: str = Field(..., description="Current investigation status (always RUNNING at acceptance)")
+    message: str = Field(..., description="Human-readable acceptance message")
+    status_url: str = Field(..., description="URL for polling investigation state (GET)")
+    events_url: str = Field(..., description="URL for SSE live event stream or JSON event history (GET)")
+
+
 _PROPOSAL_ID_REGEX = re.compile(r"^FIX-[0-9]{3}$")
 
 

@@ -14,7 +14,7 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **609 passed, 32 skipped, 1 warning** |
+| Automated tests | — | **652 passed, 32 skipped, 1 warning** |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
@@ -314,7 +314,7 @@ cp .env.example .env
 ```bash
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
-# Verified result: 609 passed, 32 skipped, 1 warning in ~13s
+# Verified result: 652 passed, 32 skipped, 1 warning in ~14s
 # (32 skipped: 30 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is unset;
 #  2 Windows symlink tests skipped for non-admin accounts without Developer Mode)
 
@@ -369,11 +369,36 @@ curl -s http://127.0.0.1:8000/health
 ```
 
 #### 2. Create & Run an Investigation
+
+**Synchronous Execution (Default, blocks until pipeline completes):**
 ```bash
 curl -s -X POST http://127.0.0.1:8000/investigations \
   -H "Content-Type: application/json" \
   -d '{"incident_id": "inc_01_n_plus_one_query"}'
 ```
+
+**Asynchronous Execution (Opt-in via `Prefer: respond-async` or `?async=true`):**
+```bash
+curl -i -X POST http://127.0.0.1:8000/investigations \
+  -H "Content-Type: application/json" \
+  -H "Prefer: respond-async" \
+  -d '{"incident_id": "inc_01_n_plus_one_query"}'
+```
+Returns `202 Accepted` immediately with `AcceptedInvestigationResponse`:
+```json
+{
+  "investigation_id": "inc_01_n_plus_one_query",
+  "status": "RUNNING",
+  "message": "Investigation 'inc_01_n_plus_one_query' accepted for asynchronous execution. Poll status_url or connect to events_url to track progress.",
+  "status_url": "http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query",
+  "events_url": "http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events"
+}
+```
+Response headers include:
+- `Preference-Applied: respond-async`
+- `Location: http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query`
+
+Initial state is persisted and lease claimed before the `202 Accepted` response is returned. Clients can immediately poll `status_url` or connect to `events_url` (SSE stream) to observe live progress as the pipeline executes in the background.
 
 #### 3. List Investigations
 ```bash
@@ -387,9 +412,12 @@ curl -s http://127.0.0.1:8000/investigations/<investigation_id>
 
 #### 5. Resume an Investigation
 ```bash
-# Resumes an interrupted or failed investigation from its last completed stage
-# If an active unexpired lease is held by another worker, returns 409 Conflict
+# Synchronous resume (default): blocks until resumed pipeline finishes
 curl -s -X POST http://127.0.0.1:8000/investigations/<investigation_id>/resume
+
+# Asynchronous resume (opt-in): returns 202 Accepted and runs in background
+curl -s -X POST http://127.0.0.1:8000/investigations/<investigation_id>/resume \
+  -H "Prefer: respond-async"
 ```
 
 #### 6. Record Human Approval Decision

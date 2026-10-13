@@ -92,12 +92,23 @@
   - Bounded pagination loop (200-event pages) with complete draining of pending persisted events before closing cleanly on terminal states (`COMPLETED`, `FAILED`, `PARTIAL`) without emitting synthetic frames.
   - Client disconnect detection via `request.is_disconnected()`.
   - 22 tests in `tests/test_event_streaming_api.py`.
+- [x] **Mission 13: Async Investigation Dispatch & Background Execution** (2026-10-13)
+  - Implemented opt-in asynchronous investigation execution via RFC 7240 `Prefer: respond-async` request header or `?async=true` query parameter on `POST /investigations`.
+  - Implemented opt-in asynchronous resume on `POST /investigations/{id}/resume` with `Prefer: respond-async` or `?async=true`.
+  - Created `AcceptedInvestigationResponse` model returning `202 Accepted` with `investigation_id`, `status: RUNNING`, `message`, `status_url`, and `events_url`.
+  - Standard response headers: `Preference-Applied: respond-async` and `Location: <status_url>`.
+  - Unified execution ownership handoff: unique `worker_id` is established during pre-flight and passed to `IncidentOrchestrator`, ensuring persisted lease, active registry, and executing worker remain aligned continuously with zero handoff race window.
+  - Pre-202 durable ownership on resume: durable lease is acquired in repository under PostgreSQL OCC before returning `202 Accepted`; competing resume claims encounter `ConcurrencyError` and return `409 Conflict`, never `202`.
+  - Background execution managed via Starlette `BackgroundTask` under the acquired `worker_id`, preserving completed stages.
+  - Process-local active slot registry prevents duplicate concurrent execution within a single server process.
+  - Background failure recovery: unhandled exceptions persist `FAILED` status, preventing orphaned `RUNNING` states.
+  - 43 tests in `tests/test_async_dispatch.py` (652 passed, 32 skipped, 1 warning total pytest suite).
 
 ---
 
-## Post-Mission 12C Remaining Engineering Work
-- [ ] **Asynchronous HTTP Dispatch & Background Worker Queue**:
-  - Convert synchronous `POST /investigations` execution into background job submission returning `202 Accepted` with a polling/task status endpoint.
+## Post-Mission 13 Remaining Engineering Work
+- [ ] **Distributed Task Queue Integration**:
+  - Extend in-process background execution to durable external task queues (Redis Streams, Celery, Temporal, or BullMQ) across multi-node worker clusters.
 - [ ] **External Event Bus Streaming Connectors**:
   - Extend `EventDeliveryWorker` to publish outbox events to external messaging brokers (Redis Streams, Apache Kafka, or HTTP Webhook consumers).
 - [ ] **Containerized PostgreSQL Test Harness in CI**:

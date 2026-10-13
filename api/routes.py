@@ -21,6 +21,7 @@ from api.models import (
     _SAFE_ID_REGEX,
     _format_sse_event,
     _project_event_payload,
+    AcceptedInvestigationResponse,
     ApprovalRecordResponse,
     CreateInvestigationRequest,
     CreateInvestigationResponse,
@@ -30,11 +31,14 @@ from api.models import (
     HealthResponse,
     InvestigationSummaryResponse,
     ListInvestigationsResponse,
+    PREFER_ASYNC_HEADER_VALUE,
     StageSummaryResponse,
     SubmitApprovalRequest,
     SubmitApprovalResponse,
 )
 from core.domain.models import ApprovalRecord, IncidentStatus
+from core.domain.state import InvestigationState
+from starlette.background import BackgroundTask
 from core.persistence import ConcurrencyError, PersistenceError, PersistenceRepository
 logger = logging.getLogger(__name__)
 
@@ -117,6 +121,148 @@ def _release_investigation(incident_id: str) -> None:
         _ACTIVE_INVESTIGATIONS.discard(incident_id)
 
 
+def _build_accepted_response(
+    incident_id: str,
+    request: Request,
+    background: Optional[Any] = None,
+) -> JSONResponse:
+    """Build a 202 Accepted JSON response for async investigation dispatch.
+
+    The base URL is derived from the request so that status/event URLs
+    resolve correctly regardless of the server host, port, or mount prefix.
+    """
+    base = str(request.base_url).rstrip("/")
+    status_url = f"{base}/investigations/{incident_id}"
+    events_url = f"{base}/investigations/{incident_id}/events"
+    resp = AcceptedInvestigationResponse(
+        investigation_id=incident_id,
+        status="RUNNING",
+        message=(
+            f"Investigation '{incident_id}' accepted for asynchronous execution. "
+            "Poll status_url or connect to events_url to track progress."
+        ),
+        status_url=status_url,
+        events_url=events_url,
+    )
+    return JSONResponse(
+        status_code=202,
+        content=resp.model_dump(),
+        background=background,
+        headers={
+            "Preference-Applied": "respond-async",
+            "Location": status_url,
+        },
+    )
+
+
+def _run_investigation_background(
+    incident_id: str,
+    candidate_path: Any,
+    repository: Optional[PersistenceRepository],
+    llm_client: Optional[Any],
+    worker_id: Optional[str] = None,
+) -> None:
+    """Background task: run the investigation pipeline and persist final state.
+
+    This function runs in a Starlette BackgroundTask (a thread-pool thread).
+    Ownership is claimed via the process-local registry and durable lease
+    **before** this task is scheduled, using the same worker_id to guarantee
+    ownership continuity between dispatch and execution.
+    Ownership is released in the finally block here.
+
+    Process-exit limitation: if the API process exits while this task is
+    running, the investigation lease will expire after its TTL (default 300 s).
+    Once the lease expires, any worker can acquire it and resume the
+    investigation via POST /investigations/{id}/resume. There is no durable
+    job queue; recovery depends entirely on lease expiry and explicit client
+    resume calls.
+    """
+    try:
+        orchestrator = IncidentOrchestrator(
+            llm_client=llm_client,
+            non_interactive=True,
+            repository=repository,
+            worker_id=worker_id,
+        )
+        orchestrator.investigate(candidate_path)
+    except Exception as exc:
+        logger.exception(
+            "Background investigation failed for '%s': %s",
+            incident_id,
+            exc,
+        )
+        # Attempt to mark the investigation FAILED so it doesn't stay RUNNING
+        if repository is not None:
+            try:
+                state = repository.load(incident_id)
+                if state is not None:
+                    status_val = (
+                        state.status.value
+                        if hasattr(state.status, "value")
+                        else str(state.status)
+                    )
+                    if status_val not in ("COMPLETED", "FAILED", "PARTIAL"):
+                        state.fail(error=f"Background execution failed: {type(exc).__name__}")
+                        repository.save(state)
+            except Exception as persist_exc:
+                logger.error(
+                    "Failed to persist FAILED state for '%s' after background error: %s",
+                    incident_id,
+                    persist_exc,
+                )
+    finally:
+        _release_investigation(incident_id)
+
+
+def _run_resume_background(
+    incident_id: str,
+    candidate_path: Any,
+    repository: Optional[PersistenceRepository],
+    llm_client: Optional[Any],
+    worker_id: Optional[str] = None,
+) -> None:
+    """Background task: resume an investigation pipeline and persist final state.
+
+    Same process-exit and recovery semantics as _run_investigation_background.
+    Executes under the same worker_id acquired durably before HTTP 202 acceptance.
+    """
+    try:
+        orchestrator = IncidentOrchestrator(
+            llm_client=llm_client,
+            non_interactive=True,
+            repository=repository,
+            worker_id=worker_id,
+        )
+        orchestrator.resume(investigation_id=incident_id, incident_dir=candidate_path)
+    except Exception as exc:
+        logger.exception(
+            "Background resume failed for '%s': %s",
+            incident_id,
+            exc,
+        )
+        # Attempt to mark the investigation FAILED so it doesn't stay RUNNING
+        if repository is not None:
+            try:
+                state = repository.load(incident_id)
+                if state is not None:
+                    status_val = (
+                        state.status.value
+                        if hasattr(state.status, "value")
+                        else str(state.status)
+                    )
+                    if status_val not in ("COMPLETED", "FAILED", "PARTIAL"):
+                        state.fail(error=f"Background resume failed: {type(exc).__name__}")
+                        repository.save(state)
+            except Exception as persist_exc:
+                logger.error(
+                    "Failed to persist FAILED state for '%s' after background resume error: %s",
+                    incident_id,
+                    persist_exc,
+                )
+    finally:
+        _release_investigation(incident_id)
+
+
 def _validate_id_param(investigation_id: str) -> str:
     """Validate a path parameter investigation ID."""
     if not isinstance(investigation_id, str):
@@ -194,7 +340,11 @@ def health(request: Request) -> JSONResponse:
 
 
 def create_investigation(request: Request) -> JSONResponse:
-    """POST /investigations - Synchronously run an incident investigation."""
+    """POST /investigations - Run an incident investigation.
+
+    Default: synchronous execution (200 OK with full result).
+    Opt-in async: send ``Prefer: respond-async`` header for 202 Accepted.
+    """
     try:
         raw_body = getattr(request, "_body", None)
         if raw_body is None:
@@ -232,7 +382,52 @@ def create_investigation(request: Request) -> JSONResponse:
     repository = getattr(request.app.state, "repository", None)
     llm_client = getattr(request.app.state, "llm_client", None)
 
-    # Perform atomic process-local claim & persisted state check
+    # --- Async opt-in: Prefer: respond-async or ?async=true ---
+    prefer_header = request.headers.get("prefer", "").strip().lower()
+    async_param = request.query_params.get("async", "").strip().lower()
+    is_async = prefer_header == PREFER_ASYNC_HEADER_VALUE or async_param in ("true", "1")
+
+    if is_async:
+        # Claim process-local slot and validate no existing persisted state
+        _claim_investigation(incident_id, repository, allow_resume=False)
+        # Persist initial RUNNING state with durable lease BEFORE returning 202
+        # so the investigation is immediately queryable and leased under the same worker_id.
+        import uuid as _uuid
+        worker_id = f"worker-{_uuid.uuid4().hex[:8]}"
+        try:
+            initial_state = InvestigationState(incident_id=incident_id)
+            initial_state.acquire_lease(owner_id=worker_id, ttl_seconds=300)
+            if repository is not None:
+                repository.save(initial_state)
+        except ConcurrencyError as ce:
+            _release_investigation(incident_id)
+            logger.warning("OCC conflict during async create for '%s': %s", incident_id, ce)
+            return error_json_response(409, "conflict", str(ce))
+        except PersistenceError as pe:
+            _release_investigation(incident_id)
+            logger.error("Persistence error during async create for '%s': %s", incident_id, pe)
+            return error_json_response(503, "persistence_unavailable", str(pe))
+        except Exception as setup_exc:
+            _release_investigation(incident_id)
+            logger.error("Async setup failed for '%s': %s", incident_id, setup_exc)
+            return error_json_response(
+                500,
+                "internal_error",
+                "Failed to initialize async investigation state.",
+            )
+        # Schedule the real pipeline as a background task with the exact same worker_id.
+        # _run_investigation_background releases the process-local claim in its finally.
+        bg = BackgroundTask(
+            _run_investigation_background,
+            incident_id,
+            candidate_path,
+            repository,
+            llm_client,
+            worker_id,
+        )
+        return _build_accepted_response(incident_id, request, background=bg)
+
+    # --- Default: synchronous execution ---
     _claim_investigation(incident_id, repository, allow_resume=False)
 
     try:
@@ -249,7 +444,11 @@ def create_investigation(request: Request) -> JSONResponse:
 
 
 def resume_investigation(request: Request) -> JSONResponse:
-    """POST /investigations/{investigation_id}/resume - Resume an interrupted/failed investigation."""
+    """POST /investigations/{investigation_id}/resume - Resume an interrupted/failed investigation.
+
+    Default: synchronous execution (200 OK with full result).
+    Opt-in async: send ``Prefer: respond-async`` header for 202 Accepted.
+    """
     raw_id = request.path_params.get("investigation_id", "")
     try:
         safe_id = _validate_id_param(raw_id)
@@ -278,7 +477,71 @@ def resume_investigation(request: Request) -> JSONResponse:
 
     llm_client = getattr(request.app.state, "llm_client", None)
 
-    # Perform atomic process-local claim & persisted state check with allow_resume=True
+    # --- Async opt-in: Prefer: respond-async or ?async=true ---
+    prefer_header = request.headers.get("prefer", "").strip().lower()
+    async_param = request.query_params.get("async", "").strip().lower()
+    is_async = prefer_header == PREFER_ASYNC_HEADER_VALUE or async_param in ("true", "1")
+
+    if is_async:
+        # Validate resumability (404, 409 for completed/active lease) before
+        # returning 202 — this ensures error semantics are identical to sync.
+        _claim_investigation(safe_id, repository, allow_resume=True)
+        # Acquire durable execution ownership in repository BEFORE returning 202
+        import uuid as _uuid
+        worker_id = f"worker-{_uuid.uuid4().hex[:8]}"
+        try:
+            existing_state = repository.load(safe_id)
+            if existing_state is None:
+                _release_investigation(safe_id)
+                return error_json_response(404, "investigation_not_found", f"Investigation '{safe_id}' not found.")
+
+            if not existing_state.acquire_lease(owner_id=worker_id, ttl_seconds=300):
+                lease_owner = getattr(existing_state, "lease_owner", None) or "another worker"
+                _release_investigation(safe_id)
+                return error_json_response(
+                    409,
+                    "conflict",
+                    f"Investigation '{safe_id}' has an active lease held by '{lease_owner}'.",
+                )
+
+            # Record original status for telemetry before transitioning to RUNNING
+            orig_status = (
+                existing_state.status.value
+                if hasattr(existing_state.status, "value")
+                else str(existing_state.status)
+            )
+            existing_state.metadata["resumed_from_status"] = orig_status
+            existing_state.current_stage = None
+            existing_state.status = IncidentStatus.RUNNING
+            existing_state.error = None
+
+            # Persist durable lease under OCC protection
+            repository.save(existing_state)
+        except ConcurrencyError as ce:
+            _release_investigation(safe_id)
+            logger.warning("OCC conflict during async resume for '%s': %s", safe_id, ce)
+            return error_json_response(409, "conflict", str(ce))
+        except PersistenceError as pe:
+            _release_investigation(safe_id)
+            logger.error("Persistence error during async resume for '%s': %s", safe_id, pe)
+            return error_json_response(503, "persistence_unavailable", str(pe))
+        except Exception as exc:
+            _release_investigation(safe_id)
+            logger.exception("Unexpected error acquiring lease for async resume of '%s': %s", safe_id, exc)
+            return error_json_response(500, "internal_error", "Failed to acquire execution ownership for resume.")
+
+        # _claim_investigation registered the slot; background task will release it.
+        bg = BackgroundTask(
+            _run_resume_background,
+            safe_id,
+            candidate_path,
+            repository,
+            llm_client,
+            worker_id,
+        )
+        return _build_accepted_response(safe_id, request, background=bg)
+
+    # --- Default: synchronous execution ---
     _claim_investigation(safe_id, repository, allow_resume=True)
 
     try:

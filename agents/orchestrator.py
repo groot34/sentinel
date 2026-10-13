@@ -417,14 +417,26 @@ class IncidentOrchestrator:
         _validate_incident_dir(incident_path)
         incident_id = incident_path.name
 
-        # Create exactly one InvestigationState for this investigation
-        state = InvestigationState(incident_id=incident_id)
+        # Check if an initial state was already prepared and leased by dispatch
+        state: Optional[InvestigationState] = None
+        if self._repository is not None:
+            existing = self._repository.load(incident_id)
+            if existing is not None:
+                status_val = existing.status.value if hasattr(existing.status, "value") else str(existing.status)
+                if status_val in ("RUNNING", IncidentStatus.RUNNING) and existing.lease_owner == self._worker_id:
+                    state = existing
+                    state.renew_lease(owner_id=self._worker_id, ttl_seconds=self._lease_ttl)
+
+        if state is None:
+            # Create exactly one InvestigationState for this investigation
+            state = InvestigationState(incident_id=incident_id)
+            # Acquire execution lease
+            state.acquire_lease(owner_id=self._worker_id, ttl_seconds=self._lease_ttl)
+
         self.state = state
         self.last_state = state
         # Clear any pending events from previous investigation
         self._pending_events.clear()
-        # Acquire execution lease
-        state.acquire_lease(owner_id=self._worker_id, ttl_seconds=self._lease_ttl)
         # Emit InvestigationStarted before first persistence so it's in the first outbox batch
         self._emit(InvestigationStarted(
             investigation_id=incident_id,
@@ -489,7 +501,12 @@ class IncidentOrchestrator:
 
         resume_stage = self._find_resume_stage(state)
 
-        resumed_from_status = status_val if isinstance(status_val, str) else status_val.value
+        orig_status = (
+            state.metadata.get("resumed_from_status")
+            if (hasattr(state, "metadata") and isinstance(state.metadata, dict))
+            else None
+        )
+        resumed_from_status = orig_status or (status_val if isinstance(status_val, str) else status_val.value)
         # Emit InvestigationResumed before persistence so it's in the outbox batch
         self._emit(InvestigationResumed(
             investigation_id=investigation_id,
