@@ -128,23 +128,62 @@ def test_mock_outbox_increment_retry():
     assert pending[0].retry_count == 1
 
 
+from tests.test_postgres_persistence import PG_URL, POSTGRES_AVAILABLE
+from core.persistence.postgres import PostgresRepository
+from core.domain.state import InvestigationState
+
+
 @pytest.mark.skipif(
-    True,  # Skip by default - requires PostgreSQL
-    reason="Requires PostgreSQL connection"
+    not POSTGRES_AVAILABLE,
+    reason="Requires PostgreSQL connection at " + PG_URL,
 )
 def test_postgres_outbox_save_unique_event_id():
     """PostgreSQL outbox enforces unique event_id constraint."""
-    # This test requires a real PostgreSQL connection
-    # Implemented in test_postgres_persistence.py
-    pass
+    with PostgresRepository(PG_URL) as repo:
+        repo.initialize_schema()
+        event = InvestigationStarted(investigation_id="int_test_outbox_uniq", initial_stage="logs")
+        try:
+            repo.save_event(event)
+            # Idempotent repeat save of same event_id
+            repo.save_event(event)
+            pending = repo.fetch_pending()
+            matching = [e for e in pending if e.event_id == event.event_id]
+            assert len(matching) == 1
+        finally:
+            with repo.pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM event_outbox WHERE investigation_id = 'int_test_outbox_uniq';")
 
 
 @pytest.mark.skipif(
-    True,  # Skip by default - requires PostgreSQL
-    reason="Requires PostgreSQL connection"
+    not POSTGRES_AVAILABLE,
+    reason="Requires PostgreSQL connection at " + PG_URL,
 )
 def test_postgres_atomic_state_and_event_persistence():
     """State and events are persisted atomically in same transaction."""
-    # This test requires a real PostgreSQL connection
-    # Implemented in test_postgres_persistence.py
-    pass
+    inv_id = "int_test_outbox_atomic"
+    with PostgresRepository(PG_URL) as repo:
+        repo.initialize_schema()
+        state = InvestigationState(incident_id=inv_id)
+        state.start_stage("logs")
+        state.complete_stage("logs", output={"stage": "logs"})
+        event = InvestigationStarted(investigation_id=inv_id, initial_stage="logs")
+
+        try:
+            repo.save(state, events=[event])
+
+            loaded = repo.load(inv_id)
+            assert loaded is not None
+            assert loaded.version == 1
+
+            pending = repo.fetch_pending()
+            matching = [e for e in pending if e.investigation_id == inv_id]
+            assert len(matching) == 1
+            assert matching[0].event_id == event.event_id
+        finally:
+            with repo.pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM investigations WHERE investigation_id = %s;", (inv_id,))
+                        cur.execute("DELETE FROM event_outbox WHERE investigation_id = %s;", (inv_id,))

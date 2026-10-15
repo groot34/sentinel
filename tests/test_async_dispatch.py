@@ -1063,4 +1063,3 @@ def test_sync_resume_returns_200_and_cleans_registry(incidents_dir):
     assert data["pipeline_status"] == "COMPLETED"
     with _ACTIVE_LOCK:
         assert "inc_async_01" not in _ACTIVE_INVESTIGATIONS
-

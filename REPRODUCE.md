@@ -29,18 +29,80 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome: 652 passed, 32 skipped, 1 warning in ~14s
-# (32 skipped: 30 integration tests requiring a live PostgreSQL instance skipped when
-#  SENTINEL_DATABASE_URL is unset; 2 symlink tests skipped on Windows without developer mode)
+# Verified outcome: 670 passed, 38 skipped, 1 warning in ~15s
+# (38 skipped: 36 integration tests requiring a live PostgreSQL instance skipped when
+#  SENTINEL_DATABASE_URL is unset/unreachable; 2 symlink tests skipped on Windows without
+#  Developer Mode. On Linux CI all 36 PostgreSQL tests execute, reducing skips to 0.)
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
 # Verified outcome: 51 passed in ~0.5s
-
-# (Optional) Run live PostgreSQL integration tests (requires running PostgreSQL 16+ instance):
-SENTINEL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sentinel_db \
-  pytest tests/test_postgres_persistence.py tests/test_outbox.py tests/test_persistence_contract.py
 ```
+
+## PostgreSQL Integration Testing
+
+All live PostgreSQL integration tests are guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)`
+and skip gracefully when no database is reachable. To execute them locally:
+
+### Prerequisites
+- Docker Desktop (or Docker Engine) running
+- Python 3.11+ with `requirements.txt` installed
+
+### Workflow
+```bash
+# 1. Start PostgreSQL 16 and wait for it to be healthy
+make db-up
+
+# 2. Bootstrap the schema using the authoritative migration runner
+make db-migrate
+# Output: "Successfully applied 2 migration(s): 001_initial_schema, 002_outbox_schema"
+#         "Schema verification passed: 3 tables verified."
+
+# 3. Inspect which migrations are recorded in the tracking table
+make db-status
+
+# 4. Run live PostgreSQL integration tests only
+make test-postgres
+# Expected with DB available: all 36 PG tests execute (none skipped).
+
+# 5. Run the complete suite (offline + live PostgreSQL + incident validation)
+make test-all
+# Expected: 670+ passed, ≤2 skipped (Windows-symlink only), 1 warning.
+
+# 6. Stop the container (data volume preserved for next run)
+make db-down
+```
+
+### Overriding the database URL
+```bash
+export SENTINEL_DATABASE_URL=postgresql://user:pass@host:5432/dbname
+make test-postgres
+# Or pass inline:
+PG_URL=postgresql://user:pass@host:5432/dbname make test-postgres
+```
+
+### Schema migration CLI
+The authoritative migration runner can be invoked directly:
+```bash
+# Apply pending migrations
+python -m core.persistence.schema apply --url "$SENTINEL_DATABASE_URL"
+
+# Verify schema completeness (all tables, columns, indexes)
+python -m core.persistence.schema verify --url "$SENTINEL_DATABASE_URL"
+
+# Show recorded migration versions
+python -m core.persistence.schema status --url "$SENTINEL_DATABASE_URL"
+```
+
+### CI / GitHub Actions
+The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
+- **`offline`** — full unit and mock suite with no database; validates incident dataset; `git diff --check`.
+- **`postgres`** — starts `postgres:16-alpine`, bootstraps the schema, runs the full test suite with `SENTINEL_DATABASE_URL` set. Fails if any required PostgreSQL integration test skips.
+
+> **Important**: The first verified live run has not yet occurred in CI (Docker is unavailable locally).
+> Until a CI run completes successfully, treat the live PostgreSQL test results as "expected to pass"
+> based on offline code review and test logic, not as a proven executed result.
+
 
 ## Starting the API Server
 

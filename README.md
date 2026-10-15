@@ -14,17 +14,20 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **652 passed, 32 skipped, 1 warning** |
+| Automated tests | — | **670 passed, 38 skipped, 1 warning** |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: 32 tests are skipped in environments where PostgreSQL is unconfigured or non-admin Windows symlink privileges are absent.)*
+*(Note: 38 tests are skipped in environments where PostgreSQL is unconfigured or non-admin Windows symlink privileges are absent. With Docker and `make db-up && make db-migrate`, all PostgreSQL integration tests execute — CI enforces this via a `postgres:16-alpine` service container.)*
 
 ---
 
 ## 1. Problem
+
+> **CI Status**: Two-job GitHub Actions workflow enforces both offline correctness and live PostgreSQL integration on every push and pull request. See `.github/workflows/ci.yml`.
+
 
 Backend and on-call engineers face complex production incidents where critical signals are
 fragmented across logs, telemetry metrics, source code, configuration files, and recent
@@ -314,9 +317,11 @@ cp .env.example .env
 ```bash
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
-# Verified result: 652 passed, 32 skipped, 1 warning in ~14s
-# (32 skipped: 30 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is unset;
-#  2 Windows symlink tests skipped for non-admin accounts without Developer Mode)
+# Current verified result: 670 passed, 38 skipped, 1 warning in ~15s
+# (38 skipped: 36 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
+#  unset/unreachable; 2 Windows symlink tests skipped for non-admin accounts without
+#  Developer Mode. Mission 14 added 18 new tests beyond the 652/32 Mission 13 baseline.)
+# With make db-up && make db-migrate, all 36 PostgreSQL tests execute (0-2 skipped).
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py

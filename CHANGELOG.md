@@ -2,6 +2,33 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission14-phase4] - Unreleased
+
+### Added
+- **GitHub Actions CI Workflow (`.github/workflows/ci.yml`)**:
+  - `offline` job: excludes the four PostgreSQL-only test modules (`test_postgres_persistence.py`, `test_postgres_concurrency.py`, `test_schema_migration.py`, `test_outbox.py`); `test_persistence_contract.py` is intentionally included because it contains only offline `TestFilesystemRepositoryContract` tests. Runs 627 passed / 2 skipped / 1 warning. Validates incident dataset.
+  - `postgres` job: starts a `postgres:16-alpine` service container with health checks, bootstraps the schema via `python -m core.persistence.schema apply`, verifies completeness via `python -m core.persistence.schema verify`, then executes the complete pytest suite with `SENTINEL_DATABASE_URL` set so all 36 PostgreSQL integration tests execute instead of skipping.
+  - Skip enforcement: parses JUnit XML (`--junitxml=test-results.xml`) from the single pytest run — no second test invocation. Fails if more than 2 tests skip on Linux (expected 0 skips: all PostgreSQL and symlink tests execute).
+  - Meaningful `git diff --check`: uses `fetch-depth: 0` so full history is available for PR base SHAs and HEAD~1 on pushes. On push, checks `HEAD~1..HEAD`. On pull request, checks `${{ github.event.pull_request.base.sha }}...HEAD`. This actually validates committed whitespace hygiene, not just the clean working tree.
+  - No tests disabled or weakened to achieve CI green; no fallback to mocks when PostgreSQL is required.
+- **Makefile PostgreSQL Developer Workflow Targets**:
+  - `db-up`: starts the `postgres:16-alpine` Docker Compose service and polls until healthy.
+  - `db-down`: stops the container while preserving the `sentinel_pgdata` data volume.
+  - `db-migrate`: invokes `python -m core.persistence.schema apply` then `verify` — the single authoritative migration runner.
+  - `db-status`: invokes `python -m core.persistence.schema status` to show applied migration versions.
+  - `test-postgres`: runs the five PostgreSQL-dependent test modules against a live instance.
+  - `test-all`: runs the complete pytest suite plus `python tests/validate_incidents.py`.
+  - Updated `help` target documents all targets with requirements.
+- **Documentation Updates** (all six project documents synchronized):
+  - `README.md`: updated test suite table (670 passed, 38 skipped → full CI expected 670+ passed, ≤2 skipped), CI badge section, and PostgreSQL workflow instructions.
+  - `REPRODUCE.md`: added "PostgreSQL Integration Testing" section with `make db-up`, `make db-migrate`, `make test-postgres`, and `make test-all` workflows.
+  - `docs/ARCHITECTURE.md`: added CI architecture section explaining two-job strategy and skip enforcement.
+  - `docs/CURRENT_STATE_AUDIT.md`: updated skip breakdown and test counts to reflect Phases 2–4.
+  - `TODO.md`: marked CI harness item as completed under Mission 14.
+
+### Changed
+- `Makefile`: expanded `.PHONY` declaration to include all new targets; added `PG_URL` variable for overridable default database URL.
+
 ## [2.0.0-mission13] - Unreleased
 
 ### Added

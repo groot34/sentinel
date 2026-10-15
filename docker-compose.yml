@@ -1,7 +1,16 @@
 # Sentinel 2.0 - Local Development PostgreSQL Service
 # LOCAL DEVELOPMENT ONLY - Do not use for production deployments.
+#
+# Schema Ownership Note:
+# Schema migrations are authoritatively owned and managed by the Sentinel application
+# migration engine (`core.persistence.schema`). Do not mount SQL files into
+# `/docker-entrypoint-initdb.d/`, as entrypoint scripts only run on fresh volumes and
+# cause dual-execution ambiguities with the application migration runner.
+# Both fresh instances and existing volumes are safely initialized via:
+#   python -m core.persistence.schema apply
 
 version: "3.8"
+
 
 services:
   postgres:

@@ -421,3 +421,66 @@ The event history endpoint (`GET /investigations/{id}/events`) provides two dist
 | **Event History API** | `backend_supports_event_history = false` | Fully supported via durable `event_outbox` queries |
 | **SSE Streaming** | Streams in-memory events during active run | Replays durable history + live streams from outbox |
 | **Crash Recovery** | Manual resume; risk of unexpired lease block | Automatic crash recovery after TTL expiry via OCC |
+
+---
+
+## 4. CI/CD Architecture (Mission 14 Phase 4)
+
+### 4.1 GitHub Actions Workflow
+
+The `.github/workflows/ci.yml` workflow runs on every push to `main` and every pull request. It enforces both offline correctness and live PostgreSQL integration.
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Push / Pull Request                                           │
+└───────────────────────┬────────────────────────────────────────┘
+                        │
+          ┌─────────────┴──────────────┐
+          │                            │
+          ▼                            ▼
+┌─────────────────┐          ┌─────────────────────────────┐
+│  offline job    │          │  postgres job               │
+│  (ubuntu)       │          │  (ubuntu + postgres:16)     │
+│                 │          │                             │
+│  pip install    │          │  pip install                │
+│  pytest         │          │  wait for pg_isready        │
+│  (no DB)        │          │  schema apply (CLI)         │
+│  validate_inc.  │          │  schema verify (CLI)        │
+│  git diff       │          │  pytest (full suite + DB)   │
+│  --check        │          │  assert skips ≤ 2           │
+│                 │          │  validate_incidents.py      │
+│  Expected:      │          │  git diff --check           │
+│  627p, 2s, 1w  │          │                             │
+└─────────────────┘          │  Expected (Linux + PG):     │
+                             │  670+ passed, 0-2 skipped   │
+                             └─────────────────────────────┘
+```
+
+**Key properties:**
+- **Truthful**: The `postgres` job fails if more than 2 tests skip on Linux CI; this enforces that PostgreSQL integration tests actually execute rather than silently skip. Skip count is parsed from `--junitxml` output — no redundant second test run.
+- **Schema ownership**: The CI runner invokes `python -m core.persistence.schema apply` (not Docker entrypoint scripts), ensuring the same authoritative migration runner is used in CI and locally.
+- **Offline exclusions**: The `offline` job excludes exactly four PostgreSQL-only modules. `test_persistence_contract.py` is intentionally **not** excluded because it contains only offline `TestFilesystemRepositoryContract` tests with no database dependency.
+- **Symlink note**: The 2 Windows-symlink tests use a runtime probe (`_can_symlink()`) that attempts `Path.symlink_to()` in a temp directory. On Linux this succeeds without elevated privileges, so both tests execute and pass. Expected skip count on the `postgres` CI job: 0, with ≤2 as a conservative margin.
+- **Meaningful `git diff --check`**: Uses `fetch-depth: 0` so full history is available for PR base SHAs and HEAD~1 on pushes. On push events, checks `HEAD~1..HEAD`. On pull-request events, checks `${{ github.event.pull_request.base.sha }}...HEAD`. This validates the whitespace hygiene of actual committed changes, not just the always-clean CI working tree.
+
+### 4.2 Schema Migration CLI
+
+The authoritative migration runner (`core.persistence.schema`) has three sub-commands used in CI and locally:
+
+| Command | Action |
+|---|---|
+| `python -m core.persistence.schema apply --url <url>` | Discover and apply pending migrations; verify schema on completion |
+| `python -m core.persistence.schema verify --url <url>` | Verify all required tables, columns, and operational indexes |
+| `python -m core.persistence.schema status --url <url>` | List applied migration versions from `schema_migrations` table |
+
+### 4.3 Developer Workflow (Makefile Targets)
+
+| Target | Command | Description |
+|---|---|---|
+| `make db-up` | `docker compose up -d postgres` + health poll | Start PostgreSQL 16 container |
+| `make db-down` | `docker compose stop postgres` | Stop container; volume preserved |
+| `make db-migrate` | `schema apply` + `schema verify` | Bootstrap or migrate schema |
+| `make db-status` | `schema status` | Show applied migration versions |
+| `make test-postgres` | `pytest` on 5 PG test modules | Run live integration tests only |
+| `make test-all` | Full `pytest` + incident validation | Complete suite with PostgreSQL |
+| `make test` | `pytest tests/` | Standard offline unit suite |

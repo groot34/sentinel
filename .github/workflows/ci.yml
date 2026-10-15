@@ -1,0 +1,209 @@
+# Sentinel CI — Full Test Suite with Live PostgreSQL Integration
+#
+# Triggers: pushes to main, all pull requests.
+#
+# Two jobs:
+#   offline  — pure unit and mocked tests; no database required.
+#   postgres — full live integration suite with PostgreSQL 16 service.
+#
+# Skip enforcement (postgres job): fails if more than 2 tests skip on Linux.
+#   Expected skip count with PostgreSQL available on Linux:
+#   - 0 skips: the two Windows-symlink tests use a runtime probe (_can_symlink())
+#     that passes on Linux without elevated privileges, so they execute and pass.
+#   - We allow ≤ 2 as a conservative margin for future platform-conditioned additions.
+#   - More than 2 skips indicates PostgreSQL tests are silently not running.
+#
+# git diff --check: checks the committed diff of the push or PR for whitespace
+#   errors. Uses fetch-depth: 0 to ensure HEAD~1 is available on push events,
+#   and the PR base SHA for pull_request events without shallow-clone truncation.
+
+name: CI
+
+'on':
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  # Canonical PostgreSQL credentials matching docker-compose.yml defaults.
+  SENTINEL_DATABASE_URL: postgresql://sentinel:sentinel_dev_password@localhost:5432/sentinel_db
+  # Disable real LLM calls — all tests mock the Groq client.
+  GROQ_API_KEY: "test-key-not-used"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # JOB 1: Offline unit + mocked tests — no database required
+  # --------------------------------------------------------------------------
+  offline:
+    name: "Offline Tests (no DB)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 ensures complete history is available so git diff --check
+          # can compare HEAD~1..HEAD on push and github.event.pull_request.base.sha
+          # on pull_request without shallow-clone bad-object errors.
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run offline test suite (database tests skipped)
+        # Exclude the four PostgreSQL-only test modules so this job has zero
+        # database dependency. test_persistence_contract.py is intentionally
+        # NOT excluded — it contains TestFilesystemRepositoryContract (18 offline
+        # tests with no PostgreSQL dependency) and no PostgreSQL subclass.
+        # Expected: 627 passed, 2 skipped (Windows symlink runtime probe), 1 warning.
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/test_postgres_persistence.py \
+            --ignore=tests/test_postgres_concurrency.py \
+            --ignore=tests/test_schema_migration.py \
+            --ignore=tests/test_outbox.py \
+            -v --tb=short -q
+        env:
+          # Explicitly unset to confirm the offline path works without any DB.
+          SENTINEL_DATABASE_URL: ""
+
+      - name: Validate incident dataset integrity
+        run: python tests/validate_incidents.py
+
+      - name: Check committed diff for whitespace errors
+        # Checks the whitespace hygiene of committed changes, not the working tree.
+        # On push:         compares HEAD~1..HEAD (the pushed commit).
+        # On pull_request: compares the PR base SHA to the PR head commit.
+        # fetch-depth: 0 ensures complete history is available for PR base SHA and HEAD~1.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            echo "PR diff check: $BASE...HEAD"
+            git diff --check "$BASE"...HEAD
+          else
+            echo "Push diff check: HEAD~1..HEAD"
+            git diff --check HEAD~1..HEAD
+          fi
+
+  # --------------------------------------------------------------------------
+  # JOB 2: Full suite with live PostgreSQL 16
+  # --------------------------------------------------------------------------
+  postgres:
+    name: "Full Suite + Live PostgreSQL 16"
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel_dev_password
+          POSTGRES_DB: sentinel_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentinel -d sentinel_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL to be healthy
+        # GitHub's health-check options wait for the container to pass before
+        # starting the job steps, but we add an explicit final probe as a
+        # belt-and-suspenders check.
+        run: |
+          for i in $(seq 1 20); do
+            pg_isready -h localhost -p 5432 -U sentinel -d sentinel_db && break
+            echo "Waiting for PostgreSQL... attempt $i"
+            sleep 2
+          done
+          pg_isready -h localhost -p 5432 -U sentinel -d sentinel_db
+
+      - name: Bootstrap database schema
+        run: |
+          python -m core.persistence.schema apply \
+            --url "$SENTINEL_DATABASE_URL"
+
+      - name: Verify schema is complete
+        run: |
+          python -m core.persistence.schema verify \
+            --url "$SENTINEL_DATABASE_URL"
+
+      - name: Run full test suite with PostgreSQL enabled
+        # With SENTINEL_DATABASE_URL set and reachable, POSTGRES_AVAILABLE=True
+        # inside every test module, so all 36 PostgreSQL integration tests run.
+        # Output saved to XML for skip-count parsing without a second pytest run.
+        # Expected on Linux with PostgreSQL: 670+ passed, 0 skipped, 1 warning.
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --junitxml=test-results.xml
+
+      - name: Assert no unexpected skips
+        # Parse the JUnit XML written by the previous step — no second pytest run.
+        # The two Windows-symlink tests pass on Linux (runtime _can_symlink() probe
+        # succeeds without elevated privileges), so expected skip count is 0.
+        # We allow ≤ 2 as a conservative margin for future platform-conditioned tests.
+        # Failure here means PostgreSQL integration tests are silently skipping,
+        # which indicates SENTINEL_DATABASE_URL is wrong or the schema was not applied.
+        run: |
+          python - <<'EOF'
+          import xml.etree.ElementTree as ET, sys
+
+          tree = ET.parse("test-results.xml")
+          root = tree.getroot()
+
+          # Count skipped test cases directly from <skipped> tags to prevent
+          # any double-counting from nested testsuites, falling back to suite attributes.
+          skipped_tags = len(list(root.iter("skipped")))
+          suite_skips = sum(int(s.get("skipped", 0)) for s in root.iter("testsuite"))
+          total_skipped = skipped_tags if skipped_tags > 0 else suite_skips
+
+          print(f"Total skipped: {total_skipped}")
+
+          if total_skipped > 2:
+              print(
+                  f"ERROR: Expected at most 2 skips on Linux CI (conservative margin).\n"
+                  f"       Got {total_skipped} skips.\n"
+                  f"       Check that SENTINEL_DATABASE_URL is reachable and the schema\n"
+                  f"       was applied by the 'Bootstrap database schema' step above.\n"
+                  f"       Do not weaken skip guards to hide this failure."
+              )
+              sys.exit(1)
+          EOF
+
+      - name: Validate incident dataset integrity
+        run: python tests/validate_incidents.py
+
+      - name: Check committed diff for whitespace errors
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            echo "PR diff check: $BASE...HEAD"
+            git diff --check "$BASE"...HEAD
+          else
+            echo "Push diff check: HEAD~1..HEAD"
+            git diff --check HEAD~1..HEAD
+          fi

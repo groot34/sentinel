@@ -104,15 +104,22 @@
   - Background failure recovery: unhandled exceptions persist `FAILED` status, preventing orphaned `RUNNING` states.
   - 43 tests in `tests/test_async_dispatch.py` (652 passed, 32 skipped, 1 warning total pytest suite).
 
+- [x] **Mission 14: PostgreSQL Reliability Harness** (commit pending)
+  - Phase 2: Authoritative migration runner (`core/persistence/schema.py`): `schema_migrations` tracking table, deterministic numeric migration discovery, per-migration transactional execution, checksum tampering detection, and strict pre-existing schema adoption requiring all 11 investigation columns + 3 indexes and all 9 outbox columns + 3 indexes. Exposes standalone CLI (`python -m core.persistence.schema apply|verify|status`).
+  - Phase 3: Live concurrency tests (`tests/test_postgres_concurrency.py`): 4 live tests using `threading.Barrier` coordination across separate connection pools to validate OCC competing writers, expired lease contention, concurrent async HTTP resume (202 vs 409), and transactional outbox atomicity with forced rollback. Updated `tests/test_outbox.py` to replace hardcoded `skipif(True)` stubs with genuine PostgreSQL implementations.
+  - Phase 4: CI and developer workflow:
+    - `.github/workflows/ci.yml`: two-job workflow (`offline` + `postgres`) with `postgres:16-alpine` service container, health-checked schema bootstrapping, full test suite execution, skip enforcement (CI fails if >2 tests skip on Linux), incident dataset validation, and `git diff --check`.
+    - `Makefile` targets: `db-up`, `db-down`, `db-migrate`, `db-status`, `test-postgres`, `test-all`.
+    - All six project documents updated to reflect Phases 2–4.
+  - Verified baseline: 670 passed, 38 skipped (36 PostgreSQL + 2 Windows symlink), 1 warning. All 36 PostgreSQL integration tests written and locally skip gracefully when Docker is offline. CI will execute them on first push.
+
 ---
 
-## Post-Mission 13 Remaining Engineering Work
+## Post-Mission 14 Remaining Engineering Work
 - [ ] **Distributed Task Queue Integration**:
   - Extend in-process background execution to durable external task queues (Redis Streams, Celery, Temporal, or BullMQ) across multi-node worker clusters.
 - [ ] **External Event Bus Streaming Connectors**:
   - Extend `EventDeliveryWorker` to publish outbox events to external messaging brokers (Redis Streams, Apache Kafka, or HTTP Webhook consumers).
-- [ ] **Containerized PostgreSQL Test Harness in CI**:
-  - Configure GitHub Actions workflow with an automated PostgreSQL 16 container service to run the 30 skipped database integration tests on every pull request.
 
 ---
 

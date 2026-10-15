@@ -108,34 +108,36 @@ class PostgresRepository(PersistenceRepository):
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
-    def initialize_schema(self) -> None:
-        """Execute the initial schema migration script. Idempotent."""
-        if not SCHEMA_FILE.is_file():
-            raise PersistenceError(f"Schema file not found at '{SCHEMA_FILE}'")
+    def initialize_schema(self) -> List[str]:
+        """Execute all pending schema migrations in deterministic order. Idempotent.
 
-        sql = SCHEMA_FILE.read_text(encoding="utf-8")
-        try:
-            with self._pool.connection() as conn:
-                with conn.transaction():
-                    with conn.cursor() as cur:
-                        cur.execute(sql)
-        except psycopg.Error as e:
-            raise PersistenceError(f"Failed to initialize PostgreSQL schema: {e}") from e
+        Uses the authoritative schema migration engine to discover and apply migrations
+        transactionally, tracking applied versions in schema_migrations.
+        """
+        from core.persistence.schema import apply_migrations
+        return apply_migrations(self._pool)
 
-    def initialize_outbox_schema(self) -> None:
-        """Execute the outbox schema migration script. Idempotent."""
-        outbox_schema_file = Path(__file__).parent / "sql" / "002_outbox_schema.sql"
-        if not outbox_schema_file.is_file():
-            raise PersistenceError(f"Outbox schema file not found at '{outbox_schema_file}'")
+    def initialize_outbox_schema(self) -> List[str]:
+        """Ensure outbox schema is applied. Idempotent.
 
-        sql = outbox_schema_file.read_text(encoding="utf-8")
-        try:
-            with self._pool.connection() as conn:
-                with conn.transaction():
-                    with conn.cursor() as cur:
-                        cur.execute(sql)
-        except psycopg.Error as e:
-            raise PersistenceError(f"Failed to initialize outbox schema: {e}") from e
+        Delegates to the authoritative migration runner, ensuring both initial schema
+        and outbox schema are applied safely in order.
+        """
+        from core.persistence.schema import apply_migrations
+        return apply_migrations(self._pool)
+
+    def verify_schema(self, raise_on_error: bool = False) -> Dict[str, Any]:
+        """Verify that all required tables, columns, and operational indexes are valid.
+
+        Args:
+            raise_on_error: If True, raises SchemaVerificationError on discrepancies.
+
+        Returns:
+            Dictionary containing verification report.
+        """
+        from core.persistence.schema import verify_schema
+        report = verify_schema(self._pool, raise_on_error=raise_on_error)
+        return report.to_dict()
 
     def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
         """Persist InvestigationState transactionally with optimistic concurrency control.
