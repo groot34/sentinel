@@ -465,7 +465,7 @@ class TestPostgresRepositoryIntegration(PersistenceContractTests):
         # Verify state persisted
         loaded_state = repo.load(inv_id)
         assert loaded_state is not None
-        assert loaded_state.status.value == "RUNNING"
+        assert loaded_state.status == IncidentStatus.RUNNING
         assert "logs" in loaded_state.stages
 
         # Verify events persisted

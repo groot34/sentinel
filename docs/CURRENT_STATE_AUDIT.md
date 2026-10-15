@@ -28,7 +28,7 @@ This audit establishes the verified state of the Sentinel repository following t
    - All 36 are **expected to execute on CI** once the `postgres:16-alpine` service container is running.
 3. **Deprecation Warning (1 warning)**: Starlette deprecation notice in `tests/test_api.py` regarding `httpx` integration with `starlette.testclient.TestClient`.
 
-> **Important**: The first verified CI run with live PostgreSQL has not yet occurred (Docker is unavailable locally). The 36 PostgreSQL integration tests are written, reviewed, and expected to pass, but their live execution has not been confirmed against a real PostgreSQL 16 instance as of this audit.
+> **Important**: The initial live PostgreSQL CI run (`38767150882`) confirmed container provisioning, schema migration, and 704 passing tests, with 4 test-assertion/type discrepancies in newly live tests. Those 4 test discrepancies have been corrected; live database verification of the fixes is pending the next GitHub Actions run.
 
 ---
 

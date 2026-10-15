@@ -29,6 +29,13 @@ All notable changes and iterative improvements to the Sentinel project will be d
 ### Changed
 - `Makefile`: expanded `.PHONY` declaration to include all new targets; added `PG_URL` variable for overridable default database URL.
 
+### Fixed
+- **Live PostgreSQL Integration Test Assertions & Types**:
+  - `tests/test_postgres_concurrency.py::test_live_occ_concurrent_competing_writers`: corrected dictionary lookup to inspect error object `errors[conflicts[0]]` rather than the worker key string.
+  - `tests/test_postgres_concurrency.py::test_live_concurrent_expired_lease_claims`: provided ISO-format string to `InvestigationState.lease_expires_at` matching the domain model schema (`Optional[str]`).
+  - `tests/test_postgres_concurrency.py::test_live_transactional_outbox_atomicity_and_rollback`: used canonical `StageCompleted` event fields (`total_tokens`), removing unexpected `duration_ms` field.
+  - `tests/test_postgres_persistence.py::test_atomic_state_and_event_persistence`: updated status assertion to compare against `IncidentStatus.RUNNING` directly, honoring `use_enum_values=True` on `BaseDomainModel`.
+
 ## [2.0.0-mission13] - Unreleased
 
 ### Added

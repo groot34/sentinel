@@ -160,7 +160,7 @@ class TestPostgresLiveConcurrency:
 
         assert len(successes) == 1, f"Expected exactly 1 successful write, got: {results}"
         assert len(conflicts) == 1, f"Expected exactly 1 ConcurrencyError, got: {errors}"
-        assert "Optimistic concurrency conflict" in str(conflicts[0])
+        assert "Optimistic concurrency conflict" in str(errors[conflicts[0]])
 
         # Verify PostgreSQL database state matches the winner
         with PostgresRepository(PG_URL) as verify_repo:
@@ -182,7 +182,7 @@ class TestPostgresLiveConcurrency:
         _clean_test_records(inv_id)
 
         # 1. Setup initial state with an EXPIRED lease
-        expired_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+        expired_time = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
         with PostgresRepository(PG_URL) as setup_repo:
             state = InvestigationState(incident_id=inv_id, status=IncidentStatus.RUNNING)
             state.lease_owner = "crashed_worker_99"
@@ -336,7 +336,7 @@ class TestPostgresLiveConcurrency:
             state.start_stage("logs")
             state.complete_stage("logs", output={"stage": "logs"})
             event1 = InvestigationStarted(investigation_id=inv_id, initial_stage="logs")
-            event2 = StageCompleted(investigation_id=inv_id, stage="logs", duration_ms=150)
+            event2 = StageCompleted(investigation_id=inv_id, stage="logs", total_tokens=150)
 
             repo.save(state, events=[event1, event2])
             assert state.version == 1
@@ -367,7 +367,7 @@ class TestPostgresLiveConcurrency:
                     raise psycopg.OperationalError("Simulated network/disk crash during outbox insert")
                 return original_execute(self_cur, query, params)
 
-            event3 = StageCompleted(investigation_id=inv_id, stage="metrics", duration_ms=200)
+            event3 = StageCompleted(investigation_id=inv_id, stage="metrics", total_tokens=200)
 
             with patch.object(psycopg.Cursor, "execute", failing_execute):
                 with pytest.raises(PersistenceError, match="Simulated network/disk crash"):
