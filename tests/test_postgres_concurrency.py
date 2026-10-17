@@ -251,24 +251,39 @@ class TestPostgresLiveConcurrency:
         inv_id = "inc_conc_test"
         _clean_test_records(inv_id)
 
-        # 1. Setup investigation in PostgreSQL eligible for resume (FAILED, no active lease)
-        with PostgresRepository(PG_URL) as setup_repo:
-            initial = InvestigationState(incident_id=inv_id, status=IncidentStatus.FAILED)
-            initial.lease_owner = None
-            initial.lease_expires_at = None
-            setup_repo.save(initial)
-            assert initial.version == 1
+        try:
+            # 1. Setup investigation in PostgreSQL eligible for resume (FAILED, no active lease)
+            with PostgresRepository(PG_URL) as setup_repo:
+                initial = InvestigationState(incident_id=inv_id, status=IncidentStatus.FAILED)
+                initial.lease_owner = None
+                initial.lease_expires_at = None
+                setup_repo.save(initial)
+                assert initial.version == 1
 
-        barrier = threading.Barrier(2)
-        responses: Dict[str, Any] = {}
+            barrier = threading.Barrier(2)
+            responses: Dict[str, Any] = {}
 
-        def send_async_resume(client_id: str):
-            # Create a separate TestClient for each client
-            repo = PostgresRepository(PG_URL)
-            app = create_app(repository=repo, incidents_root=incidents_dir)
-            client = TestClient(app)
+            def send_async_resume(client_id: str):
+                # Create a separate TestClient for each client
+                repo = PostgresRepository(PG_URL)
+                app = create_app(repository=repo, incidents_root=incidents_dir)
+                client = TestClient(app)
+                try:
+                    barrier.wait(timeout=5.0)
 
-            # Prevent background task from completing immediately to isolate acceptance window
+                    resp = client.post(
+                        f"/investigations/{inv_id}/resume",
+                        headers={"Prefer": "respond-async"},
+                    )
+                    responses[client_id] = resp
+                finally:
+                    repo.close()
+
+            # Patch the orchestrator once, in a shared context that stays active for
+            # BOTH thread starts and joins. Patching it per-thread races on the
+            # process-global symbol: whichever thread exits its `with` block first
+            # un-patches api.routes.IncidentOrchestrator while the other thread's
+            # synchronous background task may still construct the real orchestrator.
             with patch("api.routes.IncidentOrchestrator") as mock_orch:
                 instance = MagicMock()
                 instance.resume.return_value = {
@@ -279,47 +294,38 @@ class TestPostgresLiveConcurrency:
                 instance.state = InvestigationState(incident_id=inv_id, status=IncidentStatus.RUNNING)
                 mock_orch.return_value = instance
 
-                barrier.wait(timeout=5.0)
+                t1 = threading.Thread(target=send_async_resume, args=("client_1",))
+                t2 = threading.Thread(target=send_async_resume, args=("client_2",))
 
-                resp = client.post(
-                    f"/investigations/{inv_id}/resume",
-                    headers={"Prefer": "respond-async"},
-                )
-                responses[client_id] = resp
-            repo.close()
+                t1.start()
+                t2.start()
+                t1.join(timeout=10.0)
+                t2.join(timeout=10.0)
 
-        t1 = threading.Thread(target=send_async_resume, args=("client_1",))
-        t2 = threading.Thread(target=send_async_resume, args=("client_2",))
+            assert not t1.is_alive()
+            assert not t2.is_alive()
 
-        t1.start()
-        t2.start()
-        t1.join(timeout=10.0)
-        t2.join(timeout=10.0)
+            status_codes = [r.status_code for r in responses.values()]
+            assert 202 in status_codes, f"Expected a 202 Accepted, got: {status_codes}"
+            assert 409 in status_codes, f"Expected a 409 Conflict, got: {status_codes}"
 
-        assert not t1.is_alive()
-        assert not t2.is_alive()
+            accepted_resp = [r for r in responses.values() if r.status_code == 202][0]
+            conflict_resp = [r for r in responses.values() if r.status_code == 409][0]
 
-        status_codes = [r.status_code for r in responses.values()]
-        assert 202 in status_codes, f"Expected a 202 Accepted, got: {status_codes}"
-        assert 409 in status_codes, f"Expected a 409 Conflict, got: {status_codes}"
+            assert accepted_resp.json()["status"] == "RUNNING"
+            assert accepted_resp.headers.get("preference-applied") == "respond-async"
+            assert conflict_resp.json()["error"] == "conflict"
 
-        accepted_resp = [r for r in responses.values() if r.status_code == 202][0]
-        conflict_resp = [r for r in responses.values() if r.status_code == 409][0]
-
-        assert accepted_resp.json()["status"] == "RUNNING"
-        assert accepted_resp.headers.get("preference-applied") == "respond-async"
-        assert conflict_resp.json()["error"] == "conflict"
-
-        # Verify PostgreSQL database state: version incremented, active lease acquired
-        with PostgresRepository(PG_URL) as verify_repo:
-            final_st = verify_repo.load(inv_id)
-            assert final_st is not None
-            assert final_st.version == 2
-            assert final_st.status == IncidentStatus.RUNNING
-            assert final_st.is_lease_active() is True
-            assert final_st.lease_owner is not None
-
-        _clean_test_records(inv_id)
+            # Verify PostgreSQL database state: version incremented, active lease acquired
+            with PostgresRepository(PG_URL) as verify_repo:
+                final_st = verify_repo.load(inv_id)
+                assert final_st is not None
+                assert final_st.version == 2
+                assert final_st.status == IncidentStatus.RUNNING
+                assert final_st.is_lease_active() is True
+                assert final_st.lease_owner is not None
+        finally:
+            _clean_test_records(inv_id)
 
     def test_live_transactional_outbox_atomicity_and_rollback(self):
         """D. Transactional Outbox: Test real PostgreSQL transaction boundary.
