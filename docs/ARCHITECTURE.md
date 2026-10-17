@@ -450,16 +450,16 @@ The `.github/workflows/ci.yml` workflow runs on every push to `main` and every p
 │  --check        │          │  assert skips ≤ 2           │
 │                 │          │  validate_incidents.py      │
 │  Expected:      │          │  git diff --check           │
-│  627p, 2s, 1w  │          │                             │
+│  648p, ≤6s, 1w  │          │                             │
 └─────────────────┘          │  Expected (Linux + PG):     │
-                             │  670+ passed, 0-2 skipped   │
+                             │  691+ passed, 0-2 skipped   │
                              └─────────────────────────────┘
 ```
 
 **Key properties:**
 - **Truthful**: The `postgres` job fails if more than 2 tests skip on Linux CI; this enforces that PostgreSQL integration tests actually execute rather than silently skip. Skip count is parsed from `--junitxml` output — no redundant second test run.
 - **Schema ownership**: The CI runner invokes `python -m core.persistence.schema apply` (not Docker entrypoint scripts), ensuring the same authoritative migration runner is used in CI and locally.
-- **Offline exclusions**: The `offline` job excludes exactly four PostgreSQL-only modules. `test_persistence_contract.py` is intentionally **not** excluded because it contains only offline `TestFilesystemRepositoryContract` tests with no database dependency.
+- **Offline exclusions**: The `offline` job excludes exactly four PostgreSQL-only modules. `test_persistence_contract.py` is intentionally **not** excluded because it contains only offline `TestFilesystemRepositoryContract` tests with no database dependency. `tests/test_pg_retry.py` is also **not** excluded: its 21 offline retry/wiring tests run in the offline job, while its 4 live integration tests skip gracefully and execute in the `postgres` job.
 - **Symlink note**: The 2 Windows-symlink tests use a runtime probe (`_can_symlink()`) that attempts `Path.symlink_to()` in a temp directory. On Linux this succeeds without elevated privileges, so both tests execute and pass. Expected skip count on the `postgres` CI job: 0, with ≤2 as a conservative margin.
 - **Meaningful `git diff --check`**: Uses `fetch-depth: 0` so full history is available for PR base SHAs and HEAD~1 on pushes. On push events, checks `HEAD~1..HEAD`. On pull-request events, checks `${{ github.event.pull_request.base.sha }}...HEAD`. This validates the whitespace hygiene of actual committed changes, not just the always-clean CI working tree.
 
@@ -481,6 +481,62 @@ The authoritative migration runner (`core.persistence.schema`) has three sub-com
 | `make db-down` | `docker compose stop postgres` | Stop container; volume preserved |
 | `make db-migrate` | `schema apply` + `schema verify` | Bootstrap or migrate schema |
 | `make db-status` | `schema status` | Show applied migration versions |
-| `make test-postgres` | `pytest` on 5 PG test modules | Run live integration tests only |
+| `make test-postgres` | `pytest` on 6 PG test modules | Run live integration tests only |
 | `make test-all` | Full `pytest` + incident validation | Complete suite with PostgreSQL |
 | `make test` | `pytest tests/` | Standard offline unit suite |
+
+### 4.4 Transient PostgreSQL Failure Recovery (Mission 15)
+
+**Retry boundary**: retry is applied only inside `PostgresRepository.save()` — the
+single method that wraps **one complete transaction** (row lock
+`SELECT ... FOR UPDATE`, state write, and atomic outbox inserts). The extracted
+`_save_transaction()` performs only database work, so re-running the whole
+transaction cannot repeat external side effects. No generic retry wrapper is
+applied to arbitrary repository methods.
+
+| Error | SQLSTATE | Behaviour |
+|---|---|---|
+| `serialization_failure` | `40001` | Retried — entire transaction, fresh connection per attempt |
+| `deadlock_detected` | `40P01` | Retried — the whole transaction is re-run from a fresh connection, so safe here |
+| OCC conflict (`ConcurrencyError`) | — | **Never retried**; propagates as `409 Conflict` |
+| Constraint violations | `23505`/`23503`/… | **Never retried**; wrapped as `PersistenceError` |
+| Validation / safety failures | — | **Never retried** |
+
+**Isolation caveat**: Sentinel sets no explicit isolation level, so the server
+default (**READ COMMITTED**) applies. Under READ COMMITTED, `40001` is not
+naturally produced by row-lock contention (which surfaces as OCC
+`ConcurrencyError`); `40P01` deadlocks can occur. This module therefore does not
+claim serialisable isolation or phantom-read prevention — an explicit
+`SERIALIZABLE` level was deliberately not introduced.
+
+**Configuration (conservative defaults)**:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `SENTINEL_PG_RETRY_MAX_ATTEMPTS` | `5` | Total attempts (≥ 1) |
+| `SENTINEL_PG_RETRY_BASE_DELAY` | `0.05` s | Exponential backoff base |
+| `SENTINEL_PG_RETRY_MAX_DELAY` | `1.0` s | Backoff ceiling (≤ 30 s) |
+
+Backoff is exponential with full jitter (uniform in `[0, ceiling]`), bounded by
+`max_delay_seconds`, to avoid synchronized retry storms. Malformed/out-of-range
+env values are clamped, never crash repository construction.
+
+**State integrity across attempts**: each attempt restores `state.version` to the
+captured entry version before acquiring the lock, so retries never
+double-increment the OCC token; outbox events are inserted only within the
+committed attempt, so no duplicate events are persisted.
+
+**Exhaustion**: when the budget is exhausted, `RetryExhaustedError` (subclass of
+`PersistenceError`) is raised, chaining the last transient error. The existing API
+handler maps it to **`503 persistence_unavailable`**. The in-memory state version
+is restored on exhaustion.
+
+**Testing seam**: because READ COMMITTED does not naturally emit `40001`, a
+deterministic, test-only fault-injection seam
+(`core.persistence.retry.inject_transient_fault`) raises synthetic
+`SerializationFailure` at the transaction boundary. It is activated only by test
+code; no hook is installed in production, so `maybe_inject_fault` is a no-op there.
+
+> **Status**: Implemented; offline tests (21) pass. The 4 live PostgreSQL 16
+> integration tests are written but not yet executed locally (no database
+> available) — pending CI's `postgres` job.

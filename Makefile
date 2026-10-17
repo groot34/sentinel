@@ -89,6 +89,7 @@ test-postgres:
 	  tests/test_schema_migration.py \
 	  tests/test_outbox.py \
 	  tests/test_persistence_contract.py \
+	  tests/test_pg_retry.py \
 	  -v --tb=short
 
 test-all:

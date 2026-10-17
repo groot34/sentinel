@@ -25,6 +25,13 @@ from core.persistence.repository import (
     check_persistence_safety,
     validate_investigation_id,
 )
+from core.persistence.retry import (
+    RetryExhaustedError,
+    RetryPolicy,
+    maybe_inject_fault,
+    policy_from_env,
+    run_with_retry,
+)
 
 SCHEMA_FILE = Path(__file__).parent / "sql" / "001_initial_schema.sql"
 
@@ -38,6 +45,7 @@ class PostgresRepository(PersistenceRepository):
         min_size: int = 1,
         max_size: int = 10,
         timeout: float = 30.0,
+        retry_policy: Optional[RetryPolicy] = None,
     ) -> None:
         """Initialize PostgresRepository with a ConnectionPool or connection string.
 
@@ -46,6 +54,9 @@ class PostgresRepository(PersistenceRepository):
             min_size: Minimum connections in pool (if creating from conninfo).
             max_size: Maximum connections in pool (if creating from conninfo).
             timeout: Connection acquisition timeout in seconds.
+            retry_policy: Optional bounded retry policy for transient PostgreSQL
+                contention errors (SQLSTATE 40001/40P01). Defaults to the
+                conservative policy read from the SENTINEL_PG_RETRY_* env vars.
         """
         if isinstance(pool_or_conninfo, str):
             if not pool_or_conninfo.strip():
@@ -65,6 +76,9 @@ class PostgresRepository(PersistenceRepository):
             raise PersistenceError(
                 f"Expected ConnectionPool or conninfo string, got {type(pool_or_conninfo).__name__}"
             )
+
+        # Conservative, bounded retry for transient contention (SQLSTATE 40001/40P01).
+        self._retry_policy = retry_policy or policy_from_env()
 
     @property
     def pool(self) -> ConnectionPool:
@@ -140,21 +154,57 @@ class PostgresRepository(PersistenceRepository):
         return report.to_dict()
 
     def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
-        """Persist InvestigationState transactionally with optimistic concurrency control.
+        """Persist InvestigationState with bounded transient-failure retry.
+
+        Retries the *entire* transaction on transient PostgreSQL contention
+        errors (SQLSTATE 40001 serialization_failure, 40P01 deadlock_detected)
+        with a conservative bounded backoff. OCC ``ConcurrencyError`` and
+        permanent errors are never retried. Delegates the work to
+        :meth:`_save_transaction`, re-executed with fresh transactional state.
 
         Args:
             state: Valid InvestigationState instance.
             events: Optional list of DomainEvents to persist atomically in the same transaction.
 
         Raises:
-            ConcurrencyError: If an optimistic concurrency conflict or concurrent insert occurs.
-            PersistenceError: If validation, safety check, or database operation fails.
+            ConcurrencyError: If an optimistic concurrency conflict or concurrent insert occurs (never retried).
+            RetryExhaustedError: If transient PostgreSQL failures exhaust the retry budget.
+            PersistenceError: If validation, safety check, or a permanent database error fails.
         """
         if not isinstance(state, InvestigationState):
             raise PersistenceError(
                 f"save() accepts only InvestigationState, got {type(state).__name__}"
             )
 
+        entry_version = state.version
+
+        def _attempt(attempt: int) -> None:
+            # Restore the entry version before every attempt so retries never
+            # double-increment the OCC token or duplicate persisted state.
+            state.version = entry_version
+            self._save_transaction(state, events, attempt)
+
+        try:
+            run_with_retry(_attempt, policy=self._retry_policy)
+        except RetryExhaustedError:
+            # Leave the in-memory state at its entry version on exhaustion.
+            state.version = entry_version
+            raise
+
+    def _save_transaction(
+        self,
+        state: InvestigationState,
+        events: Optional[List[DomainEvent]],
+        attempt: int,
+    ) -> None:
+        """Execute exactly one atomic transaction attempt (state + outbox).
+
+        Invoked by :func:`core.persistence.retry.run_with_retry`, which re-runs
+        this *entire* transaction with a fresh connection on transient
+        PostgreSQL failures. This method performs only database work, so
+        re-execution cannot repeat external side effects. OCC semantics, lease
+        ownership, and outbox atomicity are preserved across attempts.
+        """
         safe_id = validate_investigation_id(state.incident_id)
 
         try:
@@ -181,6 +231,9 @@ class PostgresRepository(PersistenceRepository):
         try:
             with self._pool.connection() as conn:
                 with conn.transaction():
+                    # Deterministic test-only fault-injection seam at the
+                    # transaction boundary (no-op unless a test installs a hook).
+                    maybe_inject_fault(attempt)
                     with conn.cursor() as cur:
                         # Query existing version with row lock to serialize concurrent saves
                         cur.execute(

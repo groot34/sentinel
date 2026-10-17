@@ -2,6 +2,33 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission15] - Unreleased (offline validated; live PostgreSQL pending)
+
+### Added
+- **Bounded Transient PostgreSQL Failure Recovery (`core/persistence/retry.py`)**:
+  - `run_with_retry()` retries a single complete, side-effect-free transaction with a conservative bounded exponential backoff and full jitter.
+  - `RetryPolicy` defaults: `max_attempts=5`, `base_delay_seconds=0.05`, `max_delay_seconds=1.0` (ceiling 30 s); overridable via `SENTINEL_PG_RETRY_MAX_ATTEMPTS`, `SENTINEL_PG_RETRY_BASE_DELAY`, `SENTINEL_PG_RETRY_MAX_DELAY`. Malformed/out-of-range values are clamped rather than raising.
+  - Retries only SQLSTATE `40001` (`serialization_failure`) and `40P01` (`deadlock_detected`). OCC `ConcurrencyError`, constraint violations, and validation failures are **never** retried. Classification unwraps chained exceptions (`__cause__`/`__context__`).
+  - `RetryExhaustedError` subclasses `PersistenceError`, so exhausted retries surface through the existing API handler as `503 persistence_unavailable`.
+  - Deterministic, test-only fault-injection seam (`inject_transient_fault` / `maybe_inject_fault`); uses a `ContextVar` with no default hook, so it is a complete no-op in production.
+
+### Changed
+- **Repository Integration (`core/persistence/postgres.py`)**:
+  - `save()` is now a thin retry wrapper delegating to a new atomic `_save_transaction(state, events, attempt)`. The original transaction body is preserved unchanged (row lock, state write, atomic outbox insert).
+  - Optional `retry_policy` constructor argument (defaults to `policy_from_env()`); existing callers are unaffected.
+  - Each attempt restores `state.version` to its entry value before the transaction and on exhaustion, preventing OCC double-increment and duplicate outbox events across attempts.
+- **`Makefile`**: `test-postgres` now includes `tests/test_pg_retry.py`.
+- **`.github/workflows/ci.yml`**: the offline job comment documents that `tests/test_pg_retry.py` runs its offline tests there while its 4 live integration tests skip gracefully and execute in the `postgres` job.
+
+### Tests
+- **`tests/test_pg_retry.py`** — 25 tests (21 offline, 4 live PostgreSQL 16):
+  - Offline: SQLSTATE classification, wrapped-error detection, `policy_from_env` clamping/defaults, transient-then-success, deadlock-then-success, retry-budget exhaustion (typed error + cause chain), permanent-error rejection, OCC-not-retried, bounded/jittered backoff, exponential growth to cap, zero base delay, fault-seam no-op/apply/clear, and repository wiring (retry-then-commit, version restore on exhaustion, per-attempt version reset, OCC never retried, validation rejection, permanent wrapped error not retried).
+  - Live (skipped without a database): injected `40001` then real commit with exactly one event; exhausted retries leaving no partial state; OCC conflict distinct from a retryable error; state + outbox atomic under retry.
+
+### Notes / Limitations
+- No production isolation level was changed; Sentinel uses the server default **READ COMMITTED**, which does not naturally produce `40001`. No serialisable-isolation or phantom-read guarantee is claimed.
+- **Validation status**: offline suite (648 passed / 6 skipped / 1 warning in the CI offline configuration; 691 passed / 42 skipped / 1 warning for the full local suite) and incident validation (51/51) executed locally. The 4 live PostgreSQL integration tests were **not executed** (Docker daemon unavailable locally) and remain pending CI. Mission 15 is therefore **not** marked complete.
+
 ## [2.0.0-mission14-phase4] - Unreleased
 
 ### Added

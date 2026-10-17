@@ -112,10 +112,18 @@
     - `Makefile` targets: `db-up`, `db-down`, `db-migrate`, `db-status`, `test-postgres`, `test-all`.
     - All six project documents updated to reflect Phases 2–4.
   - Verified baseline: 670 passed, 38 skipped (36 PostgreSQL + 2 Windows symlink), 1 warning. All 36 PostgreSQL integration tests written and locally skip gracefully when Docker is offline. CI will execute them on first push.
+- [ ] **Mission 15: PostgreSQL Serialization Failure Recovery** (2026-10-17, offline validated — live PostgreSQL pending)
+  - Added `core/persistence/retry.py`: bounded, jittered exponential-backoff retry of a complete, side-effect-free transaction. Retries only SQLSTATE `40001` (`serialization_failure`) and `40P01` (`deadlock_detected`); never retries OCC `ConcurrencyError`, constraint violations, or validation failures.
+  - `RetryPolicy` defaults: `max_attempts=5`, `base_delay=0.05s`, `max_delay=1.0s` (ceiling 30s); overridable via `SENTINEL_PG_RETRY_*` env vars (clamped, never crash construction).
+  - `RetryExhaustedError` subclasses `PersistenceError` → API `503 persistence_unavailable` on budget exhaustion; in-memory `state.version` restored.
+  - Integrated into `PostgresRepository.save()` via a new atomic `_save_transaction()`; each attempt restores the OCC version to its entry value.
+  - `tests/test_pg_retry.py`: 25 tests — 21 offline (all passing locally) + 4 live PostgreSQL 16 integration tests.
+  - **Executed locally**: focused retry tests 21 passed / 4 skipped; CI-config offline suite 648 passed / 6 skipped / 1 warning; full suite 691 passed / 42 skipped / 1 warning; incident validation 51/51; `git diff --check` clean.
+  - **Not marked complete**: the 4 live PostgreSQL 16 integration tests were NOT executed (Docker daemon unavailable locally). They are written and will run in CI's `postgres` job.
 
 ---
 
-## Post-Mission 14 Remaining Engineering Work
+## Post-Mission 15 Remaining Engineering Work
 - [ ] **Distributed Task Queue Integration**:
   - Extend in-process background execution to durable external task queues (Redis Streams, Celery, Temporal, or BullMQ) across multi-node worker clusters.
 - [ ] **External Event Bus Streaming Connectors**:

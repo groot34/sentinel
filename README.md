@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **670 passed, 38 skipped, 1 warning** |
+| Automated tests | — | **691 passed, 42 skipped, 1 warning** |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: 38 tests are skipped in environments where PostgreSQL is unconfigured or non-admin Windows symlink privileges are absent. With Docker and `make db-up && make db-migrate`, all PostgreSQL integration tests execute — CI enforces this via a `postgres:16-alpine` service container.)*
+*(Note: 42 tests are skipped in environments where PostgreSQL is unconfigured or non-admin Windows symlink privileges are absent — 40 PostgreSQL live integration tests inclusive of Mission 15's 4 retry tests, plus 2 Windows symlink tests. With Docker and `make db-up && make db-migrate`, all PostgreSQL integration tests execute — CI enforces this via a `postgres:16-alpine` service container.)*
 
 ---
 
@@ -317,11 +317,13 @@ cp .env.example .env
 ```bash
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
-# Current verified result: 670 passed, 38 skipped, 1 warning in ~15s
-# (38 skipped: 36 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
-#  unset/unreachable; 2 Windows symlink tests skipped for non-admin accounts without
-#  Developer Mode. Mission 14 added 18 new tests beyond the 652/32 Mission 13 baseline.)
-# With make db-up && make db-migrate, all 36 PostgreSQL tests execute (0-2 skipped).
+# Current verified result: 691 passed, 42 skipped, 1 warning in ~12s
+# (42 skipped: 40 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
+#  unset/unreachable — including Mission 15's 4 transient-failure retry tests; 2 Windows
+#  symlink tests skipped for non-admin accounts without Developer Mode.
+#  Mission 14 added 18 tests beyond the 652/32 Mission 13 baseline; Mission 15 added 25
+#  tests in tests/test_pg_retry.py (21 offline, 4 live PostgreSQL).)
+# With make db-up && make db-migrate, all PostgreSQL tests execute (0-2 skipped).
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -471,6 +473,22 @@ The `GET /investigations/{id}/events` endpoint provides dual-mode event access v
 | **Event History** | `backend_supports_event_history: false` | Fully supported via durable `event_outbox` |
 | **SSE Streaming** | In-memory during run only | Durable history replay + live streaming |
 | **Event Worker** | Not applicable | Background daemon with retry backoff & deduplication |
+| **Transient Failure Recovery** | Not applicable | Bounded retry of the whole `save()` transaction on SQLSTATE `40001` / `40P01` (Mission 15) |
+
+### 11.1 Transient PostgreSQL Failure Recovery (Mission 15)
+
+`PostgresRepository.save()` retries the **entire** transaction on transient
+PostgreSQL contention errors — SQLSTATE `40001` (`serialization_failure`) and
+`40P01` (`deadlock_detected`) — with a conservative, bounded exponential backoff
+plus full jitter.
+
+- **Retried**: `40001`, `40P01` only (whole transaction, fresh connection per attempt).
+- **Never retried**: OCC `ConcurrencyError` (`409 Conflict`), constraint violations, validation/safety failures.
+- **Defaults**: `SENTINEL_PG_RETRY_MAX_ATTEMPTS=5`, `SENTINEL_PG_RETRY_BASE_DELAY=0.05` s, `SENTINEL_PG_RETRY_MAX_DELAY=1.0` s (ceiling ≤ 30 s). Invalid values are clamped, never crash construction.
+- **Exhaustion**: raises `RetryExhaustedError` (subclass of `PersistenceError`) → API `503 persistence_unavailable`; the in-memory state version is restored.
+- **Boundary**: retry applies only to `save()`; re-running it cannot duplicate external side effects, and OCC/lease/outbox atomicity are preserved. Each attempt restores `state.version` to its entry value, so retries never double-increment the version or duplicate outbox events.
+- **Isolation caveat**: no explicit isolation level is set (server default **READ COMMITTED**), so no serialisable/phantom-read guarantee is claimed. Because READ COMMITTED does not naturally emit `40001`, tests use a deterministic fault-injection seam (`core.persistence.retry.inject_transient_fault`, a no-op in production) alongside live PostgreSQL integration tests.
+- **Verified**: 21 offline retry tests pass; 4 live PostgreSQL 16 integration tests are written (skipped locally without a database, executed in CI's `postgres` job).
 
 ---
 

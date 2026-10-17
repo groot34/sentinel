@@ -29,15 +29,48 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome: 670 passed, 38 skipped, 1 warning in ~15s
-# (38 skipped: 36 integration tests requiring a live PostgreSQL instance skipped when
-#  SENTINEL_DATABASE_URL is unset/unreachable; 2 symlink tests skipped on Windows without
-#  Developer Mode. On Linux CI all 36 PostgreSQL tests execute, reducing skips to 0.)
+# Verified outcome: 691 passed, 42 skipped, 1 warning in ~12s
+# (42 skipped: 40 integration tests requiring a live PostgreSQL instance skipped when
+#  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
+#  retry tests; 2 symlink tests skipped on Windows without Developer Mode.
+#  On Linux CI all PostgreSQL tests execute, reducing skips to 0.)
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
 # Verified outcome: 51 passed in ~0.5s
 ```
+
+## Transient Failure Recovery Tests (Mission 15)
+
+Bounded transient PostgreSQL failure recovery (`40001` / `40P01`) lives in
+`core/persistence/retry.py` and is covered by `tests/test_pg_retry.py`. The 21
+offline tests (classification, retry engine, backoff bounds, repository wiring,
+fault-injection seam) require no database; the 4 integration tests require a live
+PostgreSQL instance.
+
+```bash
+# Offline retry-engine + repository-wiring tests (no database, no real sleeps)
+pytest tests/test_pg_retry.py -v
+# Verified outcome (no database): 21 passed, 4 skipped
+
+# Live PostgreSQL 16 integration (requires make db-up && make db-migrate)
+SENTINEL_DATABASE_URL=postgresql://sentinel:sentinel_dev_password@localhost:5432/sentinel_db \
+  pytest tests/test_pg_retry.py -v
+# With PostgreSQL available, the 4 integration tests execute:
+#   - injected 40001 then real commit (exactly one event persisted; version unchanged by retries)
+#   - exhausted retries leave no partial state or orphaned events
+#   - OCC conflict stays distinguishable from retryable errors
+#   - state and outbox commit atomically under an injected retry
+```
+
+Retry configuration (conservative defaults, env-overridable; malformed values are clamped):
+`SENTINEL_PG_RETRY_MAX_ATTEMPTS=5`, `SENTINEL_PG_RETRY_BASE_DELAY=0.05`,
+`SENTINEL_PG_RETRY_MAX_DELAY=1.0`.
+
+> Note: Sentinel does not set an explicit isolation level, so the server default
+> **READ COMMITTED** applies and `40001` is exercised via a deterministic
+> fault-injection seam rather than relying on isolation level. No serialisable or
+> phantom-read guarantee is claimed.
 
 ## PostgreSQL Integration Testing
 
@@ -63,11 +96,11 @@ make db-status
 
 # 4. Run live PostgreSQL integration tests only
 make test-postgres
-# Expected with DB available: all 36 PG tests execute (none skipped).
+# Expected with DB available: all 40 PG tests execute (none skipped).
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Expected: 670+ passed, ≤2 skipped (Windows-symlink only), 1 warning.
+# Expected: 691+ passed, ≤2 skipped (Windows-symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
