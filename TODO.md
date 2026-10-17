@@ -104,22 +104,22 @@
   - Background failure recovery: unhandled exceptions persist `FAILED` status, preventing orphaned `RUNNING` states.
   - 43 tests in `tests/test_async_dispatch.py` (652 passed, 32 skipped, 1 warning total pytest suite).
 
-- [x] **Mission 14: PostgreSQL Reliability Harness** (commit pending)
+- [x] **Mission 14: PostgreSQL Reliability Harness** (commits `1d3b2e4`, `a5e535a`)
   - Phase 2: Authoritative migration runner (`core/persistence/schema.py`): `schema_migrations` tracking table, deterministic numeric migration discovery, per-migration transactional execution, checksum tampering detection, and strict pre-existing schema adoption requiring all 11 investigation columns + 3 indexes and all 9 outbox columns + 3 indexes. Exposes standalone CLI (`python -m core.persistence.schema apply|verify|status`).
   - Phase 3: Live concurrency tests (`tests/test_postgres_concurrency.py`): 4 live tests using `threading.Barrier` coordination across separate connection pools to validate OCC competing writers, expired lease contention, concurrent async HTTP resume (202 vs 409), and transactional outbox atomicity with forced rollback. Updated `tests/test_outbox.py` to replace hardcoded `skipif(True)` stubs with genuine PostgreSQL implementations.
   - Phase 4: CI and developer workflow:
     - `.github/workflows/ci.yml`: two-job workflow (`offline` + `postgres`) with `postgres:16-alpine` service container, health-checked schema bootstrapping, full test suite execution, skip enforcement (CI fails if >2 tests skip on Linux), incident dataset validation, and `git diff --check`.
     - `Makefile` targets: `db-up`, `db-down`, `db-migrate`, `db-status`, `test-postgres`, `test-all`.
     - All six project documents updated to reflect Phases 2–4.
-  - Verified baseline: 670 passed, 38 skipped (36 PostgreSQL + 2 Windows symlink), 1 warning. All 36 PostgreSQL integration tests written and locally skip gracefully when Docker is offline. CI will execute them on first push.
-- [ ] **Mission 15: PostgreSQL Serialization Failure Recovery** (2026-10-17, offline validated — live PostgreSQL pending)
+  - Verified baseline: 670 passed, 38 skipped (36 PostgreSQL + 2 Windows symlink), 1 warning. All 36 PostgreSQL integration tests were written to skip gracefully when Docker is offline; they now execute in CI's `postgres` job (0 skipped).
+- [x] **Mission 15: PostgreSQL Serialization Failure Recovery** (2026-10-17, complete — live PostgreSQL 16 validated in CI)
   - Added `core/persistence/retry.py`: bounded, jittered exponential-backoff retry of a complete, side-effect-free transaction. Retries only SQLSTATE `40001` (`serialization_failure`) and `40P01` (`deadlock_detected`); never retries OCC `ConcurrencyError`, constraint violations, or validation failures.
   - `RetryPolicy` defaults: `max_attempts=5`, `base_delay=0.05s`, `max_delay=1.0s` (ceiling 30s); overridable via `SENTINEL_PG_RETRY_*` env vars (clamped, never crash construction).
   - `RetryExhaustedError` subclasses `PersistenceError` → API `503 persistence_unavailable` on budget exhaustion; in-memory `state.version` restored.
   - Integrated into `PostgresRepository.save()` via a new atomic `_save_transaction()`; each attempt restores the OCC version to its entry value.
   - `tests/test_pg_retry.py`: 25 tests — 21 offline (all passing locally) + 4 live PostgreSQL 16 integration tests.
-  - **Executed locally**: focused retry tests 21 passed / 4 skipped; CI-config offline suite 648 passed / 6 skipped / 1 warning; full suite 691 passed / 42 skipped / 1 warning; incident validation 51/51; `git diff --check` clean.
-  - **Not marked complete**: the 4 live PostgreSQL 16 integration tests were NOT executed (Docker daemon unavailable locally). They are written and will run in CI's `postgres` job.
+  - **Verified in GitHub Actions** ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`): `offline` job 650 passed / 4 skipped / 1 warning; `postgres` job (PostgreSQL 16) 733 passed / **0 skipped** / 3 warnings; incident validation 51/51. All 4 live PostgreSQL 16 retry tests executed and passed.
+  - **Executed locally** (Windows, no database): focused retry tests 21 passed / 4 skipped; full suite 691 passed / 42 skipped / 1 warning; `git diff --check` clean.
 
 ---
 

@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **691 passed, 42 skipped, 1 warning** |
+| Automated tests | — | **733 passed, 0 skipped** (live PostgreSQL 16 CI) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: 42 tests are skipped in environments where PostgreSQL is unconfigured or non-admin Windows symlink privileges are absent — 40 PostgreSQL live integration tests inclusive of Mission 15's 4 retry tests, plus 2 Windows symlink tests. With Docker and `make db-up && make db-migrate`, all PostgreSQL integration tests execute — CI enforces this via a `postgres:16-alpine` service container.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 42 tests skip — 40 PostgreSQL live integration tests (including Mission 15's 4 retry tests) plus 2 Windows symlink tests, giving 691 passed / 42 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Verified in GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped.)*
 
 ---
 
@@ -317,13 +317,14 @@ cp .env.example .env
 ```bash
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
-# Current verified result: 691 passed, 42 skipped, 1 warning in ~12s
+# Verified in CI (run 39048469043): 733 passed, 0 skipped with live PostgreSQL 16.
+# Verified locally without a database: 691 passed, 42 skipped, 1 warning in ~12s
 # (42 skipped: 40 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
 #  unset/unreachable — including Mission 15's 4 transient-failure retry tests; 2 Windows
 #  symlink tests skipped for non-admin accounts without Developer Mode.
 #  Mission 14 added 18 tests beyond the 652/32 Mission 13 baseline; Mission 15 added 25
 #  tests in tests/test_pg_retry.py (21 offline, 4 live PostgreSQL).)
-# With make db-up && make db-migrate, all PostgreSQL tests execute (0-2 skipped).
+# With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -488,7 +489,7 @@ plus full jitter.
 - **Exhaustion**: raises `RetryExhaustedError` (subclass of `PersistenceError`) → API `503 persistence_unavailable`; the in-memory state version is restored.
 - **Boundary**: retry applies only to `save()`; re-running it cannot duplicate external side effects, and OCC/lease/outbox atomicity are preserved. Each attempt restores `state.version` to its entry value, so retries never double-increment the version or duplicate outbox events.
 - **Isolation caveat**: no explicit isolation level is set (server default **READ COMMITTED**), so no serialisable/phantom-read guarantee is claimed. Because READ COMMITTED does not naturally emit `40001`, tests use a deterministic fault-injection seam (`core.persistence.retry.inject_transient_fault`, a no-op in production) alongside live PostgreSQL integration tests.
-- **Verified**: 21 offline retry tests pass; 4 live PostgreSQL 16 integration tests are written (skipped locally without a database, executed in CI's `postgres` job).
+- **Verified**: 21 offline retry tests pass locally; the 4 live PostgreSQL 16 integration tests executed and passed in CI's `postgres` job ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), 733 passed / 0 skipped).
 
 ---
 
@@ -505,6 +506,6 @@ plus full jitter.
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, and SSE).
 - **[docs/CURRENT_STATE_AUDIT.md](docs/CURRENT_STATE_AUDIT.md)** — Exhaustive repository state audit, current test counts, verified capabilities, and unresolved items.
-- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 12C.
+- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 15.
 - **[REPRODUCE.md](REPRODUCE.md)** — Complete guide for setting up, running offline tests, launching the API server, querying endpoints, and executing benchmark evaluations.
-- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-12C engineering work.
+- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 15 engineering work.

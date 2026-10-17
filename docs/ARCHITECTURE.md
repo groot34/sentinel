@@ -449,10 +449,10 @@ The `.github/workflows/ci.yml` workflow runs on every push to `main` and every p
 │  git diff       │          │  pytest (full suite + DB)   │
 │  --check        │          │  assert skips ≤ 2           │
 │                 │          │  validate_incidents.py      │
-│  Expected:      │          │  git diff --check           │
-│  648p, ≤6s, 1w  │          │                             │
-└─────────────────┘          │  Expected (Linux + PG):     │
-                             │  691+ passed, 0-2 skipped   │
+│  Verified:      │          │  git diff --check           │
+│  650p, 4s, 1w   │          │                             │
+└─────────────────┘          │  Verified (Linux + PG):     │
+                             │  733 passed, 0 skipped      │
                              └─────────────────────────────┘
 ```
 
@@ -537,6 +537,8 @@ deterministic, test-only fault-injection seam
 `SerializationFailure` at the transaction boundary. It is activated only by test
 code; no hook is installed in production, so `maybe_inject_fault` is a no-op there.
 
-> **Status**: Implemented; offline tests (21) pass. The 4 live PostgreSQL 16
-> integration tests are written but not yet executed locally (no database
-> available) — pending CI's `postgres` job.
+> **Status**: Implemented and validated. The 21 offline retry tests pass locally;
+> the 4 live PostgreSQL 16 integration tests executed and passed in CI's `postgres`
+> job ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043),
+> commit `fa4f1c7` — 733 passed, 0 skipped). Live validation was performed in CI only
+> (no local PostgreSQL instance was available).

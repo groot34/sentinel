@@ -2,7 +2,7 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
-## [2.0.0-mission15] - Unreleased (offline validated; live PostgreSQL pending)
+## [2.0.0-mission15] - 2026-10-17 (validated: offline + live PostgreSQL 16 CI)
 
 ### Added
 - **Bounded Transient PostgreSQL Failure Recovery (`core/persistence/retry.py`)**:
@@ -25,9 +25,12 @@ All notable changes and iterative improvements to the Sentinel project will be d
   - Offline: SQLSTATE classification, wrapped-error detection, `policy_from_env` clamping/defaults, transient-then-success, deadlock-then-success, retry-budget exhaustion (typed error + cause chain), permanent-error rejection, OCC-not-retried, bounded/jittered backoff, exponential growth to cap, zero base delay, fault-seam no-op/apply/clear, and repository wiring (retry-then-commit, version restore on exhaustion, per-attempt version reset, OCC never retried, validation rejection, permanent wrapped error not retried).
   - Live (skipped without a database): injected `40001` then real commit with exactly one event; exhausted retries leaving no partial state; OCC conflict distinct from a retryable error; state + outbox atomic under retry.
 
+### Fixed
+- **Concurrent async resume test race (`tests/test_postgres_concurrency.py`)**: `test_live_concurrent_async_resume_requests` opened a separate `patch("api.routes.IncidentOrchestrator")` context inside each worker thread. Because `unittest.mock.patch` replaces a process-global symbol, the first thread to leave its context un-patched it while the other thread's synchronous `TestClient` background task could still construct the real orchestrator, yielding a non-deterministic persisted state version. The patch is now applied once in a shared context covering both thread starts and joins, and cleanup runs in a `finally` block so `inc_conc_test` rows cannot leak into later tests. No production code changed.
+
 ### Notes / Limitations
 - No production isolation level was changed; Sentinel uses the server default **READ COMMITTED**, which does not naturally produce `40001`. No serialisable-isolation or phantom-read guarantee is claimed.
-- **Validation status**: offline suite (648 passed / 6 skipped / 1 warning in the CI offline configuration; 691 passed / 42 skipped / 1 warning for the full local suite) and incident validation (51/51) executed locally. The 4 live PostgreSQL integration tests were **not executed** (Docker daemon unavailable locally) and remain pending CI. Mission 15 is therefore **not** marked complete.
+- **Validation status**: verified green in GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) — `offline` job 650 passed / 4 skipped / 1 warning; `postgres` job (PostgreSQL 16) 733 passed / **0 skipped** / 3 warnings, including all 4 live retry integration tests; incident validation 51/51. Locally (Windows, no database): full suite 691 passed / 42 skipped / 1 warning. Mission 15 is **complete**.
 
 ## [2.0.0-mission14-phase4] - Unreleased
 

@@ -29,11 +29,12 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome: 691 passed, 42 skipped, 1 warning in ~12s
+# Verified outcome (local, Windows, no database): 691 passed, 42 skipped, 1 warning in ~12s
 # (42 skipped: 40 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
-#  retry tests; 2 symlink tests skipped on Windows without Developer Mode.
-#  On Linux CI all PostgreSQL tests execute, reducing skips to 0.)
+#  retry tests; 2 symlink tests skipped on Windows without Developer Mode.)
+# Verified in CI (run 39048469043): the postgres job executes every PostgreSQL test and
+#  reported 733 passed, 0 skipped; the offline job reported 650 passed, 4 skipped.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -62,6 +63,11 @@ SENTINEL_DATABASE_URL=postgresql://sentinel:sentinel_dev_password@localhost:5432
 #   - OCC conflict stays distinguishable from retryable errors
 #   - state and outbox commit atomically under an injected retry
 ```
+
+All 4 integration tests executed and passed in CI's `postgres` job
+([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043),
+733 passed / 0 skipped). They were **not** run locally — Docker is unavailable on the
+development machine, so the offline tests are the only ones executed locally.
 
 Retry configuration (conservative defaults, env-overridable; malformed values are clamped):
 `SENTINEL_PG_RETRY_MAX_ATTEMPTS=5`, `SENTINEL_PG_RETRY_BASE_DELAY=0.05`,
@@ -96,11 +102,13 @@ make db-status
 
 # 4. Run live PostgreSQL integration tests only
 make test-postgres
-# Expected with DB available: all 40 PG tests execute (none skipped).
+# With a DB available locally: all 40 PG tests execute (none skipped).
+# CI (run 39048469043) confirms the postgres job at 733 passed, 0 skipped.
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Expected: 691+ passed, ≤2 skipped (Windows-symlink only), 1 warning.
+# Locally on Windows without a DB (verified): 691 passed, 42 skipped, 1 warning.
+# With a local DB (expected): 731 passed, 2 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -132,9 +140,12 @@ The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
 - **`offline`** — full unit and mock suite with no database; validates incident dataset; `git diff --check`.
 - **`postgres`** — starts `postgres:16-alpine`, bootstraps the schema, runs the full test suite with `SENTINEL_DATABASE_URL` set. Fails if any required PostgreSQL integration test skips.
 
-> **Important**: The first verified live run has not yet occurred in CI (Docker is unavailable locally).
-> Until a CI run completes successfully, treat the live PostgreSQL test results as "expected to pass"
-> based on offline code review and test logic, not as a proven executed result.
+> **Verified live run**: GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043)
+> (commit `fa4f1c7`) completed green. The `postgres` job reported **733 passed, 0 skipped** against
+> PostgreSQL 16 — covering all 40 guarded PostgreSQL integration tests, including the 4 Mission 15
+> transient-failure retry tests. The `offline` job reported **650 passed, 4 skipped**. Live PostgreSQL
+> validation was performed **in CI only**; Docker is unavailable on the local development machine, so
+> no local PostgreSQL testing is claimed.
 
 
 ## Starting the API Server
