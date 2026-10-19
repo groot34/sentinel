@@ -2,19 +2,20 @@
 
 **Audit Date**: 2026-10-19<br>
 **Branch**: `main`<br>
-**Base Commit**: `1d55db8` (*docs: complete Mission 15 validation status*)<br>
-**Working Tree Status**: Mission 16 changes present in the working tree (uncommitted and unpushed); see §5/§6
+**Base Commit**: `aba70e1` (*feat: make outbox delivery concurrent and crash-safe*)<br>
+**Working Tree Status**: clean; Mission 16 committed as `aba70e1` and pushed to `origin/main`, with GitHub Actions run [39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) green. See §5/§6
 
 ---
 
 ## 1. Executive Summary & Verification Baseline
 
-This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 14, Phases 2–4 (PostgreSQL Reliability Harness: Schema Bootstrapping, Live Concurrency Tests, and CI/Developer Workflow), Mission 15 (PostgreSQL Serialization Failure Recovery), whose live PostgreSQL behaviour is validated in CI, and Mission 16 (Concurrent & Crash-Safe Outbox Delivery), whose implementation is complete and locally tested but whose live PostgreSQL validation is pending CI. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
+This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 14, Phases 2–4 (PostgreSQL Reliability Harness: Schema Bootstrapping, Live Concurrency Tests, and CI/Developer Workflow), Mission 15 (PostgreSQL Serialization Failure Recovery), whose live PostgreSQL behaviour is validated in CI, and Mission 16 (Concurrent & Crash-Safe Outbox Delivery), which is complete and validated by live PostgreSQL 16 CI. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
 
 ### Current Test Suite & Verification Results
 
 - **Pytest Suite (offline, local Windows / Docker unavailable, Mission 16)**: **695 passed, 48 skipped, 1 warning** (743 collected in ~13 s).
-- **Pytest Suite (GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`, Mission 15)**: `postgres` job (PostgreSQL 16) **733 passed, 0 skipped, 3 warnings**; `offline` job **650 passed, 4 skipped, 1 warning**. Mission 16 adds 10 tests (4 offline worker + 6 live outbox); its live PostgreSQL run is pending.
+- **Pytest Suite (GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), commit `aba70e1`, Mission 16)**: `postgres` job (PostgreSQL 16) **743 passed, 0 skipped, 3 warnings** (`Total skipped: 0`, so all 6 Mission 16 live outbox tests executed); `offline` job **654 passed, 4 skipped, 1 warning**. Migrations `001`–`003` applied and schema verification passed.
+- **Pytest Suite (GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`, Mission 15)**: `postgres` job (PostgreSQL 16) **733 passed, 0 skipped, 3 warnings**; `offline` job **650 passed, 4 skipped, 1 warning**.
 - **Incident Dataset Integrity Suite** (`tests/validate_incidents.py`): **51 / 51 passed** (100%) — run in both CI jobs.
 - **`git diff --check`**: Exit code 0 (clean — no trailing whitespace; only benign LF→CRLF notices on Windows).
 
@@ -26,10 +27,10 @@ This audit establishes the verified state of the Sentinel repository following t
    - 2 in `tests/test_schema_migration.py` (live bootstrap and repeat idempotency)
    - 28 in `tests/test_postgres_persistence.py` (18 contract tests inherited from `PersistenceContractTests` + 10 PostgreSQL-specific integration tests)
    - 4 in `tests/test_pg_retry.py` (Mission 15: injected `40001` then real commit; exhausted retries leave no partial state; OCC conflict distinct from retryable error; state + outbox atomic under retry)
-   - All 46 execute on CI; the `postgres` job reports **0 skipped** (verified in run 39048469043 for the 40 Mission-15-era tests; the 6 Mission 16 tests await CI).
+   - All 46 execute on CI; the `postgres` job reports **0 skipped** (verified in [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) for Mission 16 — 743 passed / 0 skipped, and previously in run 39048469043 for the 40 Mission-15-era tests).
 3. **Deprecation Warning (1 warning)**: Starlette deprecation notice in `tests/test_api.py` regarding `httpx` integration with `starlette.testclient.TestClient`.
 
-> **Important**: Live PostgreSQL validation for Mission 15 is complete. GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) passed both jobs: the `postgres` job provisioned the `postgres:16-alpine` container, applied the schema, and reported **733 passed / 0 skipped** — including all 40 PostgreSQL integration tests and Mission 15's 4 retry tests. The docs commit `1d55db8` also passed green in [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) with identical results; both runs are genuine and mutually consistent. Mission 16's live PostgreSQL validation is **pending CI** (Docker is unavailable on the local development machine).
+> **Important**: Live PostgreSQL validation for Mission 15 is complete. GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) passed both jobs: the `postgres` job provisioned the `postgres:16-alpine` container, applied the schema, and reported **733 passed / 0 skipped** — including all 40 PostgreSQL integration tests and Mission 15's 4 retry tests. The docs commit `1d55db8` also passed green in [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) with identical results; both runs are genuine and mutually consistent. Mission 16's live PostgreSQL validation is **complete**: [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`) passed both jobs — `postgres` (PostgreSQL 16) 743 passed / 0 skipped (`Total skipped: 0`, all 6 live outbox tests executed) and `offline` 654 passed / 4 skipped; migrations `001`–`003` applied and schema verification passed.
 
 ---
 
@@ -126,7 +127,7 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 - **Crash recovery**: `release_expired_claims()` returns claims past `claim_expires_at` (default TTL 300 s) to `pending`; `mark_processed()` / `mark_failed()` clear the claim. Completed and terminally failed events are never reclaimed.
 - **Duplicate-event fix**: `_save_transaction()` and `save_events()` use `INSERT ... ON CONFLICT (event_id) DO NOTHING` instead of a swallowed `UniqueViolation`, so a duplicate event ID no longer aborts the surrounding transaction. Mission 15 retry classification is unchanged.
 - **Guarantee**: durable, concurrency-safe claims with **at-least-once** delivery; exactly-once **external** delivery is **not** claimed (in-process `EventBus` destination; consumers must be idempotent and key on `event_id`).
-- **Validation status**: implementation complete. The 4 new offline worker tests (`tests/test_event_worker.py`, now 11) pass locally; the 6 new live PostgreSQL integration tests (`tests/test_outbox.py`) are **pending CI** (Docker unavailable locally). Local offline suite: 695 passed / 48 skipped / 1 warning.
+- **Validation status**: complete and validated. The 4 new offline worker tests (`tests/test_event_worker.py`, now 11) pass locally; the 6 live PostgreSQL integration tests (`tests/test_outbox.py`) executed and passed in CI's `postgres` job ([run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), 743 passed / 0 skipped, `Total skipped: 0`). Local offline suite: 695 passed / 48 skipped / 1 warning.
 
 ---
 
@@ -148,7 +149,6 @@ The following represents genuine upcoming engineering tasks, clearly separated f
 1. **Distributed Task Queue Integration**: Mission 13 implemented in-process asynchronous dispatch via Starlette `BackgroundTask`. Extending to durable external queues (Celery, Redis Streams, Temporal, BullMQ) across distributed worker pools remains a future enterprise enhancement.
 2. **External Event Bus Integrations**: Mission 16 made `EventDeliveryWorker` safe and crash-tolerant across concurrent worker processes, but it still publishes to the in-process bus. Integrating Redis, Kafka, or webhook publishers for external consumers remains future work; exactly-once external delivery would require consumer-side idempotency or a transactional broker.
 3. **Explicit `SERIALIZABLE` isolation (optional)**: Mission 15 handles `40001`/`40P01` defensively but Sentinel still runs at the server-default READ COMMITTED level; a future mission could adopt explicit serialisable isolation with the accompanying phantom-read guarantees and tests.
-4. **Live PostgreSQL validation of Mission 16**: the 6 new live outbox integration tests are pending CI (Docker unavailable locally).
 
 ---
 

@@ -456,9 +456,9 @@ The `.github/workflows/ci.yml` workflow runs on every push to `main` and every p
 │  --check        │          │  assert skips ≤ 2           │
 │                 │          │  validate_incidents.py      │
 │  Verified:      │          │  git diff --check           │
-│  650p, 4s, 1w   │          │                             │
+│  654p, 4s, 1w   │          │                             │
 └─────────────────┘          │  Verified (Linux + PG):     │
-                             │  733 passed, 0 skipped      │
+                             │  743 passed, 0 skipped      │
                              └─────────────────────────────┘
 ```
 
@@ -467,7 +467,7 @@ The `.github/workflows/ci.yml` workflow runs on every push to `main` and every p
 - **Schema ownership**: The CI runner invokes `python -m core.persistence.schema apply` (not Docker entrypoint scripts), ensuring the same authoritative migration runner is used in CI and locally.
 - **Offline exclusions**: The `offline` job excludes exactly four PostgreSQL-only modules. `test_persistence_contract.py` is intentionally **not** excluded because it contains only offline `TestFilesystemRepositoryContract` tests with no database dependency. `tests/test_pg_retry.py` is also **not** excluded: its 21 offline retry/wiring tests run in the offline job, while its 4 live integration tests skip gracefully and execute in the `postgres` job.
 - **Symlink note**: The 2 Windows-symlink tests use a runtime probe (`_can_symlink()`) that attempts `Path.symlink_to()` in a temp directory. On Linux this succeeds without elevated privileges, so both tests execute and pass. Expected skip count on the `postgres` CI job: 0, with ≤2 as a conservative margin.
-- **Mission 16 test delta**: The 4 new offline worker tests raise the `offline` job to an expected 654 passed / 4 skipped, and the 6 new live outbox tests raise the `postgres` job to an expected 743 passed / 0 skipped. These figures are **pending** the first CI run for Mission 16 (the diagram above shows the Mission 15 verified run).
+- **Mission 16 test delta (verified)**: The 4 new offline worker tests raise the `offline` job to 654 passed / 4 skipped, and the 6 new live outbox tests raise the `postgres` job to 743 passed / 0 skipped — both confirmed in [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`); the diagram above shows that verified Mission 16 run.
 - **Meaningful `git diff --check`**: Uses `fetch-depth: 0` so full history is available for PR base SHAs and HEAD~1 on pushes. On push events, checks `HEAD~1..HEAD`. On pull-request events, checks `${{ github.event.pull_request.base.sha }}...HEAD`. This validates the whitespace hygiene of actual committed changes, not just the always-clean CI working tree.
 
 ### 4.2 Schema Migration CLI
@@ -597,9 +597,9 @@ concurrent claims, stale-claim recovery, future-retry and completed-event
 exclusion, deterministic ordering for tied timestamps, duplicate-ID
 non-abortion, and terminal failure retention.
 
-> **Status**: implementation complete. The 4 offline worker tests pass locally;
-> the 6 live PostgreSQL 16 integration tests are **pending CI** (no local
-> PostgreSQL instance is available). Locally (Windows, no database): full suite
-> 695 passed / 48 skipped / 1 warning; offline-job subset 652 passed / 6 skipped;
-> incident validation 51/51. Mission 16 is not marked fully validated until the
-> live PostgreSQL CI job passes with skip-count enforcement.
+> **Status**: validated. GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918)
+> (commit `aba70e1`) passed both jobs — `offline` 654 passed / 4 skipped / 1 warning and
+> `postgres` (PostgreSQL 16) 743 passed / 0 skipped / 3 warnings (`Total skipped: 0`), so all
+> 6 live outbox tests executed; migrations `001`–`003` applied and schema verification passed;
+> incident validation 51/51 in both jobs. Locally (Windows, no database): full suite 695 passed /
+> 48 skipped / 1 warning; offline-job subset 652 passed / 6 skipped; incident validation 51/51.

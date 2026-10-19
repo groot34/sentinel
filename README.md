@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **733 passed, 0 skipped** (live PostgreSQL 16 CI; Mission 16 adds 10 tests, CI pending) |
+| Automated tests | — | **743 passed, 0 skipped** (live PostgreSQL 16 CI; Mission 16 validated) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 48 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 2 Windows symlink tests, giving 695 passed / 48 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 live PostgreSQL validation is pending CI.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 48 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 2 Windows symlink tests, giving 695 passed / 48 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed.)*
 
 ---
 
@@ -331,7 +331,8 @@ pytest
 #  — 4 offline worker tests in tests/test_event_worker.py and 6 live PostgreSQL outbox tests in
 #  tests/test_outbox.py.)
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
-# Mission 16 live PostgreSQL validation is pending CI (Docker unavailable locally).
+# Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
+#  postgres job (PostgreSQL 16) 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests ran.
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -529,9 +530,9 @@ without double-claiming or losing work.
 - **Schema**: `core/persistence/sql/003_outbox_delivery_claim.sql` (additive and
   idempotent) adds `claimed_by`, `claimed_at`, `claim_expires_at`, and
   `next_attempt_at` to `event_outbox`, plus `idx_event_outbox_claim`.
-- **Validation**: implementation complete; 4 new offline worker tests and 6 new
-  live PostgreSQL integration tests added. Live PostgreSQL 16 validation is
-  **pending CI** (Docker unavailable locally).
+- **Validation**: validated in CI ([run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918),
+  commit `aba70e1`): `offline` job 654 passed / 4 skipped; `postgres` job (PostgreSQL 16)
+  743 passed / 0 skipped (`Total skipped: 0`), so all 6 live outbox tests executed.
 
 ---
 

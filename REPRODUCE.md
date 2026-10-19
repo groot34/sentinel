@@ -36,8 +36,8 @@ pytest
 #  Windows without Developer Mode.)
 # Verified in CI (run 39048469043, Mission 15): the postgres job executes every PostgreSQL
 #  test and reported 733 passed, 0 skipped; the offline job reported 650 passed, 4 skipped.
-#  Mission 16 adds 10 tests (4 offline worker + 6 live outbox); its live PostgreSQL
-#  validation is pending CI.
+#  Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
+#  postgres 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests executed.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -112,9 +112,11 @@ delivery. Because the destination is an in-process `EventBus`, exactly-once
 **external** delivery is **not** claimed; consumers must be idempotent and key on
 `event_id`.
 
-**Validation status**: the 4 new offline worker tests pass locally. The 6 new
-live PostgreSQL integration tests have **not** run locally (Docker is unavailable
-on the development machine) and are **pending CI**.
+**Validation status**: complete. The 4 new offline worker tests pass locally; the 6 new
+live PostgreSQL integration tests executed and passed in CI's `postgres` job
+([run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918),
+743 passed / 0 skipped, `Total skipped: 0`). Locally (Docker unavailable) the offline
+suite is the only one that runs.
 
 ## PostgreSQL Integration Testing
 
@@ -142,7 +144,7 @@ make db-status
 make test-postgres
 # With a DB available locally: all 46 PG tests execute (none skipped).
 # CI (run 39048469043, Mission 15) confirms the postgres job at 733 passed, 0 skipped;
-#  Mission 16 adds 6 live outbox tests, whose live validation is pending CI.
+#  Mission 16 (run 39277794918) confirms the postgres job at 743 passed, 0 skipped — all 6 live outbox tests executed.
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
@@ -193,7 +195,10 @@ The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
 > `39049346329` is the run for the follow-up documentation commit.
 >
 > **Mission 16** adds 10 tests (4 offline worker tests + 6 live PostgreSQL outbox tests). Its live
-> PostgreSQL validation is **pending CI**; the local run without a database is reported above.
+> PostgreSQL validation is complete: GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918)
+> (commit `aba70e1`) passed both jobs — `postgres` (PostgreSQL 16) **743 passed, 0 skipped**
+> (`Total skipped: 0`; all 6 live outbox tests executed) and `offline` **654 passed, 4 skipped**;
+> migrations `001`–`003` applied and schema verification passed; incident validation 51/51 in both jobs.
 
 
 ## Starting the API Server

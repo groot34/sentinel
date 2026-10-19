@@ -120,7 +120,7 @@
   - `tests/test_pg_retry.py`: 25 tests — 21 offline (all passing locally) + 4 live PostgreSQL 16 integration tests.
   - **Verified in GitHub Actions** ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`): `offline` job 650 passed / 4 skipped / 1 warning; `postgres` job (PostgreSQL 16) 733 passed / **0 skipped** / 3 warnings; incident validation 51/51. All 4 live PostgreSQL 16 retry tests executed and passed.
   - **Executed locally** (Windows, no database): focused retry tests 21 passed / 4 skipped; full suite 691 passed / 42 skipped / 1 warning; `git diff --check` clean.
-- [x] **Mission 16: Concurrent & Crash-Safe Outbox Delivery** (2026-10-19, implementation complete — live PostgreSQL 16 CI pending)
+- [x] **Mission 16: Concurrent & Crash-Safe Outbox Delivery** (2026-10-19, complete — live PostgreSQL 16 validated in CI)
   - Added `core/persistence/sql/003_outbox_delivery_claim.sql` (additive, idempotent): `claimed_by`, `claimed_at`, `claim_expires_at`, `next_attempt_at` (NOT NULL DEFAULT NOW()) plus index `idx_event_outbox_claim (status, next_attempt_at, created_at)`.
   - `OutboxRepository` extended with `claim_pending`, `release_expired_claims`, and `schedule_retry`; `fetch_pending` is now an observational query only and no longer drives delivery.
   - `PostgresRepository.claim_pending()` claims atomically via `SELECT ... FOR UPDATE SKIP LOCKED` followed by a targeted `UPDATE ... WHERE event_id = ANY(...)`, with deterministic `(created_at ASC, event_id ASC)` ordering; concurrent workers claim disjoint sets.
@@ -129,7 +129,7 @@
   - `EventDeliveryWorker` rewritten around claim → deliver → finalise; injectable clock/rng seams; at-least-once delivery (exactly-once external delivery is explicitly **not** claimed).
   - Tests: 4 new offline tests in `tests/test_event_worker.py` + 6 new live PostgreSQL tests in `tests/test_outbox.py`; collection 733 → 743.
   - **Executed locally** (Windows, no database): full suite 695 passed / 48 skipped / 1 warning; offline-job subset 652 passed / 6 skipped; `tests/test_pg_retry.py` 21 passed / 4 skipped; incident validation 51/51; `git diff --check` clean.
-  - **Live PostgreSQL 16 validation pending CI** (Docker unavailable locally); the 6 new live outbox tests have not yet executed.
+  - **Verified in GitHub Actions** ([run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), commit `aba70e1`): `offline` job 654 passed / 4 skipped / 1 warning; `postgres` job (PostgreSQL 16) 743 passed / **0 skipped** / 3 warnings (skip enforcement: `Total skipped: 0`), so all 6 live outbox tests executed; migrations `001`–`003` applied and schema verification passed; incident validation 51/51 in both jobs.
 
 ---
 

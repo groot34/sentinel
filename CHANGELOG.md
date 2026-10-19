@@ -2,7 +2,7 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
-## [2.0.0-mission16] - 2026-10-19 (implementation complete; live PostgreSQL CI pending)
+## [2.0.0-mission16] - 2026-10-19 (validated: offline + live PostgreSQL 16 CI)
 
 ### Added
 - **Concurrent & crash-safe outbox delivery**:
@@ -28,7 +28,7 @@ All notable changes and iterative improvements to the Sentinel project will be d
 
 ### Notes / Limitations
 - **Delivery guarantee**: durable, concurrency-safe claims with **at-least-once** delivery. Because the destination is an in-process `EventBus`, exactly-once **external** delivery is **not** claimed; consumers must be idempotent and key on `event_id`.
-- **Validation status**: implementation complete. Locally (Windows, no database): full suite **695 passed / 48 skipped / 1 warning** (743 collected); the offline-job subset **652 passed / 6 skipped** (the two extra skips are the Windows symlink tests, which pass on Linux); `tests/test_pg_retry.py` **21 passed / 4 skipped**; incident validation **51/51**; `git diff --check` clean. Live PostgreSQL 16 validation is **pending CI** — Docker is unavailable on the development machine, so the 6 new live outbox tests have not yet executed. Mission 16 is **not** marked fully validated until the live PostgreSQL CI job passes with the required skip-count enforcement.
+- **Validation status**: verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`) — `offline` job 654 passed / 4 skipped / 1 warning; `postgres` job (PostgreSQL 16) 743 passed / **0 skipped** / 3 warnings, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. All three migrations (`001_initial_schema`, `002_outbox_schema`, `003_outbox_delivery_claim`) applied and schema verification passed; incident validation 51/51 in both jobs; `git diff --check` clean. Locally (Windows, no database): full suite **695 passed / 48 skipped / 1 warning** (743 collected); the offline-job subset **652 passed / 6 skipped** (the two extra skips are the Windows symlink tests, which pass on Linux); `tests/test_pg_retry.py` **21 passed / 4 skipped**; incident validation **51/51**; `git diff --check` clean. Mission 16 is **complete**.
 - No production isolation level was changed, and no external broker (Redis, Kafka, Celery, Temporal, or BullMQ) was introduced.
 
 ## [2.0.0-mission15] - 2026-10-17 (validated: offline + live PostgreSQL 16 CI)
