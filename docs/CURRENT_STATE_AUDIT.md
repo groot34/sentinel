@@ -1,36 +1,35 @@
 # Sentinel Repository State Audit
 
-**Audit Date**: 2026-10-17<br>
+**Audit Date**: 2026-10-19<br>
 **Branch**: `main`<br>
-**Base Commit**: `fa4f1c7` (*fix(tests): stabilise concurrent async resume test*)<br>
-**Working Tree Status**: Clean code tree through `fa4f1c7`; documentation reconciliation for Mission 15 completion in progress
+**Base Commit**: `1d55db8` (*docs: complete Mission 15 validation status*)<br>
+**Working Tree Status**: Mission 16 changes present in the working tree (uncommitted and unpushed); see §5/§6
 
 ---
 
 ## 1. Executive Summary & Verification Baseline
 
-This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 14, Phases 2–4 (PostgreSQL Reliability Harness: Schema Bootstrapping, Live Concurrency Tests, and CI/Developer Workflow), and Mission 15 (PostgreSQL Serialization Failure Recovery), whose live PostgreSQL behaviour is now validated in CI. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
+This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 14, Phases 2–4 (PostgreSQL Reliability Harness: Schema Bootstrapping, Live Concurrency Tests, and CI/Developer Workflow), Mission 15 (PostgreSQL Serialization Failure Recovery), whose live PostgreSQL behaviour is validated in CI, and Mission 16 (Concurrent & Crash-Safe Outbox Delivery), whose implementation is complete and locally tested but whose live PostgreSQL validation is pending CI. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
 
 ### Current Test Suite & Verification Results
 
-- **Pytest Suite (offline, local Windows / Docker unavailable)**: **691 passed, 42 skipped, 1 warning** (733 collected in ~12s).
-- **Pytest Suite (GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`)**: `postgres` job (PostgreSQL 16) **733 passed, 0 skipped, 3 warnings**; `offline` job **650 passed, 4 skipped, 1 warning**.
+- **Pytest Suite (offline, local Windows / Docker unavailable, Mission 16)**: **695 passed, 48 skipped, 1 warning** (743 collected in ~13 s).
+- **Pytest Suite (GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`, Mission 15)**: `postgres` job (PostgreSQL 16) **733 passed, 0 skipped, 3 warnings**; `offline` job **650 passed, 4 skipped, 1 warning**. Mission 16 adds 10 tests (4 offline worker + 6 live outbox); its live PostgreSQL run is pending.
 - **Incident Dataset Integrity Suite** (`tests/validate_incidents.py`): **51 / 51 passed** (100%) — run in both CI jobs.
-- **Total Passing Automated Checks (local offline)**: **742 passed**.
-- **`git diff --check`**: Exit code 0 (clean — no trailing whitespace or CRLF issues).
+- **`git diff --check`**: Exit code 0 (clean — no trailing whitespace; only benign LF→CRLF notices on Windows).
 
 #### Explanation of Skipped Tests & Warnings
 1. **Windows Symlink Security Tests (2 skipped)**: `tests/test_api.py::test_create_investigation_rejects_symlink_inside_root` and `test_create_investigation_rejects_symlink_escaping_root` are skipped because standard Windows user accounts without Developer Mode cannot create filesystem symbolic links. These tests **pass on Linux CI** (symlink creation does not require elevated privileges), so CI reports 0 or fewer skips for these.
-2. **PostgreSQL Live Integration Tests (40 skipped locally)**: All guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)` where `POSTGRES_AVAILABLE` probes `SENTINEL_DATABASE_URL` at test collection time. Skipped locally because Docker Desktop is not running on the development machine. Exact breakdown:
+2. **PostgreSQL Live Integration Tests (46 skipped locally)**: All guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)` where `POSTGRES_AVAILABLE` probes `SENTINEL_DATABASE_URL` at test collection time. Skipped locally because Docker Desktop is not running on the development machine. Exact breakdown:
    - 4 in `tests/test_postgres_concurrency.py` (OCC competing writes, expired lease race, concurrent async resume, outbox rollback)
-   - 2 in `tests/test_outbox.py` (PostgreSQL outbox uniqueness + atomic persistence)
+   - 8 in `tests/test_outbox.py` (6 from Mission 16: concurrent disjoint claims, stale-claim recovery, future-retry/completed exclusion, tied-timestamp ordering, duplicate-ID non-abortion, terminal-failure retention; plus 2 Mission 11/14: PostgreSQL outbox uniqueness + atomic persistence)
    - 2 in `tests/test_schema_migration.py` (live bootstrap and repeat idempotency)
    - 28 in `tests/test_postgres_persistence.py` (18 contract tests inherited from `PersistenceContractTests` + 10 PostgreSQL-specific integration tests)
    - 4 in `tests/test_pg_retry.py` (Mission 15: injected `40001` then real commit; exhausted retries leave no partial state; OCC conflict distinct from retryable error; state + outbox atomic under retry)
-   - All 40 execute on CI; the `postgres` job reports **0 skipped** (verified in run 39048469043) once the `postgres:16-alpine` service container is running.
+   - All 46 execute on CI; the `postgres` job reports **0 skipped** (verified in run 39048469043 for the 40 Mission-15-era tests; the 6 Mission 16 tests await CI).
 3. **Deprecation Warning (1 warning)**: Starlette deprecation notice in `tests/test_api.py` regarding `httpx` integration with `starlette.testclient.TestClient`.
 
-> **Important**: Live PostgreSQL validation is complete. GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) passed both jobs: the `postgres` job provisioned the `postgres:16-alpine` container, applied the schema, and reported **733 passed / 0 skipped** — including all 40 PostgreSQL integration tests and Mission 15's 4 retry tests. Those retry tests execute **only** in CI, because Docker is unavailable on the local development machine. An earlier run (`38767150882`) had exposed 4 test-assertion/type discrepancies, which were corrected in `a5e535a`.
+> **Important**: Live PostgreSQL validation for Mission 15 is complete. GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) passed both jobs: the `postgres` job provisioned the `postgres:16-alpine` container, applied the schema, and reported **733 passed / 0 skipped** — including all 40 PostgreSQL integration tests and Mission 15's 4 retry tests. The docs commit `1d55db8` also passed green in [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) with identical results; both runs are genuine and mutually consistent. Mission 16's live PostgreSQL validation is **pending CI** (Docker is unavailable on the local development machine).
 
 ---
 
@@ -81,8 +80,8 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 - **PostgreSQL Backend**: Uses `psycopg-pool` to manage PostgreSQL connections. Stores relational operational metadata alongside `state_payload JSONB`. OCC ensures that updates match `version = %s` and increment `version = version + 1`, raising `ConcurrencyError` on conflicting writes. Supports durable outbox and reports `backend_supports_event_history: true`.
 
 ### 3.2 Transactional Outbox & Event Delivery Worker
-- State updates and outbox events are committed in a single atomic database transaction via `PostgresRepository.save(state, events)`.
-- The `EventDeliveryWorker` (`python -m api.event_worker` or `make worker`) polls `event_outbox` for records with `processed_at IS NULL AND retry_count < max_retries`, ordered by `created_at ASC, id ASC`. It dispatches events to registered event buses, marks success with `processed_at = NOW()`, or records `last_error` with exponential backoff on delivery failure.
+- State updates and outbox events are committed in a single atomic database transaction via `PostgresRepository.save(state, events)`. Duplicate event IDs use `INSERT ... ON CONFLICT (event_id) DO NOTHING`, so a duplicate can never abort a valid state change (Mission 16).
+- The `EventDeliveryWorker` (`python -m api.event_worker` or `make worker`) runs a claim → deliver → finalise cycle. Each poll first releases expired claims (crash recovery), then atomically claims a batch via `claim_pending()` (locking eligible `status = 'pending' AND next_attempt_at <= NOW()` rows with `FOR UPDATE SKIP LOCKED` in `(created_at ASC, event_id ASC)` order). It dispatches events to registered event buses and marks success with `mark_processed()`, or durably reschedules with `schedule_retry()` (persisted `next_attempt_at`, bounded jittered exponential backoff) and marks terminal failure with `mark_failed()` after the attempt limit. The earlier implementation read rows with a non-claiming query (`processed_at IS NULL AND retry_count < max_retries`, ordered by `created_at ASC`) and recorded `error_message`; that predicate and the `error_message` column name are superseded by the claim protocol while `error_message` is retained.
 
 ### 3.3 Execution Leasing & Crash Recovery
 - Investigations carry lease metadata: `lease_owner: Optional[str]` and `lease_expires_at: Optional[datetime]`.
@@ -120,6 +119,15 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 - **Isolation caveat / limit**: no explicit isolation level is configured (server default **READ COMMITTED**), which does not naturally produce `40001`; a deterministic test-only fault-injection seam exercises retries. No serialisable-isolation or phantom-read guarantee is claimed.
 - **Validation status**: 21 offline tests pass locally; the 4 live PostgreSQL 16 integration tests in `tests/test_pg_retry.py` executed and passed in CI's `postgres` job ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), 733 passed / 0 skipped). They were **not** run locally (Docker daemon unavailable).
 
+### 3.7 Concurrent & Crash-Safe Outbox Delivery (Mission 16)
+- **Migration**: `core/persistence/sql/003_outbox_delivery_claim.sql` (additive, idempotent) adds `claimed_by`, `claimed_at`, `claim_expires_at`, and `next_attempt_at` (`NOT NULL DEFAULT NOW()`) to `event_outbox`, plus index `idx_event_outbox_claim (status, next_attempt_at, created_at)`. `core/persistence/schema.py` validates these in `EXPECTED_TABLES` while keeping the 002 adoption check tolerant of a legacy 002-era outbox (the pre-003 column/index set), so existing databases upgrade in place.
+- **Atomic claiming**: `PostgresRepository.claim_pending(worker_id, limit, claim_ttl_seconds)` locks eligible rows with `SELECT ... FOR UPDATE SKIP LOCKED` in `(created_at ASC, event_id ASC)` order, then claims exactly those rows via `UPDATE ... WHERE event_id = ANY(%s::text[])`. Concurrent workers claim **disjoint** sets.
+- **Durable retry scheduling**: `schedule_retry(event_id, next_attempt_at, error_message)` persists the next eligible attempt time, increments `retry_count`, records `error_message`, and clears the claim. The worker computes bounded exponential backoff with full jitter and never sleeps inside the batch loop.
+- **Crash recovery**: `release_expired_claims()` returns claims past `claim_expires_at` (default TTL 300 s) to `pending`; `mark_processed()` / `mark_failed()` clear the claim. Completed and terminally failed events are never reclaimed.
+- **Duplicate-event fix**: `_save_transaction()` and `save_events()` use `INSERT ... ON CONFLICT (event_id) DO NOTHING` instead of a swallowed `UniqueViolation`, so a duplicate event ID no longer aborts the surrounding transaction. Mission 15 retry classification is unchanged.
+- **Guarantee**: durable, concurrency-safe claims with **at-least-once** delivery; exactly-once **external** delivery is **not** claimed (in-process `EventBus` destination; consumers must be idempotent and key on `event_id`).
+- **Validation status**: implementation complete. The 4 new offline worker tests (`tests/test_event_worker.py`, now 11) pass locally; the 6 new live PostgreSQL integration tests (`tests/test_outbox.py`) are **pending CI** (Docker unavailable locally). Local offline suite: 695 passed / 48 skipped / 1 warning.
+
 ---
 
 ## 4. Documentation Discrepancies Resolved in this Audit
@@ -134,12 +142,13 @@ Prior to this reconciliation, documentation had drifted significantly across the
 
 ---
 
-## 5. Remaining Engineering Work (Post-Mission 15)
+## 5. Remaining Engineering Work (Post-Mission 16)
 
 The following represents genuine upcoming engineering tasks, clearly separated from completed work:
 1. **Distributed Task Queue Integration**: Mission 13 implemented in-process asynchronous dispatch via Starlette `BackgroundTask`. Extending to durable external queues (Celery, Redis Streams, Temporal, BullMQ) across distributed worker pools remains a future enterprise enhancement.
-2. **External Event Bus Integrations**: `EventDeliveryWorker` currently publishes to the in-memory bus; integrating Redis, Kafka, or webhook publishers for external consumers.
+2. **External Event Bus Integrations**: Mission 16 made `EventDeliveryWorker` safe and crash-tolerant across concurrent worker processes, but it still publishes to the in-process bus. Integrating Redis, Kafka, or webhook publishers for external consumers remains future work; exactly-once external delivery would require consumer-side idempotency or a transactional broker.
 3. **Explicit `SERIALIZABLE` isolation (optional)**: Mission 15 handles `40001`/`40P01` defensively but Sentinel still runs at the server-default READ COMMITTED level; a future mission could adopt explicit serialisable isolation with the accompanying phantom-read guarantees and tests.
+4. **Live PostgreSQL validation of Mission 16**: the 6 new live outbox integration tests are pending CI (Docker unavailable locally).
 
 ---
 

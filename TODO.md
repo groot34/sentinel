@@ -120,10 +120,20 @@
   - `tests/test_pg_retry.py`: 25 tests — 21 offline (all passing locally) + 4 live PostgreSQL 16 integration tests.
   - **Verified in GitHub Actions** ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`): `offline` job 650 passed / 4 skipped / 1 warning; `postgres` job (PostgreSQL 16) 733 passed / **0 skipped** / 3 warnings; incident validation 51/51. All 4 live PostgreSQL 16 retry tests executed and passed.
   - **Executed locally** (Windows, no database): focused retry tests 21 passed / 4 skipped; full suite 691 passed / 42 skipped / 1 warning; `git diff --check` clean.
+- [x] **Mission 16: Concurrent & Crash-Safe Outbox Delivery** (2026-10-19, implementation complete — live PostgreSQL 16 CI pending)
+  - Added `core/persistence/sql/003_outbox_delivery_claim.sql` (additive, idempotent): `claimed_by`, `claimed_at`, `claim_expires_at`, `next_attempt_at` (NOT NULL DEFAULT NOW()) plus index `idx_event_outbox_claim (status, next_attempt_at, created_at)`.
+  - `OutboxRepository` extended with `claim_pending`, `release_expired_claims`, and `schedule_retry`; `fetch_pending` is now an observational query only and no longer drives delivery.
+  - `PostgresRepository.claim_pending()` claims atomically via `SELECT ... FOR UPDATE SKIP LOCKED` followed by a targeted `UPDATE ... WHERE event_id = ANY(...)`, with deterministic `(created_at ASC, event_id ASC)` ordering; concurrent workers claim disjoint sets.
+  - Durable retry scheduling: `next_attempt_at` persisted with bounded jittered exponential backoff (no sleeping inside the batch loop); a visibility-timeout claim expiry recovers abandoned claims after a crash; terminal failure after the attempt limit retains the error.
+  - Duplicate event IDs now use `INSERT ... ON CONFLICT (event_id) DO NOTHING` instead of a swallowed `UniqueViolation`, so a duplicate can no longer abort a valid state-plus-event transaction. Mission 15 retry classification unchanged.
+  - `EventDeliveryWorker` rewritten around claim → deliver → finalise; injectable clock/rng seams; at-least-once delivery (exactly-once external delivery is explicitly **not** claimed).
+  - Tests: 4 new offline tests in `tests/test_event_worker.py` + 6 new live PostgreSQL tests in `tests/test_outbox.py`; collection 733 → 743.
+  - **Executed locally** (Windows, no database): full suite 695 passed / 48 skipped / 1 warning; offline-job subset 652 passed / 6 skipped; `tests/test_pg_retry.py` 21 passed / 4 skipped; incident validation 51/51; `git diff --check` clean.
+  - **Live PostgreSQL 16 validation pending CI** (Docker unavailable locally); the 6 new live outbox tests have not yet executed.
 
 ---
 
-## Post-Mission 15 Remaining Engineering Work
+## Post-Mission 16 Remaining Engineering Work
 - [ ] **Distributed Task Queue Integration**:
   - Extend in-process background execution to durable external task queues (Redis Streams, Celery, Temporal, or BullMQ) across multi-node worker clusters.
 - [ ] **External Event Bus Streaming Connectors**:

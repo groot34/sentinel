@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -323,34 +324,35 @@ class PostgresRepository(PersistenceRepository):
                                 )
                             state.version = update_row[0]
 
-                        # Insert events into outbox table within the same transaction
+                        # Insert events into outbox table within the same transaction.
+                        # ON CONFLICT DO NOTHING makes duplicate event IDs a no-op
+                        # instead of raising UniqueViolation, which would abort the
+                        # whole transaction and prevent the valid state change from
+                        # committing.
                         if events:
                             for event in events:
                                 outbox_event = OutboxEvent.from_domain_event(event)
-                                try:
-                                    cur.execute(
-                                        """
-                                        INSERT INTO event_outbox (
-                                            event_id, investigation_id, event_type, payload,
-                                            status, created_at, retry_count
-                                        ) VALUES (
-                                            %s, %s, %s, %s,
-                                            %s, %s, %s
-                                        );
-                                        """,
-                                        (
-                                            outbox_event.event_id,
-                                            outbox_event.investigation_id,
-                                            outbox_event.event_type,
-                                            Jsonb(outbox_event.payload),
-                                            outbox_event.status,
-                                            outbox_event.created_at,
-                                            outbox_event.retry_count,
-                                        ),
+                                cur.execute(
+                                    """
+                                    INSERT INTO event_outbox (
+                                        event_id, investigation_id, event_type, payload,
+                                        status, created_at, retry_count
+                                    ) VALUES (
+                                        %s, %s, %s, %s,
+                                        %s, %s, %s
                                     )
-                                except psycopg.errors.UniqueViolation as uv_err:
-                                    # Event already exists - skip silently (idempotent)
-                                    pass
+                                    ON CONFLICT (event_id) DO NOTHING;
+                                    """,
+                                    (
+                                        outbox_event.event_id,
+                                        outbox_event.investigation_id,
+                                        outbox_event.event_type,
+                                        Jsonb(outbox_event.payload),
+                                        outbox_event.status,
+                                        outbox_event.created_at,
+                                        outbox_event.retry_count,
+                                    ),
+                                )
         except ConcurrencyError:
             raise
         except psycopg.Error as e:
@@ -500,41 +502,45 @@ class PostgresRepository(PersistenceRepository):
                     with conn.cursor() as cur:
                         for event in events:
                             outbox_event = OutboxEvent.from_domain_event(event)
-                            try:
-                                cur.execute(
-                                    """
-                                    INSERT INTO event_outbox (
-                                        event_id, investigation_id, event_type, payload,
-                                        status, created_at, retry_count
-                                    ) VALUES (
-                                        %s, %s, %s, %s,
-                                        %s, %s, %s
-                                    );
-                                    """,
-                                    (
-                                        outbox_event.event_id,
-                                        outbox_event.investigation_id,
-                                        outbox_event.event_type,
-                                        Jsonb(outbox_event.payload),
-                                        outbox_event.status,
-                                        outbox_event.created_at,
-                                        outbox_event.retry_count,
-                                    ),
+                            # Conflict-safe: a duplicate event ID is ignored without
+                            # raising, so one duplicate cannot abort the transaction
+                            # and discard the other valid inserts.
+                            cur.execute(
+                                """
+                                INSERT INTO event_outbox (
+                                    event_id, investigation_id, event_type, payload,
+                                    status, created_at, retry_count
+                                ) VALUES (
+                                    %s, %s, %s, %s,
+                                    %s, %s, %s
                                 )
-                            except psycopg.errors.UniqueViolation:
-                                # Event already exists - skip silently (idempotent)
-                                pass
+                                ON CONFLICT (event_id) DO NOTHING;
+                                """,
+                                (
+                                    outbox_event.event_id,
+                                    outbox_event.investigation_id,
+                                    outbox_event.event_type,
+                                    Jsonb(outbox_event.payload),
+                                    outbox_event.status,
+                                    outbox_event.created_at,
+                                    outbox_event.retry_count,
+                                ),
+                            )
         except psycopg.Error as e:
             raise PersistenceError(f"Database error saving events to outbox: {e}") from e
 
     def fetch_pending(self, limit: int = 100) -> List[OutboxEvent]:
         """Fetch pending events for delivery.
 
+        Observational query only: it does not claim or mutate events, so it is
+        safe for auditing and tests but must not drive delivery. The worker uses
+        :meth:`claim_pending` to obtain exclusive delivery claims.
+
         Args:
             limit: Maximum number of events to fetch.
 
         Returns:
-            List of pending OutboxEvents in created_at order.
+            List of pending OutboxEvents in canonical (created_at, event_id) order.
         """
         try:
             with self._pool.connection() as conn:
@@ -545,30 +551,180 @@ class PostgresRepository(PersistenceRepository):
                                status, created_at, processed_at, retry_count, error_message
                         FROM event_outbox
                         WHERE status = 'pending'
-                        ORDER BY created_at ASC
+                        ORDER BY created_at ASC, event_id ASC
                         LIMIT %s;
                         """,
                         (limit,),
                     )
-                    rows = cur.fetchall()
-                    events = []
-                    for row in rows:
-                        events.append(
-                            OutboxEvent(
-                                event_id=row[0],
-                                investigation_id=row[1],
-                                event_type=row[2],
-                                payload=dict(row[3]) if isinstance(row[3], dict) else row[3],
-                                status=row[4],
-                                created_at=row[5].isoformat() if row[5] else "",
-                                processed_at=row[6].isoformat() if row[6] else None,
-                                retry_count=row[7],
-                                error_message=row[8],
-                            )
-                        )
-                    return events
+                    return [self._row_to_outbox_event(row) for row in cur.fetchall()]
         except psycopg.Error as e:
             raise PersistenceError(f"Database error fetching pending events: {e}") from e
+
+    @staticmethod
+    def _row_to_outbox_event(row: Tuple[Any, ...]) -> OutboxEvent:
+        """Build an OutboxEvent from a 9-column outbox row."""
+        return OutboxEvent(
+            event_id=row[0],
+            investigation_id=row[1],
+            event_type=row[2],
+            payload=dict(row[3]) if isinstance(row[3], dict) else row[3],
+            status=row[4],
+            created_at=row[5].isoformat() if row[5] else "",
+            processed_at=row[6].isoformat() if row[6] else None,
+            retry_count=row[7],
+            error_message=row[8],
+        )
+
+    def claim_pending(
+        self,
+        worker_id: str,
+        limit: int = 100,
+        claim_ttl_seconds: float = 300.0,
+    ) -> List[OutboxEvent]:
+        """Atomically claim up to ``limit`` eligible pending events for delivery.
+
+        Uses ``FOR UPDATE SKIP LOCKED`` so that concurrent worker processes claim
+        disjoint event batches without blocking or double-claiming. Eligibility
+        requires ``status = 'pending'`` and ``next_attempt_at <= NOW()``, so
+        events scheduled for a future retry and already-processed/failed events
+        are excluded. Ordering is deterministic: ``(created_at ASC, event_id ASC)``.
+
+        Args:
+            worker_id: Identity of the claiming worker.
+            limit: Maximum number of events to claim.
+            claim_ttl_seconds: Visibility timeout for the resulting claim.
+
+        Returns:
+            List of claimed OutboxEvents in canonical (created_at, event_id) order.
+
+        Raises:
+            PersistenceError: If claiming fails.
+        """
+        if not worker_id or not str(worker_id).strip():
+            raise PersistenceError("worker_id cannot be empty")
+        if claim_ttl_seconds <= 0:
+            raise PersistenceError("claim_ttl_seconds must be > 0")
+
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        # Lock the eligible rows in canonical order. FOR UPDATE
+                        # SKIP LOCKED makes concurrent claimers skip rows already
+                        # locked by another in-flight claim, so two workers can
+                        # never own the same event. Locks are held until commit.
+                        cur.execute(
+                            """
+                            SELECT event_id
+                            FROM event_outbox
+                            WHERE status = 'pending'
+                              AND next_attempt_at <= NOW()
+                            ORDER BY created_at ASC, event_id ASC
+                            LIMIT %s
+                            FOR UPDATE SKIP LOCKED;
+                            """,
+                            (limit,),
+                        )
+                        ordered_ids = [row[0] for row in cur.fetchall()]
+                        if not ordered_ids:
+                            return []
+
+                        # Claim exactly the locked rows. UPDATE ... RETURNING does
+                        # not guarantee row order, so the deterministic order is
+                        # restored from the ordered id list below.
+                        cur.execute(
+                            """
+                            UPDATE event_outbox
+                            SET status = 'processing',
+                                claimed_by = %s,
+                                claimed_at = NOW(),
+                                claim_expires_at = NOW() + make_interval(secs => %s)
+                            WHERE event_id = ANY(%s::text[])
+                            RETURNING event_id, investigation_id, event_type, payload,
+                                      status, created_at, processed_at, retry_count, error_message;
+                            """,
+                            (worker_id, claim_ttl_seconds, ordered_ids),
+                        )
+                        rows_by_id = {row[0]: row for row in cur.fetchall()}
+                        return [
+                            self._row_to_outbox_event(rows_by_id[eid])
+                            for eid in ordered_ids
+                            if eid in rows_by_id
+                        ]
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error claiming pending events: {e}") from e
+
+    def release_expired_claims(self) -> int:
+        """Return abandoned claims (past their visibility timeout) to pending.
+
+        Crash recovery: a worker that dies mid-delivery leaves its claim to
+        expire; this sweep makes those events claimable again. Completed
+        (``processed``) and terminally ``failed`` events are never touched.
+
+        Returns:
+            Number of events whose claims were released.
+
+        Raises:
+            PersistenceError: If recovery fails.
+        """
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE event_outbox
+                            SET status = 'pending',
+                                claimed_by = NULL,
+                                claimed_at = NULL,
+                                claim_expires_at = NULL
+                            WHERE status = 'processing'
+                              AND claim_expires_at IS NOT NULL
+                              AND claim_expires_at <= NOW();
+                            """
+                        )
+                        return cur.rowcount
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error releasing expired claims: {e}") from e
+
+    def schedule_retry(
+        self, event_id: str, next_attempt_at: datetime, error_message: str
+    ) -> None:
+        """Durably reschedule a failed event for a later attempt.
+
+        Increments the attempt counter, records the error, clears the claim, and
+        sets the earliest time the event may be claimed again. This replaces the
+        previous in-process backoff sleep, so retry timing survives worker
+        restarts and does not block the delivery batch.
+
+        Args:
+            event_id: Event ID to reschedule.
+            next_attempt_at: Earliest time the event may be claimed again.
+            error_message: Error description from the failed attempt.
+
+        Raises:
+            PersistenceError: If the update fails.
+        """
+        try:
+            with self._pool.connection() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE event_outbox
+                            SET status = 'pending',
+                                retry_count = retry_count + 1,
+                                next_attempt_at = %s,
+                                error_message = %s,
+                                claimed_by = NULL,
+                                claimed_at = NULL,
+                                claim_expires_at = NULL
+                            WHERE event_id = %s;
+                            """,
+                            (next_attempt_at, error_message, event_id),
+                        )
+        except psycopg.Error as e:
+            raise PersistenceError(f"Database error scheduling event retry: {e}") from e
 
     def mark_processed(self, event_id: str) -> None:
         """Mark an event as successfully processed.
@@ -586,7 +742,11 @@ class PostgresRepository(PersistenceRepository):
                         cur.execute(
                             """
                             UPDATE event_outbox
-                            SET status = 'processed', processed_at = NOW()
+                            SET status = 'processed',
+                                processed_at = NOW(),
+                                claimed_by = NULL,
+                                claimed_at = NULL,
+                                claim_expires_at = NULL
                             WHERE event_id = %s;
                             """,
                             (event_id,),
@@ -611,7 +771,12 @@ class PostgresRepository(PersistenceRepository):
                         cur.execute(
                             """
                             UPDATE event_outbox
-                            SET status = 'failed', error_message = %s, processed_at = NOW()
+                            SET status = 'failed',
+                                error_message = %s,
+                                processed_at = NOW(),
+                                claimed_by = NULL,
+                                claimed_at = NULL,
+                                claim_expires_at = NULL
                             WHERE event_id = %s;
                             """,
                             (error_message, event_id),

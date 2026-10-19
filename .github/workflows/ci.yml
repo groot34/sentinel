@@ -157,10 +157,11 @@ jobs:
 
       - name: Run full test suite with PostgreSQL enabled
         # With SENTINEL_DATABASE_URL set and reachable, POSTGRES_AVAILABLE=True
-        # inside every test module, so all 40 PostgreSQL integration tests run
-        # (36 from Mission 14 + Mission 15's 4 transient-failure retry tests).
+        # inside every test module, so all 46 PostgreSQL integration tests run
+        # (36 from Mission 14 + Mission 15's 4 transient-failure retry tests +
+        # Mission 16's 6 outbox claim/recovery tests).
         # Output saved to XML for skip-count parsing without a second pytest run.
-        # Expected on Linux with PostgreSQL: 691+ passed, 0 skipped, 1 warning.
+        # Expected on Linux with PostgreSQL: 743 passed, 0 skipped, 1 warning.
         run: |
           python -m pytest tests/ -v --tb=short \
             --junitxml=test-results.xml

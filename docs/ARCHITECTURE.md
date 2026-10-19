@@ -290,8 +290,10 @@ Sentinel 2.0 evolves the multi-agent reasoning engine from a single-run CLI tool
                                                               ▼
                                               ┌────────────────────────────────┐
                                               │      EventDeliveryWorker       │
+                                              │ • Atomic SKIP LOCKED claims    │
                                               │ • At-least-once outbox delivery│
-                                              │ • Exponential backoff retries  │
+                                              │ • Durable DB-scheduled retries │
+                                              │ • Claim-expiry crash recovery  │
                                               │ • Deduplication by event_id    │
                                               └────────────────────────────────┘
 ```
@@ -340,9 +342,13 @@ Sentinel 2.0 provides pluggable persistence through `PersistenceRepository` (`co
 ### 3.4 Transactional Outbox & Background Event Delivery
 
 To avoid dual-write inconsistencies between database persistence and event emission:
-- **Atomic Outbox Persistence**: When `PostgresRepository.save(state, events)` is called, state mutation and pending domain events are written to `investigations` and `event_outbox` (`core/persistence/sql/002_outbox_schema.sql`) inside the **same database transaction**.
-- **Outbox Schema**: `event_outbox` captures `event_id` (UUID, UNIQUE), `investigation_id`, `event_type`, `payload JSONB`, `created_at`, `processed_at`, `retry_count`, and `last_error`.
-- **EventDeliveryWorker (`api/event_worker/worker.py`)**: A standalone background worker continuously polls unprocessed outbox entries (`processed_at IS NULL AND retry_count < max_retries`), ordered by `created_at ASC, id ASC`. It dispatches them to subscriber buses, records successful delivery (`processed_at = NOW()`), or applies exponential backoff on transient dispatch failures.
+- **Atomic Outbox Persistence**: When `PostgresRepository.save(state, events)` is called, state mutation and pending domain events are written to `investigations` and `event_outbox` (`core/persistence/sql/002_outbox_schema.sql`) inside the **same database transaction**. Duplicate event IDs are handled with `INSERT ... ON CONFLICT (event_id) DO NOTHING`, so a duplicate can never abort an otherwise valid state change.
+- **Outbox Schema**: `event_outbox` captures `event_id` (VARCHAR, PRIMARY KEY), `investigation_id`, `event_type`, `payload JSONB`, `status`, `created_at`, `processed_at`, `retry_count`, and `error_message`. The additive Mission 16 migration (`003_outbox_delivery_claim.sql`) adds claim state: `claimed_by`, `claimed_at`, `claim_expires_at`, and `next_attempt_at`, plus the `idx_event_outbox_claim` index.
+- **Atomic Claiming (Mission 16)**: `PostgresRepository.claim_pending(worker_id, limit, claim_ttl_seconds)` locks eligible rows in canonical `(created_at ASC, event_id ASC)` order with `SELECT ... FOR UPDATE SKIP LOCKED`, then claims exactly those rows. Concurrent worker processes therefore claim **disjoint** event sets; locks are held until commit.
+- **EventDeliveryWorker (`api/event_worker/worker.py`)**: A standalone background worker runs the claim → deliver → finalise cycle. Each poll first calls `release_expired_claims()` (crash recovery), then `claim_pending()`, then delivers each event and records the outcome with `mark_processed()`, `schedule_retry()`, or `mark_failed()`. Retries use durable, database-scheduled bounded exponential backoff with full jitter — **no sleeping occurs inside the batch loop**.
+- **Visibility Timeout / Crash Recovery**: Each claim carries a `claim_expires_at` (default TTL 300 s). If a worker crashes mid-delivery, `release_expired_claims()` returns the abandoned claim to `pending` so another worker can reclaim it. Completed (`processed`) and terminally `failed` events are never reclaimed.
+- **Delivery Guarantee**: durable, concurrency-safe claims with **at-least-once** delivery. Because the destination is an in-process `EventBus`, exactly-once **external** delivery is **not** claimed; consumers must be idempotent and key on `event_id`.
+- **Observational query**: `fetch_pending()` remains available for auditing and event-history reads but does **not** claim or mutate events; it must not drive delivery.
 
 ### 3.5 Execution Leasing & Crash Recovery
 
@@ -417,7 +423,7 @@ The event history endpoint (`GET /investigations/{id}/events`) provides two dist
 | **Multi-Worker API** | Unsafe (risk of overwritten state files) | Safe (OCC blocks conflicting concurrent writes) |
 | **Execution Leases** | Memory/file level; no distributed lock | Atomic OCC lease claims with lease expiry recovery |
 | **Event Outbox** | Not supported | Transactional atomic state + event insertion |
-| **Event Delivery Worker**| In-memory direct publish only | Dedicated background worker with retry and deduplication |
+| **Event Delivery Worker**| In-memory direct publish only | Dedicated background worker: atomic multi-worker claims, durable DB-scheduled retry backoff, claim-expiry crash recovery (Mission 16) |
 | **Event History API** | `backend_supports_event_history = false` | Fully supported via durable `event_outbox` queries |
 | **SSE Streaming** | Streams in-memory events during active run | Replays durable history + live streams from outbox |
 | **Crash Recovery** | Manual resume; risk of unexpired lease block | Automatic crash recovery after TTL expiry via OCC |
@@ -461,6 +467,7 @@ The `.github/workflows/ci.yml` workflow runs on every push to `main` and every p
 - **Schema ownership**: The CI runner invokes `python -m core.persistence.schema apply` (not Docker entrypoint scripts), ensuring the same authoritative migration runner is used in CI and locally.
 - **Offline exclusions**: The `offline` job excludes exactly four PostgreSQL-only modules. `test_persistence_contract.py` is intentionally **not** excluded because it contains only offline `TestFilesystemRepositoryContract` tests with no database dependency. `tests/test_pg_retry.py` is also **not** excluded: its 21 offline retry/wiring tests run in the offline job, while its 4 live integration tests skip gracefully and execute in the `postgres` job.
 - **Symlink note**: The 2 Windows-symlink tests use a runtime probe (`_can_symlink()`) that attempts `Path.symlink_to()` in a temp directory. On Linux this succeeds without elevated privileges, so both tests execute and pass. Expected skip count on the `postgres` CI job: 0, with ≤2 as a conservative margin.
+- **Mission 16 test delta**: The 4 new offline worker tests raise the `offline` job to an expected 654 passed / 4 skipped, and the 6 new live outbox tests raise the `postgres` job to an expected 743 passed / 0 skipped. These figures are **pending** the first CI run for Mission 16 (the diagram above shows the Mission 15 verified run).
 - **Meaningful `git diff --check`**: Uses `fetch-depth: 0` so full history is available for PR base SHAs and HEAD~1 on pushes. On push events, checks `HEAD~1..HEAD`. On pull-request events, checks `${{ github.event.pull_request.base.sha }}...HEAD`. This validates the whitespace hygiene of actual committed changes, not just the always-clean CI working tree.
 
 ### 4.2 Schema Migration CLI
@@ -542,3 +549,57 @@ code; no hook is installed in production, so `maybe_inject_fault` is a no-op the
 > job ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043),
 > commit `fa4f1c7` — 733 passed, 0 skipped). Live validation was performed in CI only
 > (no local PostgreSQL instance was available).
+
+### 4.5 Concurrent & Crash-Safe Outbox Delivery (Mission 16)
+
+**Problem addressed**: the pre-Mission-16 worker read pending rows (a
+non-claiming `SELECT`) and then delivered them. Two worker processes could read
+the same batch, failed deliveries slept in-process (losing retry timing on
+restart), and a swallowed `UniqueViolation` left the transaction aborted so a
+valid state change could not commit.
+
+**Schema** — `core/persistence/sql/003_outbox_delivery_claim.sql` (additive and
+idempotent; `ADD COLUMN IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`):
+
+| Column | Type | Purpose |
+|---|---|---|
+| `claimed_by` | `VARCHAR(128)` | Worker identity holding the current claim |
+| `claimed_at` | `TIMESTAMPTZ` | When the claim was taken |
+| `claim_expires_at` | `TIMESTAMPTZ` | Visibility timeout for the claim |
+| `next_attempt_at` | `TIMESTAMPTZ NOT NULL DEFAULT NOW()` | Earliest claimable time (durable retry scheduling) |
+
+Plus index `idx_event_outbox_claim (status, next_attempt_at, created_at)`.
+
+**Atomic claiming** — `PostgresRepository.claim_pending()`:
+
+1. `SELECT event_id ... WHERE status = 'pending' AND next_attempt_at <= NOW() ORDER BY created_at ASC, event_id ASC LIMIT %s FOR UPDATE SKIP LOCKED`.
+2. `UPDATE event_outbox SET status = 'processing', claimed_by = …, claimed_at = NOW(), claim_expires_at = NOW() + make_interval(secs => %s) WHERE event_id = ANY(%s::text[]) RETURNING …`.
+
+`FOR UPDATE SKIP LOCKED` makes concurrent claimers skip rows locked by another
+in-flight claim, so two workers never own the same event. `UPDATE ... RETURNING`
+does **not** guarantee row order, so the deterministic `(created_at, event_id)`
+order is restored from the locked id list.
+
+**Durable retry & crash recovery** — `schedule_retry()` persists
+`next_attempt_at`, increments `retry_count`, records `error_message`, and clears
+the claim; `release_expired_claims()` returns claims past `claim_expires_at` to
+`pending`. `mark_processed()` / `mark_failed()` clear the claim. The worker never
+sleeps inside the batch loop; backoff is bounded exponential with full jitter
+(defaults `base=2.0s`, `max=60.0s`), computed from an injectable clock and rng.
+
+**Guarantee** — durable, concurrency-safe claims with **at-least-once** delivery.
+Because the destination is an in-process `EventBus`, exactly-once **external**
+delivery is **not** claimed; consumers must be idempotent and key on `event_id`.
+
+**Tests** — 4 new offline worker tests (`tests/test_event_worker.py`, now 11) and
+6 new live PostgreSQL integration tests (`tests/test_outbox.py`): disjoint
+concurrent claims, stale-claim recovery, future-retry and completed-event
+exclusion, deterministic ordering for tied timestamps, duplicate-ID
+non-abortion, and terminal failure retention.
+
+> **Status**: implementation complete. The 4 offline worker tests pass locally;
+> the 6 live PostgreSQL 16 integration tests are **pending CI** (no local
+> PostgreSQL instance is available). Locally (Windows, no database): full suite
+> 695 passed / 48 skipped / 1 warning; offline-job subset 652 passed / 6 skipped;
+> incident validation 51/51. Mission 16 is not marked fully validated until the
+> live PostgreSQL CI job passes with skip-count enforcement.

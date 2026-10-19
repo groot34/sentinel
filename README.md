@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **733 passed, 0 skipped** (live PostgreSQL 16 CI) |
+| Automated tests | — | **733 passed, 0 skipped** (live PostgreSQL 16 CI; Mission 16 adds 10 tests, CI pending) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 42 tests skip — 40 PostgreSQL live integration tests (including Mission 15's 4 retry tests) plus 2 Windows symlink tests, giving 691 passed / 42 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Verified in GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 48 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 2 Windows symlink tests, giving 695 passed / 48 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 live PostgreSQL validation is pending CI.)*
 
 ---
 
@@ -188,15 +188,18 @@ Sentinel 2.0 wraps the 8-stage core pipeline in a production-ready, distributed,
                                                      ▼
                                      ┌───────────────────────────────────┐
                                      │        EventDeliveryWorker        │
+                                     │ • Atomic FOR UPDATE SKIP LOCKED   │
+                                     │   claims (multi-worker safe)      │
                                      │ • At-least-once outbox delivery   │
-                                     │ • Exponential backoff retries     │
+                                     │ • Durable DB-scheduled retries    │
+                                     │ • Claim-expiry crash recovery     │
                                      └───────────────────────────────────┘
 ```
 
 - **Domain State**: Typed `InvestigationState` with integer `version` field for optimistic concurrency control (OCC).
 - **Execution Leases**: Leases protect active investigations against concurrent worker collisions. Crashed workers' leases expire after TTL, allowing safe crash recovery.
-- **Transactional Outbox**: Atomic database transactions commit state and domain events together in PostgreSQL.
-- **Event Delivery Worker**: Background daemon ensuring reliable delivery to event subscribers with backoff retries.
+- **Transactional Outbox**: Atomic database transactions commit state and domain events together in PostgreSQL. Duplicate event IDs are handled with `ON CONFLICT DO NOTHING`, so they never abort a valid state change.
+- **Event Delivery Worker**: Background daemon ensuring reliable delivery to event subscribers. Workers atomically claim disjoint batches (`FOR UPDATE SKIP LOCKED`), retry with durable database-scheduled backoff, and recover abandoned claims after a crash. Delivery is **at-least-once**; consumers must be idempotent and key on `event_id`.
 - **REST & SSE API**: Full investigation lifecycle management, human approval recording, and live streaming via Server-Sent Events.
 
 ## 7. Evaluation
@@ -317,14 +320,18 @@ cp .env.example .env
 ```bash
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
-# Verified in CI (run 39048469043): 733 passed, 0 skipped with live PostgreSQL 16.
-# Verified locally without a database: 691 passed, 42 skipped, 1 warning in ~12s
-# (42 skipped: 40 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
-#  unset/unreachable — including Mission 15's 4 transient-failure retry tests; 2 Windows
-#  symlink tests skipped for non-admin accounts without Developer Mode.
+# Verified in CI (run 39048469043, Mission 15): 733 passed, 0 skipped with live PostgreSQL 16.
+# Verified locally without a database (Mission 16): 695 passed, 48 skipped, 1 warning in ~13s
+# (48 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
+#  unset/unreachable — including Mission 15's 4 transient-failure retry tests and Mission 16's
+#  6 outbox claim/recovery tests; 2 Windows symlink tests skipped for non-admin accounts
+#  without Developer Mode.
 #  Mission 14 added 18 tests beyond the 652/32 Mission 13 baseline; Mission 15 added 25
-#  tests in tests/test_pg_retry.py (21 offline, 4 live PostgreSQL).)
+#  tests in tests/test_pg_retry.py (21 offline, 4 live PostgreSQL); Mission 16 added 10 tests
+#  — 4 offline worker tests in tests/test_event_worker.py and 6 live PostgreSQL outbox tests in
+#  tests/test_outbox.py.)
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
+# Mission 16 live PostgreSQL validation is pending CI (Docker unavailable locally).
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -473,7 +480,7 @@ The `GET /investigations/{id}/events` endpoint provides dual-mode event access v
 | **Execution Leases** | Memory/file level | Distributed atomic leases with TTL crash recovery |
 | **Event History** | `backend_supports_event_history: false` | Fully supported via durable `event_outbox` |
 | **SSE Streaming** | In-memory during run only | Durable history replay + live streaming |
-| **Event Worker** | Not applicable | Background daemon with retry backoff & deduplication |
+| **Event Worker** | Not applicable | Background daemon with atomic multi-worker claims, durable DB-scheduled retry backoff, and claim-expiry crash recovery (Mission 16) |
 | **Transient Failure Recovery** | Not applicable | Bounded retry of the whole `save()` transaction on SQLSTATE `40001` / `40P01` (Mission 15) |
 
 ### 11.1 Transient PostgreSQL Failure Recovery (Mission 15)
@@ -491,6 +498,41 @@ plus full jitter.
 - **Isolation caveat**: no explicit isolation level is set (server default **READ COMMITTED**), so no serialisable/phantom-read guarantee is claimed. Because READ COMMITTED does not naturally emit `40001`, tests use a deterministic fault-injection seam (`core.persistence.retry.inject_transient_fault`, a no-op in production) alongside live PostgreSQL integration tests.
 - **Verified**: 21 offline retry tests pass locally; the 4 live PostgreSQL 16 integration tests executed and passed in CI's `postgres` job ([run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), 733 passed / 0 skipped).
 
+### 11.2 Concurrent & Crash-Safe Outbox Delivery (Mission 16)
+
+Mission 16 replaces the previous read-then-deliver outbox loop with an atomic,
+crash-safe claim protocol so that multiple worker processes can deliver events
+without double-claiming or losing work.
+
+- **Atomic claims**: `PostgresRepository.claim_pending()` locks eligible rows in
+  canonical order with `SELECT ... FOR UPDATE SKIP LOCKED`, then claims exactly
+  those rows. Concurrent workers therefore receive **disjoint** batches; locks
+  are held until commit. Ordering is deterministic: `(created_at ASC, event_id ASC)`.
+- **Durable retry scheduling**: each claim carries a persisted `next_attempt_at`.
+  Failed deliveries are rescheduled with bounded exponential backoff and full
+  jitter (defaults `base=2.0s`, `max=60.0s`) written to the database — **no
+  sleeping occurs inside the batch loop**, and retry timing survives worker
+  restarts. Events with a future `next_attempt_at` are not claimable.
+- **Crash recovery / visibility timeout**: a claim carries `claim_expires_at`
+  (default TTL 300s). `release_expired_claims()` returns abandoned claims to
+  `pending` so another worker can reclaim them after a crash. Completed
+  (`processed`) and terminally `failed` events are never reclaimed.
+- **Terminal failure**: after the attempt limit (default 5), the event is marked
+  `failed` and the error is retained.
+- **Duplicate events**: state-plus-event persistence uses
+  `INSERT ... ON CONFLICT (event_id) DO NOTHING`, so a duplicate event ID can no
+  longer abort an otherwise valid transaction.
+- **Delivery guarantee**: durable, concurrency-safe claims with **at-least-once**
+  delivery. The destination is an in-process `EventBus`, so exactly-once
+  **external** delivery is **not** claimed; consumers must be idempotent and key
+  on `event_id`.
+- **Schema**: `core/persistence/sql/003_outbox_delivery_claim.sql` (additive and
+  idempotent) adds `claimed_by`, `claimed_at`, `claim_expires_at`, and
+  `next_attempt_at` to `event_outbox`, plus `idx_event_outbox_claim`.
+- **Validation**: implementation complete; 4 new offline worker tests and 6 new
+  live PostgreSQL integration tests added. Live PostgreSQL 16 validation is
+  **pending CI** (Docker unavailable locally).
+
 ---
 
 ## 12. Safety Invariants & Boundary Guarantees
@@ -506,6 +548,6 @@ plus full jitter.
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, and SSE).
 - **[docs/CURRENT_STATE_AUDIT.md](docs/CURRENT_STATE_AUDIT.md)** — Exhaustive repository state audit, current test counts, verified capabilities, and unresolved items.
-- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 15.
+- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 16.
 - **[REPRODUCE.md](REPRODUCE.md)** — Complete guide for setting up, running offline tests, launching the API server, querying endpoints, and executing benchmark evaluations.
-- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 15 engineering work.
+- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 16 engineering work.

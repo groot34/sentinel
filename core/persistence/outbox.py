@@ -79,11 +79,74 @@ class OutboxRepository:
     def fetch_pending(self, limit: int = 100) -> List[OutboxEvent]:
         """Fetch pending events for delivery.
 
+        Observational query only: it does not claim or mutate events, so it is
+        safe for auditing/tests but must not be used to drive delivery. Use
+        :meth:`claim_pending` to obtain an exclusive delivery claim.
+
         Args:
             limit: Maximum number of events to fetch.
 
         Returns:
-            List of pending OutboxEvents in created_at order.
+            List of pending OutboxEvents in canonical (created_at, event_id) order.
+        """
+        raise NotImplementedError
+
+    def claim_pending(
+        self,
+        worker_id: str,
+        limit: int = 100,
+        claim_ttl_seconds: float = 300.0,
+    ) -> List[OutboxEvent]:
+        """Atomically claim up to ``limit`` eligible pending events for delivery.
+
+        A claim transfers ownership of an event to ``worker_id`` for a bounded
+        visibility timeout. Concurrent claimers must not receive the same event;
+        events scheduled for a future retry (:attr:`next_attempt_at`) and events
+        already claimed, processed, or failed are ineligible.
+
+        Args:
+            worker_id: Identity of the claiming worker.
+            limit: Maximum number of events to claim.
+            claim_ttl_seconds: Visibility timeout for the resulting claim.
+
+        Returns:
+            List of claimed OutboxEvents in canonical (created_at, event_id) order.
+
+        Raises:
+            PersistenceError: If claiming fails.
+        """
+        raise NotImplementedError
+
+    def release_expired_claims(self) -> int:
+        """Return abandoned claims (past their visibility timeout) to pending.
+
+        Enables crash recovery: if a worker dies mid-delivery, its claim expires
+        and another worker can reclaim the event.
+
+        Returns:
+            Number of events whose claims were released.
+
+        Raises:
+            PersistenceError: If recovery fails.
+        """
+        raise NotImplementedError
+
+    def schedule_retry(
+        self, event_id: str, next_attempt_at: datetime, error_message: str
+    ) -> None:
+        """Durably reschedule a failed event for a later attempt.
+
+        Increments the attempt counter, records the error, clears the claim, and
+        sets the earliest time the event may be claimed again. No sleeping occurs
+        in the delivery loop.
+
+        Args:
+            event_id: Event ID to reschedule.
+            next_attempt_at: Earliest time the event may be claimed again.
+            error_message: Error description from the failed attempt.
+
+        Raises:
+            PersistenceError: If the update fails.
         """
         raise NotImplementedError
 

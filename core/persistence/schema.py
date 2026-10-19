@@ -64,7 +64,19 @@ class SchemaVerificationReport:
         }
 
 
-# Expected schema definitions for authoritative verification
+# Columns and index added to event_outbox by 003_outbox_delivery_claim.
+# Tracked separately from the aggregate expectations below so schema adoption can
+# distinguish a legacy 002-era outbox (which is upgradable in place) from an
+# already-migrated one, and never rejects the former.
+_OUTBOX_CLAIM_COLUMNS = {
+    "claimed_by",
+    "claimed_at",
+    "claim_expires_at",
+    "next_attempt_at",
+}
+_OUTBOX_CLAIM_INDEXES = {"idx_event_outbox_claim"}
+
+# Expected schema definitions for authoritative verification (current shape).
 EXPECTED_TABLES = {
     "schema_migrations": {
         "columns": {"version", "applied_at", "checksum"},
@@ -101,12 +113,14 @@ EXPECTED_TABLES = {
             "processed_at",
             "retry_count",
             "error_message",
-        },
+        }
+        | _OUTBOX_CLAIM_COLUMNS,
         "indexes": {
             "idx_event_outbox_status_created",
             "idx_event_outbox_investigation_id",
             "idx_event_outbox_event_type",
-        },
+        }
+        | _OUTBOX_CLAIM_INDEXES,
     },
 }
 
@@ -293,12 +307,15 @@ def adopt_existing_schema_if_needed(conn: psycopg.Connection) -> List[str]:
             )
         adopted.append("001_initial_schema")
 
-    # Check 002_outbox_schema: requires complete event_outbox table & indexes
+    # Check 002_outbox_schema: requires complete event_outbox table & indexes.
+    # Validated against the pre-003 (002-era) shape minus the columns/index added
+    # by 003, so a legacy outbox is adopted here and then upgraded in place by
+    # 003 rather than being rejected as incomplete.
     if "002_outbox_schema" not in applied_versions and "event_outbox" in existing_tables:
         cols = get_table_columns(conn, "event_outbox")
         idxs = get_table_indexes(conn, "event_outbox")
-        req_cols = EXPECTED_TABLES["event_outbox"]["columns"]
-        req_idxs = EXPECTED_TABLES["event_outbox"]["indexes"]
+        req_cols = EXPECTED_TABLES["event_outbox"]["columns"] - _OUTBOX_CLAIM_COLUMNS
+        req_idxs = EXPECTED_TABLES["event_outbox"]["indexes"] - _OUTBOX_CLAIM_INDEXES
 
         missing_cols = req_cols - cols
         missing_idxs = req_idxs - idxs
@@ -323,6 +340,12 @@ def adopt_existing_schema_if_needed(conn: psycopg.Connection) -> List[str]:
                 """
             )
         adopted.append("002_outbox_schema")
+
+    # 003_outbox_delivery_claim is purely additive and fully idempotent
+    # (ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS), so a pre-existing
+    # outbox that already carries the claim columns is simply left pending: the
+    # migration runner re-executes it safely and records it in one pass. No
+    # adoption branch is required, and a legacy 002-era outbox is never rejected.
 
     return adopted
 

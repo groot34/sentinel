@@ -2,6 +2,35 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission16] - 2026-10-19 (implementation complete; live PostgreSQL CI pending)
+
+### Added
+- **Concurrent & crash-safe outbox delivery**:
+  - New migration `core/persistence/sql/003_outbox_delivery_claim.sql` (additive and idempotent): adds `claimed_by`, `claimed_at`, `claim_expires_at`, and `next_attempt_at` (`TIMESTAMPTZ NOT NULL DEFAULT NOW()`) to `event_outbox`, plus index `idx_event_outbox_claim (status, next_attempt_at, created_at)` for the claim query and claim-expiry sweeps. Existing rows are immediately eligible because `next_attempt_at` defaults to `NOW()`.
+  - `OutboxRepository` gains three abstract operations: `claim_pending(worker_id, limit, claim_ttl_seconds)`, `release_expired_claims()`, and `schedule_retry(event_id, next_attempt_at, error_message)`. `fetch_pending()` is now documented as an observational, non-claiming query and no longer drives delivery.
+  - `PostgresRepository.claim_pending()` claims atomically: it locks eligible rows in canonical order with `SELECT ... FOR UPDATE SKIP LOCKED`, then claims exactly those rows with a targeted `UPDATE ... WHERE event_id = ANY(%s::text[])`. Concurrent worker processes therefore claim **disjoint** event sets (locks are held until commit). Ordering is deterministic: `(created_at ASC, event_id ASC)`.
+  - `release_expired_claims()` implements a visibility timeout: an abandoned claim (crashed worker) whose `claim_expires_at` has passed returns to `pending` and becomes claimable again. Completed and terminally failed events are never touched.
+  - `schedule_retry()` durably persists the next eligible attempt time and the error message, increments `retry_count`, and clears the claim — retries no longer rely on in-process sleeping.
+
+### Changed
+- **`EventDeliveryWorker` (`api/event_worker/worker.py`)** rewritten around the claim → deliver → finalise cycle. Each poll first releases expired claims, then atomically claims a batch, then delivers each event and records the outcome. Retry backoff (bounded exponential with full jitter; defaults `base=2.0s`, `max=60.0s`) is scheduled in the database via `schedule_retry()`, so **no sleeping occurs inside the batch loop** and retry timing survives worker restarts.
+  - New injectable `clock` and `rng` seams for deterministic tests; a process-unique default `worker_id` (`host:pid:hex`); configurable `claim_ttl_seconds` (default 300s) and `max_retry_attempts` (default 5).
+  - Terminal failure after the attempt limit is recorded via `mark_failed()` with the error retained.
+  - `mark_processed()` / `mark_failed()` clear the claim fields; completed and terminally failed events are excluded from future claims.
+  - `main()` now capability-checks the **full** atomic delivery protocol (`release_expired_claims`, `claim_pending`, `mark_processed`, `mark_failed`, `schedule_retry`) and exits with a clear error listing any missing method — it never silently falls back to non-claiming `fetch_pending`. `KeyboardInterrupt` is handled predictably.
+
+### Fixed
+- **Duplicate-event transaction abort**: `PostgresRepository._save_transaction()` and `save_events()` previously caught `psycopg.errors.UniqueViolation` and continued using the same already-aborted transaction, which caused the whole unit of work to fail. They now use the conflict-safe `INSERT ... ON CONFLICT (event_id) DO NOTHING`, so a duplicate event ID can no longer prevent a valid state change from committing. Atomic state-plus-event persistence is preserved, and Mission 15's retry classification is unchanged — `ConcurrencyError` and permanent failures are still never retried.
+
+### Tests
+- **`tests/test_event_worker.py`** — 11 tests (+4): the worker claims atomically with its identity and TTL, schedules a retry without sleeping, continues the batch after a delivery failure, and fails terminally at the attempt limit.
+- **`tests/test_outbox.py`** — 6 new live PostgreSQL integration tests (skipped without a database): 20 eligible events claimed concurrently by two independent workers through a `threading.Barrier`, each claiming at most 10, asserted to return disjoint event sets that collectively cover all 20; stale-claim recovery after a worker crash; exclusion of future-retry and completed events; deterministic ordering for tied timestamps; duplicate event ID not aborting state-plus-event persistence; and terminal failure retaining the error.
+
+### Notes / Limitations
+- **Delivery guarantee**: durable, concurrency-safe claims with **at-least-once** delivery. Because the destination is an in-process `EventBus`, exactly-once **external** delivery is **not** claimed; consumers must be idempotent and key on `event_id`.
+- **Validation status**: implementation complete. Locally (Windows, no database): full suite **695 passed / 48 skipped / 1 warning** (743 collected); the offline-job subset **652 passed / 6 skipped** (the two extra skips are the Windows symlink tests, which pass on Linux); `tests/test_pg_retry.py` **21 passed / 4 skipped**; incident validation **51/51**; `git diff --check` clean. Live PostgreSQL 16 validation is **pending CI** — Docker is unavailable on the development machine, so the 6 new live outbox tests have not yet executed. Mission 16 is **not** marked fully validated until the live PostgreSQL CI job passes with the required skip-count enforcement.
+- No production isolation level was changed, and no external broker (Redis, Kafka, Celery, Temporal, or BullMQ) was introduced.
+
 ## [2.0.0-mission15] - 2026-10-17 (validated: offline + live PostgreSQL 16 CI)
 
 ### Added

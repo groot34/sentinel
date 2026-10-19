@@ -29,12 +29,15 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome (local, Windows, no database): 691 passed, 42 skipped, 1 warning in ~12s
-# (42 skipped: 40 integration tests requiring a live PostgreSQL instance skipped when
+# Verified outcome (local, Windows, no database): 695 passed, 48 skipped, 1 warning in ~13s
+# (48 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
-#  retry tests; 2 symlink tests skipped on Windows without Developer Mode.)
-# Verified in CI (run 39048469043): the postgres job executes every PostgreSQL test and
-#  reported 733 passed, 0 skipped; the offline job reported 650 passed, 4 skipped.
+#  retry tests and Mission 16's 6 outbox claim/recovery tests; 2 symlink tests skipped on
+#  Windows without Developer Mode.)
+# Verified in CI (run 39048469043, Mission 15): the postgres job executes every PostgreSQL
+#  test and reported 733 passed, 0 skipped; the offline job reported 650 passed, 4 skipped.
+#  Mission 16 adds 10 tests (4 offline worker + 6 live outbox); its live PostgreSQL
+#  validation is pending CI.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -78,6 +81,41 @@ Retry configuration (conservative defaults, env-overridable; malformed values ar
 > fault-injection seam rather than relying on isolation level. No serialisable or
 > phantom-read guarantee is claimed.
 
+## Concurrent & Crash-Safe Outbox Delivery Tests (Mission 16)
+
+Atomic, crash-safe outbox claims live in `PostgresRepository`
+(`core/persistence/postgres.py`) with the worker in
+`api/event_worker/worker.py`. The state-plus-event migration is
+`core/persistence/sql/003_outbox_delivery_claim.sql`. The offline worker tests
+require no database; the outbox integration tests require a live PostgreSQL
+instance and are skipped otherwise.
+
+```bash
+# Offline event-worker tests (no database, no real sleeps — clock/rng are injected)
+pytest tests/test_event_worker.py -v
+# Verified outcome (no database): 11 passed
+
+# Live PostgreSQL 16 outbox integration (requires make db-up && make db-migrate)
+SENTINEL_DATABASE_URL=postgresql://sentinel:sentinel_dev_password@localhost:5432/sentinel_db \
+  pytest tests/test_outbox.py -v
+# With PostgreSQL available, the outbox integration tests execute:
+#   - concurrent workers claim disjoint event sets (threading.Barrier, separate pools)
+#   - expired claims are recovered after a simulated worker crash (visibility timeout)
+#   - future-retry and completed events are excluded from claims
+#   - deterministic (created_at, event_id) ordering for tied timestamps
+#   - duplicate event IDs do not abort valid state-plus-event persistence
+#   - terminal failure after the attempt limit retains the error
+```
+
+**Delivery guarantee**: durable, concurrency-safe claims with **at-least-once**
+delivery. Because the destination is an in-process `EventBus`, exactly-once
+**external** delivery is **not** claimed; consumers must be idempotent and key on
+`event_id`.
+
+**Validation status**: the 4 new offline worker tests pass locally. The 6 new
+live PostgreSQL integration tests have **not** run locally (Docker is unavailable
+on the development machine) and are **pending CI**.
+
 ## PostgreSQL Integration Testing
 
 All live PostgreSQL integration tests are guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)`
@@ -94,7 +132,7 @@ make db-up
 
 # 2. Bootstrap the schema using the authoritative migration runner
 make db-migrate
-# Output: "Successfully applied 2 migration(s): 001_initial_schema, 002_outbox_schema"
+# Output: "Successfully applied 3 migration(s): 001_initial_schema, 002_outbox_schema, 003_outbox_delivery_claim"
 #         "Schema verification passed: 3 tables verified."
 
 # 3. Inspect which migrations are recorded in the tracking table
@@ -102,13 +140,14 @@ make db-status
 
 # 4. Run live PostgreSQL integration tests only
 make test-postgres
-# With a DB available locally: all 40 PG tests execute (none skipped).
-# CI (run 39048469043) confirms the postgres job at 733 passed, 0 skipped.
+# With a DB available locally: all 46 PG tests execute (none skipped).
+# CI (run 39048469043, Mission 15) confirms the postgres job at 733 passed, 0 skipped;
+#  Mission 16 adds 6 live outbox tests, whose live validation is pending CI.
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Locally on Windows without a DB (verified): 691 passed, 42 skipped, 1 warning.
-# With a local DB (expected): 731 passed, 2 skipped (Windows symlink only), 1 warning.
+# Locally on Windows without a DB (verified): 695 passed, 48 skipped, 1 warning.
+# With a local DB (expected): 741 passed, 2 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -146,6 +185,15 @@ The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
 > transient-failure retry tests. The `offline` job reported **650 passed, 4 skipped**. Live PostgreSQL
 > validation was performed **in CI only**; Docker is unavailable on the local development machine, so
 > no local PostgreSQL testing is claimed.
+>
+> **Run-number reconciliation**: the later documentation commit `1d55db8` also passed green in
+> [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) with identical
+> results (`postgres` 733 passed / 0 skipped; `offline` 650 passed / 4 skipped). Both runs are
+> genuine and mutually consistent — `39048469043` is the run for the code commit `fa4f1c7`, and
+> `39049346329` is the run for the follow-up documentation commit.
+>
+> **Mission 16** adds 10 tests (4 offline worker tests + 6 live PostgreSQL outbox tests). Its live
+> PostgreSQL validation is **pending CI**; the local run without a database is reported above.
 
 
 ## Starting the API Server
@@ -206,24 +254,34 @@ curl http://127.0.0.1:8000/health
 
 ## Event Delivery Worker
 
-The event delivery worker polls the transactional outbox for pending events
-and delivers them through the EventBus. This requires PostgreSQL persistence.
+The event delivery worker atomically claims pending events from the
+transactional outbox and delivers them through the EventBus. This requires
+PostgreSQL persistence.
 
 ```bash
 # Start the event worker (requires PostgreSQL backend configured)
 python -m api.event_worker
 
 # The worker will:
-# 1. Poll for pending events every 5 seconds (configurable)
-# 2. Deliver events to in-memory EventBus subscribers
-# 3. Mark successful deliveries as processed
-# 4. Retry failed events up to 5 times with exponential backoff
-# 5. Mark permanently failed events with error message
+# 1. Release expired claims (crash recovery) and atomically claim a batch of
+#    eligible events using SELECT ... FOR UPDATE SKIP LOCKED, so concurrent
+#    worker processes claim disjoint sets in deterministic (created_at, event_id) order.
+# 2. Deliver each claimed event to in-memory EventBus subscribers.
+# 3. Mark successful deliveries as processed.
+# 4. Durably reschedule failed events (bounded exponential backoff with jitter),
+#    writing next_attempt_at to the database — no sleeping inside the batch loop.
+# 5. Mark events terminally failed after the attempt limit, retaining the error.
 ```
+
+**Delivery guarantee:** durable, concurrency-safe claims with **at-least-once**
+delivery. The destination is an in-process `EventBus`, so exactly-once
+**external** delivery is **not** claimed; consumers must be idempotent and key on
+`event_id`.
 
 **Configuration:**
 - `SENTINEL_DATABASE_URL` must be set (PostgreSQL required)
 - Worker uses the same `event_outbox` table as the API server
+- Claim visibility timeout defaults to 300 s; retry attempt limit defaults to 5
 - No additional environment variables needed
 
 **Note:** The worker is optional. If not running, events will accumulate in the
