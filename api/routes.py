@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from agents.approval_gate import _build_approval_record
+from agents.bundle_validator import require_valid_incident_bundle
 from agents.orchestrator import IncidentOrchestrator
 from api.errors import error_json_response, sanitize_error_message
 from api.models import (
@@ -25,16 +26,23 @@ from api.models import (
     ApprovalRecordResponse,
     CreateInvestigationRequest,
     CreateInvestigationResponse,
+    EvidenceResultResponse,
     EventHistoryItemResponse,
     EventHistoryResponse,
+    FileChangeResponse,
     GetInvestigationResponse,
     HealthResponse,
+    HypothesisResultResponse,
+    InvestigationResultResponse,
     InvestigationSummaryResponse,
     ListInvestigationsResponse,
     PREFER_ASYNC_HEADER_VALUE,
+    ProposalResultResponse,
     StageSummaryResponse,
     SubmitApprovalRequest,
     SubmitApprovalResponse,
+    VerificationCheckResponse,
+    VerificationResultResponse,
 )
 from core.domain.models import ApprovalRecord, IncidentStatus
 from core.domain.state import InvestigationState
@@ -330,6 +338,240 @@ def _project_investigation_result(
 
 
 # ---------------------------------------------------------------------------
+# Investigation result projection helpers (GET /investigations/{id}/result)
+#
+# Each helper reads only named attributes/dict keys from the persisted state
+# and returns plain dicts that are then validated by the allowlisted response
+# models.  Nothing is inferred: missing or malformed input yields empty/None
+# rather than a fabricated value.
+# ---------------------------------------------------------------------------
+
+def _opt_str(value: Any) -> Optional[str]:
+    """Return *value* as a plain string, or None for anything else.
+
+    Accepts str and str-valued enums; never stringifies arbitrary objects, so
+    no opaque repr/JSON blobs can leak into a response field.
+    """
+    if isinstance(value, str):
+        return value
+    inner = getattr(value, "value", None)
+    if isinstance(inner, str):
+        return inner
+    return None
+
+
+def _opt_float(value: Any) -> Optional[float]:
+    """Return *value* as a float, or None when it is not a real number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _opt_int(value: Any) -> Optional[int]:
+    """Return *value* as an int, or None when it is not a real integer."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _str_list(value: Any) -> List[str]:
+    """Return only the str members of *value* (empty list for non-sequences)."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _project_evidence(state: InvestigationState) -> List[Dict[str, Any]]:
+    """Project persisted evidence items onto the allowlisted evidence shape."""
+    projected: List[Dict[str, Any]] = []
+    for item in getattr(state, "evidence", None) or []:
+        evidence_id = _opt_str(getattr(item, "evidence_id", None))
+        if not evidence_id:
+            continue
+        source = _opt_str(getattr(item, "source", None)) or _opt_str(
+            getattr(item, "source_type", None)
+        )
+        excerpt = _opt_str(getattr(item, "excerpt", None)) or _opt_str(
+            getattr(item, "raw_snippet", None)
+        )
+        projected.append(
+            EvidenceResultResponse(
+                evidence_id=evidence_id,
+                source=source,
+                type=_opt_str(getattr(item, "type", None)),
+                reference=_opt_str(getattr(item, "reference", None)),
+                description=_opt_str(getattr(item, "description", None)),
+                excerpt=excerpt,
+                timestamp=_opt_str(getattr(item, "timestamp", None)),
+                interpretation=_opt_str(getattr(item, "interpretation", None)),
+                metric=_opt_str(getattr(item, "metric", None)),
+                value=_opt_float(getattr(item, "value", None)),
+            ).model_dump()
+        )
+    return projected
+
+
+def _project_verification(state: InvestigationState) -> List[Dict[str, Any]]:
+    """Project the persisted verification stage output.
+
+    The verification stage output is the only persisted representation that
+    keeps a check's discrete PASS/FAIL ``result`` and its ``reference``
+    (file:line) — the normalised ``state.verification_results`` records fold
+    that outcome into free text.  It is also the representation the
+    orchestrator itself treats as authoritative for the result summary.
+    """
+    stage = (getattr(state, "stages", None) or {}).get("verification")
+    output = getattr(stage, "output", None) if stage is not None else None
+    if not isinstance(output, dict):
+        return []
+
+    raw_results = output.get("results")
+    if not isinstance(raw_results, list):
+        return []
+
+    projected: List[Dict[str, Any]] = []
+    for raw in raw_results:
+        if not isinstance(raw, dict):
+            continue
+        hypothesis_id = _opt_str(raw.get("hypothesis_id"))
+        verdict = _opt_str(raw.get("verdict"))
+        if not hypothesis_id or not verdict:
+            continue
+
+        checks: List[Dict[str, Any]] = []
+        raw_checks = raw.get("checks")
+        for chk in raw_checks if isinstance(raw_checks, list) else []:
+            if not isinstance(chk, dict):
+                continue
+            detail = _opt_str(chk.get("detail"))
+            checks.append(
+                VerificationCheckResponse(
+                    check_id=_opt_str(chk.get("check_id")),
+                    description=_opt_str(chk.get("description")),
+                    result=_opt_str(chk.get("result")),
+                    # ``reference`` is the traceability contract and is emitted
+                    # verbatim (incident-relative, e.g. "service/app.py:42").
+                    reference=_opt_str(chk.get("reference")),
+                    # ``detail`` is free-form tool diagnostics, so it is
+                    # redacted for absolute filesystem paths like stage errors.
+                    detail=sanitize_error_message(detail) if detail else None,
+                    evidence_ids=_str_list(chk.get("evidence")),
+                ).model_dump()
+            )
+
+        projected.append(
+            VerificationResultResponse(
+                hypothesis_id=hypothesis_id,
+                verdict=verdict,
+                confidence=_opt_float(raw.get("confidence")),
+                reasoning=_opt_str(raw.get("reasoning")),
+                checks=checks,
+            ).model_dump()
+        )
+    return projected
+
+
+def _project_hypotheses(
+    state: InvestigationState,
+    verdict_by_hypothesis: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    """Project persisted hypotheses, joining in any known verdict."""
+    projected: List[Dict[str, Any]] = []
+    for hyp in getattr(state, "hypotheses", None) or []:
+        hypothesis_id = _opt_str(getattr(hyp, "hypothesis_id", None))
+        if not hypothesis_id:
+            continue
+        projected.append(
+            HypothesisResultResponse(
+                hypothesis_id=hypothesis_id,
+                claim=_opt_str(getattr(hyp, "claim", None)) or "",
+                evidence_ids=_str_list(getattr(hyp, "evidence_ids", None)),
+                verdict=verdict_by_hypothesis.get(hypothesis_id),
+                supporting_reasoning=_opt_str(getattr(hyp, "supporting_reasoning", None)),
+                falsification_criteria=_str_list(getattr(hyp, "falsification_criteria", None)),
+                verification_plan=_str_list(getattr(hyp, "verification_plan", None)),
+            ).model_dump()
+        )
+    return projected
+
+
+def _project_proposals(state: InvestigationState) -> List[Dict[str, Any]]:
+    """Project persisted fix proposals onto the allowlisted proposal shape."""
+    projected: List[Dict[str, Any]] = []
+    for prop in getattr(state, "proposals", None) or []:
+        proposal_id = _opt_str(getattr(prop, "proposal_id", None))
+        if not proposal_id:
+            continue
+
+        changes: List[Dict[str, Any]] = []
+        raw_changes = getattr(prop, "changes", None)
+        for change in raw_changes if isinstance(raw_changes, list) else []:
+            file_path = _opt_str(getattr(change, "file", None))
+            if not file_path:
+                continue
+            changes.append(
+                FileChangeResponse(
+                    file=file_path,
+                    description=_opt_str(getattr(change, "description", None)),
+                    start_line=_opt_int(getattr(change, "start_line", None)),
+                    end_line=_opt_int(getattr(change, "end_line", None)),
+                ).model_dump()
+            )
+
+        projected.append(
+            ProposalResultResponse(
+                proposal_id=proposal_id,
+                hypothesis_id=_opt_str(getattr(prop, "hypothesis_id", None)),
+                status=_opt_str(getattr(prop, "status", None)),
+                summary=_opt_str(getattr(prop, "summary", None)),
+                rationale=_opt_str(getattr(prop, "rationale", None)),
+                patch=_opt_str(getattr(prop, "patch", None)),
+                expected_effect=_opt_str(getattr(prop, "expected_effect", None)),
+                risks=_str_list(getattr(prop, "risks", None)),
+                validation_plan=_str_list(getattr(prop, "validation_plan", None)),
+                rollback_plan=_opt_str(getattr(prop, "rollback_plan", None)),
+                evidence_ids=_str_list(getattr(prop, "evidence_ids", None)),
+                changes=changes,
+                human_approval_notice=_opt_str(getattr(prop, "human_approval_notice", None)),
+            ).model_dump()
+        )
+    return projected
+
+
+def _project_investigation_result_response(
+    state: InvestigationState,
+    status_val: str,
+) -> InvestigationResultResponse:
+    """Build the allowlisted investigation-result response for a persisted state."""
+    verification_projected = _project_verification(state)
+    verdict_by_hypothesis = {
+        v["hypothesis_id"]: v["verdict"]
+        for v in verification_projected
+        if v.get("hypothesis_id") and v.get("verdict")
+    }
+    hypotheses_projected = _project_hypotheses(state, verdict_by_hypothesis)
+    evidence_projected = _project_evidence(state)
+    proposals_projected = _project_proposals(state)
+
+    return InvestigationResultResponse(
+        investigation_id=state.incident_id,
+        status=status_val,
+        current_stage=getattr(state, "current_stage", None),
+        completed_at=getattr(state, "completed_at", None),
+        result_available=bool(
+            hypotheses_projected
+            or evidence_projected
+            or verification_projected
+            or proposals_projected
+        ),
+        hypotheses=hypotheses_projected,
+        evidence=evidence_projected,
+        verification=verification_projected,
+        proposals=proposals_projected,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Route Handlers (Synchronous - offloaded to AnyIO thread pool by Starlette)
 # ---------------------------------------------------------------------------
 
@@ -378,6 +620,13 @@ def create_investigation(request: Request) -> JSONResponse:
     resolved_root = incidents_root.resolve()
     if resolved_candidate.parent != resolved_root or candidate_path.name != incident_id:
         return error_json_response(400, "invalid_incident_id", "Incident ID must identify a direct child directory.")
+
+    # Mission 18 preflight: an invalid bundle is rejected before any state is
+    # created, any lease is acquired, or any LLM-backed stage runs — for both
+    # the synchronous and the asynchronous dispatch paths.
+    # InvalidIncidentBundleError is mapped to 400 invalid_incident_bundle by the
+    # exception handler registered in api/app.py.
+    require_valid_incident_bundle(candidate_path, expected_id=incident_id)
 
     repository = getattr(request.app.state, "repository", None)
     llm_client = getattr(request.app.state, "llm_client", None)
@@ -470,6 +719,10 @@ def resume_investigation(request: Request) -> JSONResponse:
     resolved_root = incidents_root.resolve()
     if resolved_candidate.parent != resolved_root or candidate_path.name != safe_id:
         return error_json_response(400, "invalid_incident_id", "Incident ID must identify a direct child directory.")
+
+    # Mission 18 preflight: validate the bundle before any lease is acquired or
+    # any LLM-backed stage runs, on both the synchronous and asynchronous paths.
+    require_valid_incident_bundle(candidate_path, expected_id=safe_id)
 
     repository = getattr(request.app.state, "repository", None)
     if repository is None:
@@ -773,6 +1026,38 @@ def get_investigation(request: Request) -> JSONResponse:
         stages=stages_projected,
         approvals=approvals_projected,
     )
+    return JSONResponse(status_code=200, content=resp_model.model_dump())
+
+
+def get_investigation_result(request: Request) -> JSONResponse:
+    """GET /investigations/{investigation_id}/result - Retrieve the investigation diagnosis.
+
+    Exposes the evidence, hypotheses, verification checks and fix proposals
+    that are already persisted in the investigation state.  Sections that have
+    not been produced yet (e.g. an investigation still in progress) are
+    returned as empty lists rather than triggering an error.
+    """
+    raw_id = request.path_params.get("investigation_id", "")
+    try:
+        safe_id = _validate_id_param(raw_id)
+    except HTTPException as he:
+        return error_json_response(he.status_code, "invalid_investigation_id", str(he.detail))
+
+    repository = getattr(request.app.state, "repository", None)
+    if repository is None:
+        return error_json_response(503, "persistence_unavailable", "Persistence repository is not configured.")
+
+    state = repository.load(safe_id)
+    if state is None:
+        return error_json_response(404, "investigation_not_found", f"Investigation '{safe_id}' not found.")
+
+    status_val = (
+        state.status.value
+        if isinstance(state.status, IncidentStatus)
+        else str(state.status)
+    )
+
+    resp_model = _project_investigation_result_response(state, status_val)
     return JSONResponse(status_code=200, content=resp_model.model_dump())
 
 

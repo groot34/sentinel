@@ -1,26 +1,28 @@
 # Sentinel Repository State Audit
 
-**Audit Date**: 2026-10-19<br>
+**Audit Date**: 2026-10-21<br>
 **Branch**: `main`<br>
-**Base Commit**: `aba70e1` (*feat: make outbox delivery concurrent and crash-safe*)<br>
-**Working Tree Status**: clean; Mission 16 committed as `aba70e1` and pushed to `origin/main`, with GitHub Actions run [39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) green. See §5/§6
+**Base Commit**: `f458a2b` (*docs: record Mission 16 CI validation*)<br>
+**Working Tree Status**: Mission 17 and Mission 18 changes present but **uncommitted** — Mission 17 modified 5 files (`README.md`, `api/app.py`, `api/models.py`, `api/routes.py`, `docs/ARCHITECTURE.md`) and added `tests/test_investigation_result_api.py`; Mission 18 modified `agents/orchestrator.py`, `api/app.py`, `api/errors.py`, `README.md`, `REPRODUCE.md`, `TODO.md`, `CHANGELOG.md`, `docs/ARCHITECTURE.md`, `docs/CURRENT_STATE_AUDIT.md` and added `agents/bundle_validator.py` + `tests/test_bundle_validator.py`. The last committed state is Mission 16 (`aba70e1`), verified green in GitHub Actions run [39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918). Missions 17 and 18 have **local validation only** — see §1, §3.8, and §3.9.
 
 ---
 
 ## 1. Executive Summary & Verification Baseline
 
-This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 14, Phases 2–4 (PostgreSQL Reliability Harness: Schema Bootstrapping, Live Concurrency Tests, and CI/Developer Workflow), Mission 15 (PostgreSQL Serialization Failure Recovery), whose live PostgreSQL behaviour is validated in CI, and Mission 16 (Concurrent & Crash-Safe Outbox Delivery), which is complete and validated by live PostgreSQL 16 CI. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
+This audit establishes the verified state of the Sentinel repository following the implementation and verification of Sentinel 2.0 Mission 14, Phases 2–4 (PostgreSQL Reliability Harness: Schema Bootstrapping, Live Concurrency Tests, and CI/Developer Workflow), Mission 15 (PostgreSQL Serialization Failure Recovery), whose live PostgreSQL behaviour is validated in CI, Mission 16 (Concurrent & Crash-Safe Outbox Delivery), which is complete and validated by live PostgreSQL 16 CI, Mission 17 (Investigation Result API), which is implemented and **locally validated only** (no CI run yet), and Mission 18 (Incident Bundle Contract & Preflight Validation), also implemented and **locally validated only**. All findings are derived directly from the active codebase, automated test executions, and verifiable Git history.
 
 ### Current Test Suite & Verification Results
 
+- **Pytest Suite (offline, local Windows / Docker unavailable, Mission 18)**: **799 passed, 54 skipped, 1 warning** (853 collected — +98 vs Mission 17's 755).
+- **Pytest Suite (offline, local Windows / Docker unavailable, Mission 17)**: **707 passed, 48 skipped, 1 warning** (755 collected — +12 vs Mission 16's 743).
 - **Pytest Suite (offline, local Windows / Docker unavailable, Mission 16)**: **695 passed, 48 skipped, 1 warning** (743 collected in ~13 s).
-- **Pytest Suite (GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), commit `aba70e1`, Mission 16)**: `postgres` job (PostgreSQL 16) **743 passed, 0 skipped, 3 warnings** (`Total skipped: 0`, so all 6 Mission 16 live outbox tests executed); `offline` job **654 passed, 4 skipped, 1 warning**. Migrations `001`–`003` applied and schema verification passed.
+- **Pytest Suite (GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), commit `aba70e1`, Mission 16)**: `postgres` job (PostgreSQL 16) **743 passed, 0 skipped, 3 warnings** (`Total skipped: 0`, so all 6 Mission 16 live outbox tests executed); `offline` job **654 passed, 4 skipped, 1 warning**. Migrations `001`–`003` applied and schema verification passed. *(This is the latest verified CI run; **no CI run exists for Missions 17 or 18 yet**.)*
 - **Pytest Suite (GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043), commit `fa4f1c7`, Mission 15)**: `postgres` job (PostgreSQL 16) **733 passed, 0 skipped, 3 warnings**; `offline` job **650 passed, 4 skipped, 1 warning**.
 - **Incident Dataset Integrity Suite** (`tests/validate_incidents.py`): **51 / 51 passed** (100%) — run in both CI jobs.
 - **`git diff --check`**: Exit code 0 (clean — no trailing whitespace; only benign LF→CRLF notices on Windows).
 
 #### Explanation of Skipped Tests & Warnings
-1. **Windows Symlink Security Tests (2 skipped)**: `tests/test_api.py::test_create_investigation_rejects_symlink_inside_root` and `test_create_investigation_rejects_symlink_escaping_root` are skipped because standard Windows user accounts without Developer Mode cannot create filesystem symbolic links. These tests **pass on Linux CI** (symlink creation does not require elevated privileges), so CI reports 0 or fewer skips for these.
+1. **Windows Symlink Security Tests (5 skipped)**: `tests/test_api.py::test_create_investigation_rejects_symlink_inside_root` and `test_create_investigation_rejects_symlink_escaping_root`, plus three Mission 18 tests in `tests/test_bundle_validator.py` (`test_symlinked_bundle_entry_escaping_root_is_rejected`, `test_symlinked_bundle_entry_inside_root_is_accepted`, `test_symlinked_bundle_root_is_rejected`), are skipped because standard Windows user accounts without Developer Mode cannot create filesystem symbolic links. These tests **pass on Linux CI** (symlink creation does not require elevated privileges), so CI reports fewer skips for these.
 2. **PostgreSQL Live Integration Tests (46 skipped locally)**: All guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)` where `POSTGRES_AVAILABLE` probes `SENTINEL_DATABASE_URL` at test collection time. Skipped locally because Docker Desktop is not running on the development machine. Exact breakdown:
    - 4 in `tests/test_postgres_concurrency.py` (OCC competing writes, expired lease race, concurrent async resume, outbox rollback)
    - 8 in `tests/test_outbox.py` (6 from Mission 16: concurrent disjoint claims, stale-claim recovery, future-retry/completed exclusion, tied-timestamp ordering, duplicate-ID non-abortion, terminal-failure retention; plus 2 Mission 11/14: PostgreSQL outbox uniqueness + atomic persistence)
@@ -50,7 +52,7 @@ Sentinel 1.0 established the multi-agent incident diagnosis and verification fra
   - **Documented Incident 10 Limitation**: In `inc_10_multi_symptom_cascade`, diagnosis and verification succeeded (4 CONFIRMED hypotheses), but the fix-proposal stage was rate-limited on the Groq free-tier daily token limit, yielding 0 fix proposals with an overall pipeline status of `PARTIAL`.
 
 ### Sentinel 2.0: Enterprise Distributed & Event-Driven Architecture
-Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distributed investigation platform across Missions 01 through 15:
+Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distributed investigation platform across Missions 01 through 17:
 
 | Mission | Commit | Date | Core Deliverables & Implemented Modules |
 |---|---|---|---|
@@ -71,6 +73,8 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 | **Mission 13** | `8d8e7d6` | 2026-10-13 | Async Investigation Dispatch & Background Execution: opt-in `Prefer: respond-async` / `?async=true` returning `202 Accepted` with `AcceptedInvestigationResponse`, immediate queryability and SSE connectivity, durable lease ownership acquired before 202 acceptance with PostgreSQL OCC protection (`ConcurrencyError` -> 409), continuous worker ID ownership throughout dispatch and execution, Starlette `BackgroundTask` execution, process-local slot registry, and failure state handling. |
 | **Mission 14** | `1d3b2e4`, `a5e535a` | 2026-10-15 | PostgreSQL Reliability Harness: Phase 2 — authoritative migration runner (`core/persistence/schema.py`), `schema_migrations` tracking table, checksum tampering detection, strict pre-existing schema adoption; Phase 3 — live concurrency tests (OCC, expired lease race, concurrent async resume, outbox atomicity); Phase 4 — `.github/workflows/ci.yml` (two-job, PostgreSQL service), Makefile `db-up/db-down/db-migrate/db-status/test-postgres/test-all` targets, all six documents updated. |
 | **Mission 15** | `16a6ea8` (stabilised in `fa4f1c7`) | 2026-10-17 | PostgreSQL Serialization Failure Recovery: bounded retry of transient transaction failures (`40001`, `40P01`) wrapping the whole `PostgresRepository.save()` transaction with a fresh connection per attempt; exponential backoff with full jitter (`SENTINEL_PG_RETRY_*`, clamped); OCC `ConcurrencyError` and permanent errors never retried; `RetryExhaustedError` → `503 persistence_unavailable`; deterministic test-only fault-injection seam; `tests/test_pg_retry.py` (21 offline + 4 live). Validated green in GitHub Actions run 39048469043. |
+| **Mission 16** | `aba70e1` | 2026-10-19 | Concurrent & Crash-Safe Outbox Delivery: additive migration `003_outbox_delivery_claim.sql`; atomic multi-worker claiming via `SELECT ... FOR UPDATE SKIP LOCKED`; durable DB-scheduled retry (`next_attempt_at`) with claim-expiry crash recovery; `INSERT ... ON CONFLICT (event_id) DO NOTHING`; `EventDeliveryWorker` rewritten around claim → deliver → finalise with injectable clock/rng. Validated green in GitHub Actions run 39277794918. |
+| **Mission 17** | *uncommitted* | 2026-10-21 | Investigation Result API: read-only `GET /investigations/{id}/result` exposing an allowlisted projection of the diagnosis (hypotheses + verdicts, evidence with `file:line` references, per-check verification outcomes, fix proposals with unified-diff `patch`). Seven `extra="forbid"` Pydantic models in `api/models.py`; defensive projection helpers in `api/routes.py`; 12 tests in `tests/test_investigation_result_api.py`. **Local validation only; no CI run yet.** |
 
 ---
 
@@ -94,12 +98,13 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 | Endpoint | Method | Status Codes | Description |
 |---|---|---|---|
 | `/health` | `GET` | 200 | Returns system status, persistence backend, and outbox queue stats. |
-| `/investigations` | `POST` | 200, 202, 400, 409, 500 | Runs an investigation for an `incident_id`. Default: synchronous (`200 OK`). Opt-in async via `Prefer: respond-async` or `?async=true` (`202 Accepted`). |
+| `/investigations` | `POST` | 200, 202, 400, 409, 500 | Runs an investigation for an `incident_id`. Default: synchronous (`200 OK`). Opt-in async via `Prefer: respond-async` or `?async=true` (`202 Accepted`). A `400 invalid_incident_bundle` is returned when the bundle fails the Mission 18 preflight contract before any stage runs. |
 | `/investigations` | `GET` | 200 | Paginated list of investigations with optional status filter. |
 | `/investigations/{id}` | `GET` | 200, 404 | Retrieves complete investigation state and summary. Immediately queryable after 202 acceptance. |
 | `/investigations/{id}/resume` | `POST` | 200, 202, 400, 404, 409 | Resumes an interrupted investigation. Rejects active leases with 409 Conflict. Default: synchronous (`200 OK`). Opt-in async (`202 Accepted`). |
 | `/investigations/{id}/approval` | `POST` | 200, 400, 404, 409 | Records human approval/rejection decision. Patch is never auto-applied. |
 | `/investigations/{id}/events` | `GET` | 200, 400, 404 | Dual-mode: JSON snapshot (`application/json`) or live SSE stream (`text/event-stream`). Immediately connectable after 202 acceptance. |
+| `/investigations/{id}/result` | `GET` | 200, 400, 404, 503 | Read-only, allowlisted projection of the diagnosis: hypotheses (+ verdicts), evidence (+ `file:line` references), per-check verification outcomes, and fix proposals (+ unified-diff `patch`). Never mutates state or applies patches. |
 
 ### 3.5 Event History & SSE Streaming Semantics
 - **Content Negotiation**: Driven strictly by the `Accept` request header.
@@ -129,6 +134,26 @@ Sentinel 2.0 evolved the single-run CLI into an enterprise-grade, durable, distr
 - **Guarantee**: durable, concurrency-safe claims with **at-least-once** delivery; exactly-once **external** delivery is **not** claimed (in-process `EventBus` destination; consumers must be idempotent and key on `event_id`).
 - **Validation status**: complete and validated. The 4 new offline worker tests (`tests/test_event_worker.py`, now 11) pass locally; the 6 live PostgreSQL integration tests (`tests/test_outbox.py`) executed and passed in CI's `postgres` job ([run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), 743 passed / 0 skipped, `Total skipped: 0`). Local offline suite: 695 passed / 48 skipped / 1 warning.
 
+### 3.8 Investigation Result Projection (Mission 17)
+- **Endpoint**: `GET /investigations/{id}/result` — the read-only "result plane" that returns the diagnosis `GET /investigations/{id}` deliberately omits. Registered in `api/app.py` ahead of the `/events` route.
+- **Allowlisted models**: seven Pydantic v2 models in `api/models.py` — `InvestigationResultResponse`, `HypothesisResultResponse`, `EvidenceResultResponse`, `VerificationResultResponse`, `VerificationCheckResponse`, `ProposalResultResponse`, `FileChangeResponse` — each declared with `ConfigDict(extra="forbid")`.
+- **Projection source**: hypotheses/evidence/proposals are read from their persisted state collections; per-check verification outcomes are read from `stages["verification"].output`, the only persisted representation retaining each check's discrete `result` and `reference` (the normalised `verification_results` fold that information into free text).
+- **Defensive mapping**: `_project_*` helpers in `api/routes.py` read only named attributes/dict keys; absent, partial, or malformed input yields empty lists / `None` rather than a fabricated value or a `500`. `result_available` is `true` when any of the four sections is populated.
+- **Non-exposure guarantees**: the raw state payload, stage outputs, free-form `metadata`, secrets, `before`/`after` file bodies, and unrelated state fields are never returned. `reference` values are emitted verbatim (incident-relative `file:line`); only free-form check `detail` is path-sanitised via `sanitize_error_message()`.
+- **Read-only**: the handler calls `repository.load()` only — it never mutates investigation state and never applies patches. Returned `proposal_id` values are accepted directly by `POST /investigations/{id}/approval`.
+- **Status codes**: `200 OK` (including in-progress/partial investigations with empty sections), `400` invalid ID, `404` not found, `503` repository unavailable — mirroring the existing detail endpoint.
+- **Visibility backend scope**: backend-agnostic by construction — `FilesystemRepository` and `PostgresRepository` both reconstruct `InvestigationState` via `from_dict()`, so the projection reads the same shape.
+- **Validation status**: implementation complete, **local validation only**. 12 focused tests in `tests/test_investigation_result_api.py` pass locally against the real app; full offline suite 707 passed / 48 skipped / 1 warning; incident validation 51/51; `git diff --check` clean. **No CI run exists for Mission 17 yet**, and **PostgreSQL integration was not run locally** (Docker unavailable) — the backend-agnostic claim rests on code inspection.
+
+### 3.9 Incident Bundle Contract & Preflight Validation (Mission 18)
+- **Contract owner**: `agents/bundle_validator.py` — deterministic, read-only, zero LLM calls, no new dependencies. The only required entry is the incident directory (named `<incident_id>`); `logs/application.log`, `metrics/metrics.csv`, `git_diff.patch`, `service/`, and `docker-compose.yml` are all optional; `ground_truth.md` is evaluation-only and never read at runtime.
+- **API surface**: `validate_incident_bundle(incident_dir, expected_id=None)` → frozen `BundleValidationResult` (detected `evidence_sources`, severity-tagged `BundleIssue`s with stable codes, `ok`, `error_messages()` / `warning_messages()`); `require_valid_incident_bundle(...)` raises `FileNotFoundError` / `NotADirectoryError` / `InvalidIncidentBundleError`; CLI `python -m agents.bundle_validator <dir> [--incident-id ID]` exits `0` valid / `1` invalid.
+- **Fatal conditions**: missing path, non-directory path, invalid or mismatched incident ID, symlinked bundle root or entry symlink escaping the root, an entry whose type contradicts the contract (`not_a_file` / `not_a_directory`), a declared channel directory (`logs/`, `metrics/`) whose expected file is absent (`required_file_missing`), a present-but-empty/malformed `metrics/metrics.csv` (`metrics_csv_empty` / `metrics_csv_invalid`, messages naming the metric and the 1-indexed file row), and a present-but-invalid metrics timestamp (`metrics_timestamp_invalid` — a `timestamp` value that is not an ISO-8601 UTC instant ending in `Z`, e.g. `2026-08-28T14:00:00Z`).
+- **Non-fatal (preserved partial evidence)**: any evidence source absent; empty log file (warning `empty_log_file`); evidence-free bundle (warning `no_evidence_sources`). The existing empty-directory and non-standard-filename fixtures remain valid.
+- **Where it runs**: `IncidentOrchestrator._validate_incident_dir()` calls `require_valid_incident_bundle()` at the top of both `investigate()` and `resume()`, before `_run_pipeline()` — therefore before any stage and before the LLM client is constructed, so an invalid bundle never spends Groq credits. `api/errors.py` + `api/app.py` map `InvalidIncidentBundleError` to `400 invalid_incident_bundle`; the pre-existing `api/routes.py` containment checks are unchanged.
+- **Read isolation**: containment is verified **before** any evidence file is opened — a canonical evidence path (`logs/application.log` or `metrics/metrics.csv`) that resolves outside the bundle root is reported as `bundle_escapes_root` but is never read or parsed, so escaped content cannot leak into the `400` detail. The validator opens only those two canonical files by relative path; it never enumerates the bundle and never opens `ground_truth.md`, `results_baseline.csv`, or `baseline_summary.json`. It never writes to the bundle and never applies patches. *Residual limitation (accepted):* the bundle is validated before the pipeline re-reads it, so a symlink swapped in between the preflight check and the read is not re-checked (a narrow TOCTOU window) — documented rather than closed by architectural change.
+- **Validation status**: implementation complete, **local validation only**. 98 focused tests in `tests/test_bundle_validator.py` (92 passed / 6 symlink skips); the CLI reports `VALID` for all 10 canonical fixtures; full offline suite 799 passed / 54 skipped / 1 warning (853 collected); incident validation 51/51; `git diff --check` clean. **No CI run exists for Mission 18 yet**, and PostgreSQL was **not** exercised locally.
+
 ---
 
 ## 4. Documentation Discrepancies Resolved in this Audit
@@ -143,12 +168,14 @@ Prior to this reconciliation, documentation had drifted significantly across the
 
 ---
 
-## 5. Remaining Engineering Work (Post-Mission 16)
+## 5. Remaining Engineering Work (Post-Mission 18)
 
 The following represents genuine upcoming engineering tasks, clearly separated from completed work:
-1. **Distributed Task Queue Integration**: Mission 13 implemented in-process asynchronous dispatch via Starlette `BackgroundTask`. Extending to durable external queues (Celery, Redis Streams, Temporal, BullMQ) across distributed worker pools remains a future enterprise enhancement.
-2. **External Event Bus Integrations**: Mission 16 made `EventDeliveryWorker` safe and crash-tolerant across concurrent worker processes, but it still publishes to the in-process bus. Integrating Redis, Kafka, or webhook publishers for external consumers remains future work; exactly-once external delivery would require consumer-side idempotency or a transactional broker.
-3. **Explicit `SERIALIZABLE` isolation (optional)**: Mission 15 handles `40001`/`40P01` defensively but Sentinel still runs at the server-default READ COMMITTED level; a future mission could adopt explicit serialisable isolation with the accompanying phantom-read guarantees and tests.
+1. ~~**Documented Incident Bundle Contract (product priority)**~~ — **completed in Mission 18**: the canonical input contract (required/optional entries, formats, incident-ID and bundle-path handling, fatal vs. legitimate partial-evidence conditions, and a minimal example) is documented in [README §6.2](../README.md) and [docs/ARCHITECTURE.md §4.7](ARCHITECTURE.md), and enforced before any LLM call by `agents/bundle_validator.py`. The consumer-facing *diagnosis* contract remains exposed by `GET /investigations/{id}/result` (Mission 17).
+2. **CI validation for Missions 17 & 18**: commit and push the Mission 17 and Mission 18 changes and confirm both GitHub Actions jobs stay green; no CI run exists for either mission yet.
+3. **Distributed Task Queue Integration**: Mission 13 implemented in-process asynchronous dispatch via Starlette `BackgroundTask`. Extending to durable external queues (Celery, Redis Streams, Temporal, BullMQ) across distributed worker pools remains a future enterprise enhancement.
+4. **External Event Bus Integrations**: Mission 16 made `EventDeliveryWorker` safe and crash-tolerant across concurrent worker processes, but it still publishes to the in-process bus. Integrating Redis, Kafka, or webhook publishers for external consumers remains future work; exactly-once external delivery would require consumer-side idempotency or a transactional broker.
+5. **Explicit `SERIALIZABLE` isolation (optional)**: Mission 15 handles `40001`/`40P01` defensively but Sentinel still runs at the server-default READ COMMITTED level; a future mission could adopt explicit serialisable isolation with the accompanying phantom-read guarantees and tests.
 
 ---
 

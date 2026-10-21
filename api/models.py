@@ -197,6 +197,132 @@ class GetInvestigationResponse(BaseModel):
     approvals: List[ApprovalRecordResponse] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Investigation result projection (GET /investigations/{id}/result)
+#
+# These models expose the diagnosis that is already persisted in
+# InvestigationState: evidence, hypotheses, verification checks and fix
+# proposals.  Every field is explicitly declared — the raw state payload and
+# free-form ``metadata`` blobs are never returned.
+# ---------------------------------------------------------------------------
+
+class EvidenceResultResponse(BaseModel):
+    """Allowlisted projection of one persisted evidence item.
+
+    Flattens the four concrete evidence subtypes (Log/Metric/Code/Evidence)
+    onto a single shape; fields that a given subtype does not carry stay None.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str
+    source: Optional[str] = None
+    type: Optional[str] = None
+    reference: Optional[str] = None
+    description: Optional[str] = None
+    excerpt: Optional[str] = None
+    timestamp: Optional[str] = None
+    interpretation: Optional[str] = None
+    metric: Optional[str] = None
+    value: Optional[float] = None
+
+
+class HypothesisResultResponse(BaseModel):
+    """Allowlisted projection of one persisted hypothesis.
+
+    ``verdict`` is joined from the verification stage output; it stays None
+    when the hypothesis has not been verified yet.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    hypothesis_id: str
+    claim: str
+    evidence_ids: List[str] = Field(default_factory=list)
+    verdict: Optional[str] = None
+    supporting_reasoning: Optional[str] = None
+    falsification_criteria: List[str] = Field(default_factory=list)
+    verification_plan: List[str] = Field(default_factory=list)
+
+
+class VerificationCheckResponse(BaseModel):
+    """Allowlisted projection of a single deterministic verification check."""
+    model_config = ConfigDict(extra="forbid")
+
+    check_id: Optional[str] = None
+    description: Optional[str] = None
+    result: Optional[str] = None          # PASS | FAIL | INCONCLUSIVE
+    reference: Optional[str] = None       # e.g. "service/app.py:12"
+    detail: Optional[str] = None
+    evidence_ids: List[str] = Field(default_factory=list)
+
+
+class VerificationResultResponse(BaseModel):
+    """Allowlisted projection of the verification outcome for one hypothesis."""
+    model_config = ConfigDict(extra="forbid")
+
+    hypothesis_id: str
+    verdict: str                          # CONFIRMED | REJECTED | INCONCLUSIVE
+    confidence: Optional[float] = None
+    reasoning: Optional[str] = None
+    checks: List[VerificationCheckResponse] = Field(default_factory=list)
+
+
+class FileChangeResponse(BaseModel):
+    """Allowlisted projection of a proposed file change.
+
+    ``before``/``after`` (raw file bodies) are deliberately omitted; the
+    unified diff is carried by ``ProposalResultResponse.patch``.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    file: str
+    description: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+
+
+class ProposalResultResponse(BaseModel):
+    """Allowlisted projection of one persisted fix proposal.
+
+    ``proposal_id`` is the identifier accepted by
+    POST /investigations/{id}/approval.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: str
+    hypothesis_id: Optional[str] = None
+    status: Optional[str] = None
+    summary: Optional[str] = None
+    rationale: Optional[str] = None
+    patch: Optional[str] = None
+    expected_effect: Optional[str] = None
+    risks: List[str] = Field(default_factory=list)
+    validation_plan: List[str] = Field(default_factory=list)
+    rollback_plan: Optional[str] = None
+    evidence_ids: List[str] = Field(default_factory=list)
+    changes: List[FileChangeResponse] = Field(default_factory=list)
+    human_approval_notice: Optional[str] = None
+
+
+class InvestigationResultResponse(BaseModel):
+    """Allowlisted response for GET /investigations/{id}/result.
+
+    ``result_available`` is False when no result section has been persisted
+    yet (e.g. an investigation still in progress). Sections are always
+    present as lists so consumers never have to null-check them.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str
+    status: str
+    current_stage: Optional[str] = None
+    completed_at: Optional[str] = None
+    result_available: bool = False
+    hypotheses: List[HypothesisResultResponse] = Field(default_factory=list)
+    evidence: List[EvidenceResultResponse] = Field(default_factory=list)
+    verification: List[VerificationResultResponse] = Field(default_factory=list)
+    proposals: List[ProposalResultResponse] = Field(default_factory=list)
+
+
 class ListInvestigationsResponse(BaseModel):
     """Allowlisted response for GET /investigations."""
     model_config = ConfigDict(extra="forbid")

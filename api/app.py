@@ -13,17 +13,20 @@ from api.errors import (
     concurrency_exception_handler,
     generic_exception_handler,
     http_exception_handler,
+    invalid_bundle_exception_handler,
     persistence_exception_handler,
 )
 from api.routes import (
     create_investigation,
     get_investigation,
+    get_investigation_result,
     health,
     list_investigation_events,
     list_investigations,
     resume_investigation,
     submit_approval,
 )
+from agents.bundle_validator import InvalidIncidentBundleError
 from core.llm.base import BaseLLMProvider
 from core.persistence import (
     ConcurrencyError,
@@ -53,6 +56,7 @@ def create_app(
         Route("/investigations", endpoint=create_investigation, methods=["POST"]),
         Route("/investigations", endpoint=list_investigations, methods=["GET"]),
         Route("/investigations/{investigation_id}", endpoint=get_investigation, methods=["GET"]),
+        Route("/investigations/{investigation_id}/result", endpoint=get_investigation_result, methods=["GET"]),
         Route("/investigations/{investigation_id}/events", endpoint=list_investigation_events, methods=["GET"]),
         Route("/investigations/{investigation_id}/resume", endpoint=resume_investigation, methods=["POST"]),
         Route("/investigations/{investigation_id}/approval", endpoint=submit_approval, methods=["POST"]),
@@ -62,6 +66,7 @@ def create_app(
         HTTPException: http_exception_handler,
         ConcurrencyError: concurrency_exception_handler,
         PersistenceError: persistence_exception_handler,
+        InvalidIncidentBundleError: invalid_bundle_exception_handler,
         Exception: generic_exception_handler,
     }
 

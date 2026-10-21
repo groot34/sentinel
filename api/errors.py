@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from agents.bundle_validator import InvalidIncidentBundleError
 from core.persistence import ConcurrencyError, PersistenceError
 
 _PATH_REGEX = re.compile(r"([A-Za-z]:[\\/]|/)[^\s:\"']+")
@@ -64,6 +65,13 @@ async def concurrency_exception_handler(request: Request, exc: ConcurrencyError)
 async def persistence_exception_handler(request: Request, exc: PersistenceError) -> JSONResponse:
     """Map PersistenceError to 503 Service Unavailable."""
     return error_json_response(503, "persistence_unavailable", str(exc))
+
+
+async def invalid_bundle_exception_handler(
+    request: Request, exc: InvalidIncidentBundleError
+) -> JSONResponse:
+    """Map InvalidIncidentBundleError to 400 Bad Request."""
+    return error_json_response(400, "invalid_incident_bundle", str(exc))
 
 
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:

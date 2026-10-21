@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **743 passed, 0 skipped** (live PostgreSQL 16 CI; Mission 16 validated) |
+| Automated tests | — | **799 passed, 54 skipped** offline (Mission 18); **743 passed, 0 skipped** live PostgreSQL 16 CI (Mission 16) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 48 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 2 Windows symlink tests, giving 695 passed / 48 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 54 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 8 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests), giving 799 passed / 54 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Mission 17 adds 12 result-endpoint tests and Mission 18 adds 98 bundle-validator tests (92 passing, 6 symlink tests skipped on this Windows account), taking the suite from 755 to 853 collected; both missions have **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally.)*
 
 ---
 
@@ -202,6 +202,94 @@ Sentinel 2.0 wraps the 8-stage core pipeline in a production-ready, distributed,
 - **Event Delivery Worker**: Background daemon ensuring reliable delivery to event subscribers. Workers atomically claim disjoint batches (`FOR UPDATE SKIP LOCKED`), retry with durable database-scheduled backoff, and recover abandoned claims after a crash. Delivery is **at-least-once**; consumers must be idempotent and key on `event_id`.
 - **REST & SSE API**: Full investigation lifecycle management, human approval recording, and live streaming via Server-Sent Events.
 
+### 6.2 Incident Bundle Contract
+
+An **incident bundle** is a directory whose name is the incident ID. Commands accept it by
+path (`python -m agents.orchestrator --incident-dir incidents/<incident_id>`) and the API
+accepts it by ID (`POST /investigations {"incident_id": "<incident_id>"}`, resolved under
+`--incidents-root`, default `incidents/`).
+
+```
+incidents/<incident_id>/
+├── logs/
+│   └── application.log      # optional — log evidence
+├── metrics/
+│   └── metrics.csv          # optional — metric evidence
+├── git_diff.patch           # optional — unified diff evidence
+├── service/                 # optional — source tree evidence
+│   ├── app.py
+│   └── tests/test_service.py
+├── docker-compose.yml       # optional — deployment context
+└── ground_truth.md          # evaluation only — NEVER read at runtime
+```
+
+| Entry | Required | Format | Notes |
+|---|---|---|---|
+| incident directory | **yes** | directory named `<incident_id>` | The directory itself is the only required entry |
+| `logs/application.log` | no | one log line per line | Lines opening with an ISO-8601 timestamp (`2026-08-28T14:00:00Z`) carry a timestamp; level tokens `INFO`/`WARN`/`WARNING`/`ERROR`/`FATAL`/`DEBUG`/`TRACE`/`CRITICAL` and `[service]` markers are parsed. Decoded with `errors="ignore"`, so it is Unicode-tolerant but never fatal |
+| `metrics/metrics.csv` | no | wide CSV | Header row required; a `timestamp` column is required (ISO-8601 `…Z`); all remaining columns must be numeric. Series are short (typically 5–9 samples). Row references are 1-indexed **file lines including the header**, so `metrics/metrics.csv:row 2` is the first data row |
+| `git_diff.patch` | no | unified diff | References are `git_diff.patch:hunk N` when added lines interleave context |
+| `service/` | no | Python source tree | `__pycache__`, `tests/`, and `.pytest_cache` are skipped; `ground_truth.md` / `ground_truth.json` are never read |
+| `docker-compose.yml` | no | YAML | Consumed only if present; not evidence on its own |
+| `ground_truth.md` | evaluation only | markdown | Present in the 10 canonical fixtures for scoring. **Runtime code never reads it** |
+
+**Incident IDs.** A valid ID matches `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` and may not contain
+`/`, `\`, `..`, or `:`. The API additionally requires the resolved bundle directory's parent to be
+the permitted incident root and its name to equal the incident ID, so `../x`, `sub/id`, and
+symlinked bundle directories are rejected with `400`.
+
+**Fatal vs. partial.** A bundle is *not* required to carry every evidence source — the pipeline
+is designed for partial evidence. These conditions are **fatal** (the run never starts, and no
+LLM credits are spent):
+
+| Fatal condition | Surfaced as |
+|---|---|
+| Bundle path does not exist | `FileNotFoundError` (CLI) / `404` when missing under the incident root (API) |
+| Bundle path is not a directory | `NotADirectoryError` |
+| Directory name is not a valid incident ID, or differs from the expected ID | `invalid_incident_id` / `incident_id_mismatch` → `400 invalid_incident_bundle` |
+| Bundle directory is a symlink, or an entry symlink escapes the bundle root | `bundle_symlink` / `bundle_escapes_root` |
+| A channel directory (`logs/`, `metrics/`) exists but its expected file is absent | `required_file_missing` |
+| An entry's type contradicts the contract (e.g. `service/` as a file) | `not_a_directory` / `not_a_file` |
+| `metrics/metrics.csv` is present but empty, headerless, missing its `timestamp` column, or has a non-numeric/missing value | `metrics_csv_empty` / `metrics_csv_invalid` (message names the metric and the offending row) |
+| `metrics/metrics.csv` has a `timestamp` value that is not an ISO-8601 UTC instant ending in `Z` (e.g. `2026-08-28T14:00:00Z`) | `metrics_timestamp_invalid` (message names the offending 1-indexed file row) |
+
+These conditions are **legitimate partial evidence** and are explicitly *not* fatal: any of
+`logs/application.log`, `metrics/metrics.csv`, `service/`, `git_diff.patch`, or
+`docker-compose.yml` absent; an empty log file (warning `empty_log_file`); a bundle with no
+evidence at all (warning `no_evidence_sources`). In every case the affected agent returns an
+empty result and the pipeline continues.
+
+**Preflight validation.** The contract is enforced deterministically by
+`agents/bundle_validator.py` (zero LLM calls, read-only — it opens only
+`logs/application.log` and `metrics/metrics.csv` and never enumerates the bundle). Containment is
+verified **before** any evidence file is opened, so a canonical evidence path that resolves outside
+the bundle root is reported as `bundle_escapes_root` but is never read or parsed.
+`IncidentOrchestrator._validate_incident_dir()` calls it at the top of both `investigate()`
+and `resume()`, **before any stage — and therefore before any Groq call**. The API maps a
+violation to `400 invalid_incident_bundle`. *Residual limitation:* the bundle is validated before
+the pipeline re-reads it, so a symlink swapped in between the check and the read is not re-checked
+(a narrow TOCTOU window) — documented rather than closed by architectural change. You can check a
+bundle without starting an investigation:
+
+```bash
+python -m agents.bundle_validator incidents/inc_01_n_plus_one_query --incident-id inc_01_n_plus_one_query
+# Bundle:        incidents\inc_01_n_plus_one_query
+# Incident ID:   inc_01_n_plus_one_query
+# Evidence:      logs/application.log, metrics/metrics.csv, git_diff.patch, service
+# Result:        VALID
+```
+
+Exit code `0` means valid (warnings allowed); exit code `1` means at least one fatal error.
+
+**Minimal example.** A bundle with log evidence only is valid — this is the smallest useful
+incident:
+
+```
+incidents/my_incident/
+└── logs/
+    └── application.log
+```
+
 ## 7. Evaluation
 
 Sentinel is evaluated against a fair baseline across 10 canonical synthetic production incidents.
@@ -321,22 +409,29 @@ cp .env.example .env
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
 # Verified in CI (run 39048469043, Mission 15): 733 passed, 0 skipped with live PostgreSQL 16.
-# Verified locally without a database (Mission 16): 695 passed, 48 skipped, 1 warning in ~13s
-# (48 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
+# Verified locally without a database (Mission 18): 799 passed, 54 skipped, 1 warning in ~16s
+# (54 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
 #  unset/unreachable — including Mission 15's 4 transient-failure retry tests and Mission 16's
-#  6 outbox claim/recovery tests; 2 Windows symlink tests skipped for non-admin accounts
-#  without Developer Mode.
+#  6 outbox claim/recovery tests; 8 Windows symlink tests skipped for non-admin accounts
+#  without Developer Mode — 2 in tests/test_api.py and 6 in tests/test_bundle_validator.py.
 #  Mission 14 added 18 tests beyond the 652/32 Mission 13 baseline; Mission 15 added 25
 #  tests in tests/test_pg_retry.py (21 offline, 4 live PostgreSQL); Mission 16 added 10 tests
 #  — 4 offline worker tests in tests/test_event_worker.py and 6 live PostgreSQL outbox tests in
-#  tests/test_outbox.py.)
+#  tests/test_outbox.py; Mission 17 added 12 result-endpoint tests in
+#  tests/test_investigation_result_api.py; Mission 18 added 98 bundle-validator tests in
+#  tests/test_bundle_validator.py.)
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
 # Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres job (PostgreSQL 16) 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests ran.
+# Missions 17 and 18 have local validation only — no CI run yet; PostgreSQL was not tested locally.
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
 # Verified result: 51/51 passed across all 10 canonical incidents
+
+# Validate an incident bundle against the documented contract (no LLM, no API key)
+python -m agents.bundle_validator incidents/inc_01_n_plus_one_query --incident-id inc_01_n_plus_one_query
+# Verified result: "Result: VALID" with evidence logs/application.log, metrics/metrics.csv, git_diff.patch, service
 ```
 
 ### Investigate one incident via CLI
@@ -469,6 +564,23 @@ The `GET /investigations/{id}/events` endpoint provides dual-mode event access v
   ```
   Streams real-time events, periodically emits `: keep-alive\n\n` comments, safely drains all pending persisted events, and closes cleanly without emitting synthetic frames upon reaching a terminal state (`COMPLETED`, `FAILED`, `PARTIAL`). If an unresolvable cursor is supplied, the server returns HTTP 200, emits an SSE comment notice, and restarts streaming from the beginning (never failing with HTTP 400).
 
+#### 8. Retrieve Investigation Result
+
+The `GET /investigations/{id}/result` endpoint returns a read-only, allowlisted projection of the investigation's diagnosis — the part `GET /investigations/{id}` intentionally omits.
+
+```bash
+curl -s http://127.0.0.1:8000/investigations/<investigation_id>/result
+```
+
+Returns `200 OK` with `InvestigationResultResponse`:
+
+- `hypotheses`: `hypothesis_id`, `claim`, linked `evidence_ids`, `verdict` (`CONFIRMED` / `REJECTED` / `INCONCLUSIVE`, or `null` if not yet verified).
+- `evidence`: `evidence_id`, `source`, `type`, `reference` (incident-relative `file:line`), `description`, `excerpt`.
+- `verification`: per-hypothesis `verdict` plus individual `checks` with `check_id`, `result` (`PASS` / `FAIL` / `INCONCLUSIVE`) and `reference`.
+- `proposals`: `proposal_id`, `summary`, `rationale`, unified-diff `patch`, `risks`, `rollback_plan`.
+
+`result_available` is `true` only when at least one section is populated. In-progress or partial investigations return empty sections rather than an error, and the returned `proposal_id` values can be passed straight to `POST /investigations/{id}/approval`. Internal state, raw stage outputs, `before`/`after` file bodies and evidence `metadata` are never exposed.
+
 ---
 
 ## 11. Persistence Backend Comparison
@@ -549,6 +661,6 @@ without double-claiming or losing work.
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, and SSE).
 - **[docs/CURRENT_STATE_AUDIT.md](docs/CURRENT_STATE_AUDIT.md)** — Exhaustive repository state audit, current test counts, verified capabilities, and unresolved items.
-- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 16.
+- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 18.
 - **[REPRODUCE.md](REPRODUCE.md)** — Complete guide for setting up, running offline tests, launching the API server, querying endpoints, and executing benchmark evaluations.
-- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 16 engineering work.
+- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 18 engineering work.

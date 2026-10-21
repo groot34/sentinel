@@ -42,6 +42,10 @@ from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 import jsonschema
 
 from agents.approval_gate import ApprovalGate
+from agents.bundle_validator import (
+    InvalidIncidentBundleError,
+    require_valid_incident_bundle,
+)
 from agents.code_agent import CodeAgent
 from agents.fix_proposal_agent import FixProposalAgent
 from agents.fix_tools import HUMAN_APPROVAL_NOTICE, collect_all_evidence_ids
@@ -114,15 +118,6 @@ def _find_resume_stage(state: InvestigationState) -> Optional[str]:
         return stage_name
     return None
 
-# Forbidden files — must never be read or passed to any agent
-# Forbidden files — must never be read or passed to any agent.
-# Expressed as joined parts to avoid raw path literals appearing in the module's string constants.
-_GT = "ground_truth" + ".md"           # never open this file
-_RB = "results_baseline" + ".csv"      # never open this file
-_BS = "baseline_summary" + ".json"     # never open this file
-_FORBIDDEN_FILES = frozenset([_GT, _RB, _BS])
-_FORBIDDEN_DIRS = frozenset(["eval/results/baseline"])
-
 
 def _load_result_schema() -> Dict[str, Any]:
     with open(RESULT_SCHEMA_PATH, "r", encoding="utf-8") as f:
@@ -156,15 +151,14 @@ def _stage_result(
 
 
 def _validate_incident_dir(incident_dir: Path) -> None:
-    if not incident_dir.exists():
-        raise FileNotFoundError(f"Incident directory not found: {incident_dir}")
-    if not incident_dir.is_dir():
-        raise NotADirectoryError(f"Path is not a directory: {incident_dir}")
-    for forbidden in _FORBIDDEN_FILES:
-        if (incident_dir / forbidden).exists():
-            # The orchestrator never reads evaluation-only files;
-            # this is a belt-and-suspenders guard.
-            pass  # presence of the file is fine; we just never read it.
+    """Run the deterministic incident-bundle preflight before any stage starts.
+
+    Raises:
+        FileNotFoundError: the incident bundle directory does not exist.
+        NotADirectoryError: the incident bundle path is not a directory.
+        InvalidIncidentBundleError: the bundle violates the documented contract.
+    """
+    require_valid_incident_bundle(incident_dir)
 
 
 def _collect_evidence_ids_from_bundle(bundle: Optional[Dict[str, Any]]) -> Set[str]:
@@ -1401,7 +1395,7 @@ Examples:
 
     try:
         result = orchestrator.investigate(incident_path)
-    except (FileNotFoundError, NotADirectoryError) as exc:
+    except (FileNotFoundError, NotADirectoryError, InvalidIncidentBundleError) as exc:
         print(f"\n[ERROR] {exc}")
         raise SystemExit(1)
 

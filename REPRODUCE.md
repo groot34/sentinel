@@ -29,15 +29,17 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome (local, Windows, no database): 695 passed, 48 skipped, 1 warning in ~13s
-# (48 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
+# Verified outcome (local, Windows, no database, Mission 18): 799 passed, 54 skipped, 1 warning in ~16s
+# (54 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
-#  retry tests and Mission 16's 6 outbox claim/recovery tests; 2 symlink tests skipped on
-#  Windows without Developer Mode.)
+#  retry tests and Mission 16's 6 outbox claim/recovery tests; 8 symlink tests skipped on
+#  Windows without Developer Mode — 2 in tests/test_api.py, 6 in tests/test_bundle_validator.py.)
 # Verified in CI (run 39048469043, Mission 15): the postgres job executes every PostgreSQL
 #  test and reported 733 passed, 0 skipped; the offline job reported 650 passed, 4 skipped.
 #  Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests executed.
+#  Missions 17 (12 result-endpoint tests) and 18 (98 bundle-validator tests) have local
+#  validation only — no CI run yet; PostgreSQL integration was NOT run locally.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -118,6 +120,65 @@ live PostgreSQL integration tests executed and passed in CI's `postgres` job
 743 passed / 0 skipped, `Total skipped: 0`). Locally (Docker unavailable) the offline
 suite is the only one that runs.
 
+## Investigation Result API Tests (Mission 17)
+
+The read-only `GET /investigations/{id}/result` projection lives in `api/routes.py`
+with allowlisted response models in `api/models.py`. Its tests are offline only —
+no database and no Groq calls are required.
+
+```bash
+# Focused result-endpoint tests (real app via TestClient; no database, no network)
+pytest tests/test_investigation_result_api.py -v
+# Verified outcome (no database): 12 passed
+```
+
+They cover full diagnosis exposure, interoperability with `POST /investigations/{id}/approval`,
+in-progress / partial / malformed-verification handling, `404`/`400`/`503` error behaviour,
+internal-state non-leakage (exact allowlisted key sets; `before`/`after` absent), and
+preservation of the pre-existing `GET /investigations/{id}` contract.
+
+**Validation status**: implementation complete, **local validation only**. All 12 tests pass
+locally and the full offline suite is 707 passed / 48 skipped / 1 warning (at the time of
+Mission 17; after Mission 18 the suite is 799 passed / 54 skipped). **No CI run exists
+for Mission 17 yet**, and the endpoint's PostgreSQL path was **not** exercised locally
+(Docker unavailable) — the projection is backend-agnostic because both repositories
+reconstruct `InvestigationState` via `from_dict()`.
+
+## Incident Bundle Contract & Preflight Validation (Mission 18)
+
+The canonical input contract and the deterministic preflight validator live in
+`agents/bundle_validator.py`. The full contract is documented in
+[README §6.2](README.md#62-incident-bundle-contract) and
+[docs/ARCHITECTURE.md §4.7](docs/ARCHITECTURE.md#47-incident-bundle-contract--preflight-validation-mission-18).
+Validation is read-only, free of LLM calls, and runs before the first pipeline stage.
+
+```bash
+# Validate one bundle (no API key, no database, no Groq credits)
+python -m agents.bundle_validator incidents/inc_01_n_plus_one_query --incident-id inc_01_n_plus_one_query
+# Verified output:
+#   Bundle:        incidents\inc_01_n_plus_one_query
+#   Incident ID:   inc_01_n_plus_one_query
+#   Evidence:      logs/application.log, metrics/metrics.csv, git_diff.patch, service
+#   Result:        VALID
+# Exit code 0 = valid (warnings allowed); exit code 1 = at least one fatal error.
+
+# Focused validator tests (offline; no database, no network, no Groq)
+pytest tests/test_bundle_validator.py -v
+# Verified outcome (no database): 92 passed, 6 skipped (symlink tests need
+# Windows Developer Mode / non-admin privileges)
+```
+
+They cover the eight target categories: valid canonical bundles, missing required files, empty
+or malformed files, legitimate partial-evidence bundles, invalid incident IDs and path traversal,
+clear actionable error messages (file + offending row), validation occurring before any LLM call
+(`get_llm_client` is asserted never to be constructed), and no source mutation / no access to
+`ground_truth.md` (recorded file-open tracing plus an AST-style literal scan).
+
+**Validation status**: implementation complete, **local validation only**. Focused tests 92 passed /
+6 skipped locally; full offline suite 799 passed / 54 skipped / 1 warning (853 collected); incident
+validation 51/51. **No CI run exists for Mission 18 yet**, and PostgreSQL was **not** exercised
+locally.
+
 ## PostgreSQL Integration Testing
 
 All live PostgreSQL integration tests are guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)`
@@ -148,8 +209,8 @@ make test-postgres
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Locally on Windows without a DB (verified): 695 passed, 48 skipped, 1 warning.
-# With a local DB (expected): 741 passed, 2 skipped (Windows symlink only), 1 warning.
+# Locally on Windows without a DB (verified, Mission 18): 799 passed, 54 skipped, 1 warning.
+# With a local DB (expected): 845 passed, 8 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -355,6 +416,22 @@ curl http://127.0.0.1:8000/investigations
 # Retrieve a specific investigation state (including recorded approvals)
 curl http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query
 ```
+
+### Retrieve the investigation result (diagnosis)
+
+```bash
+# Read-only, allowlisted projection of the diagnosis: hypotheses (+ verdicts),
+# evidence (+ file:line references), per-check verification outcomes, and fix proposals.
+curl -s http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/result
+```
+
+> **Result endpoint guarantees (`GET /investigations/{id}/result`):**
+> - **Read-only.** It loads state and returns a projection; it never mutates investigation state and never applies patches.
+> - **Allowlisted.** Only the declared fields are returned; the raw state payload, stage outputs, `metadata`, secrets, and `before`/`after` file bodies are never exposed.
+> - **Traceable.** `reference` values are emitted verbatim as incident-relative `file:line` (e.g. `service/app.py:42`).
+> - **Safe when incomplete.** In-progress or partial investigations return `200 OK` with empty sections and `result_available: false` rather than an error.
+> - **Actionable.** The returned `proposal_id` values are accepted directly by `POST /investigations/{id}/approval`.
+> - **Status codes.** `200` (incl. empty/in-progress), `400` invalid ID, `404` not found, `503` repository unavailable.
 
 ### Resume an interrupted/failed investigation
 

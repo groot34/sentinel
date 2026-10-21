@@ -255,6 +255,7 @@ Sentinel 2.0 evolves the multi-agent reasoning engine from a single-run CLI tool
 │  ├─ POST /investigations               ├─ POST /investigations/{id}/resume             │
 │  ├─ GET  /investigations               ├─ POST /investigations/{id}/approval           │
 │  ├─ GET  /investigations/{id}          └─ GET  /investigations/{id}/events             │
+│  ├─ GET  /investigations/{id}/result                                                     │
 │  │                                        (JSON Snapshot & SSE Live Stream)            │
 │  └────────────────────────────────────────┬────────────────────────────────────────────┘
                                             │
@@ -378,6 +379,8 @@ The Sentinel 2.0 API is built on Starlette and served via Uvicorn (`api/app.py`,
 - `POST /investigations/{id}/approval`: Records a human decision (`decision: APPROVED | REJECTED`, `approver`, `notes`).
   > **Crucial Safety Rule**: Approval records the human decision in `ApprovalRecord` **ONLY**. It **NEVER** applies code patches to disk or modifies git state.
 - `GET /investigations/{id}/events`: Content-negotiated event retrieval endpoint supporting JSON snapshots and live SSE streaming.
+- `GET /investigations/{id}/result`: Read-only, allowlisted projection of the investigation's diagnosis (`200 OK` or `404 Not Found`). Returns hypotheses (IDs, claims, linked `evidence_ids`, verdicts), evidence (IDs, descriptions/excerpts, `file:line` references), verification results (overall verdict plus per-check `PASS`/`FAIL`/`INCONCLUSIVE` outcomes and source references) and fix proposals (IDs, summary, rationale, unified-diff `patch`, risks, rollback plan). Incomplete or in-progress investigations return empty sections with `result_available: false`; the internal state payload, raw stage outputs, `before`/`after` file bodies and `metadata` are never returned.
+  - The returned `proposal_id` values are interoperable with `POST /investigations/{id}/approval`.
 
 #### Asynchronous Dispatch Lifecycle & Limitations
 1. **Durable Ownership & Persistence Pre-Condition (Before `202 Accepted`)**:
@@ -603,3 +606,117 @@ non-abortion, and terminal failure retention.
 > 6 live outbox tests executed; migrations `001`–`003` applied and schema verification passed;
 > incident validation 51/51 in both jobs. Locally (Windows, no database): full suite 695 passed /
 > 48 skipped / 1 warning; offline-job subset 652 passed / 6 skipped; incident validation 51/51.
+
+### 4.6 Investigation Result Projection (Mission 17)
+
+**Problem addressed**: `GET /investigations/{id}` is a control-plane view — it returns lifecycle and stage summaries but deliberately omits the diagnosis. Before Mission 17 there was no read-only way for an API consumer to retrieve the hypotheses, evidence, verification checks, and fix proposals that the pipeline had already produced.
+
+**Endpoint** — `GET /investigations/{id}/result` returns `200 OK` with an allowlisted projection; `400` invalid id, `404` not found, `503` repository unavailable.
+
+**Response** — `InvestigationResultResponse`:
+
+| Field | Contents |
+|---|---|
+| `investigation_id`, `status`, `current_stage`, `completed_at` | Envelope |
+| `result_available` | `true` when any of the four sections below is populated |
+| `hypotheses` | `hypothesis_id`, `claim`, `evidence_ids`, `verdict` (joined from verification; `null` before verification), `supporting_reasoning`, `falsification_criteria`, `verification_plan` |
+| `evidence` | `evidence_id`, `source`, `type`, `reference` (incident-relative `file:line`), `description`, `excerpt`, `timestamp`, `interpretation`, `metric`, `value` |
+| `verification` | per-hypothesis `verdict`, `confidence`, `reasoning`, and `checks` (`check_id`, `description`, `result` = `PASS`/`FAIL`/`INCONCLUSIVE`, `reference`, `detail`) |
+| `proposals` | `proposal_id`, `hypothesis_id`, `status`, `summary`, `rationale`, unified-diff `patch`, `expected_effect`, `risks`, `validation_plan`, `rollback_plan`, `evidence_ids`, `changes` (`file`, `description`, `start_line`, `end_line`), `human_approval_notice` |
+
+**Projection rules**:
+1. Hypotheses, evidence, and proposals are read from their persisted state collections; verification outcomes are read from `stages["verification"].output` — the only persisted representation that retains each check's discrete `result` and `reference`.
+2. Seven `ConfigDict(extra="forbid")` Pydantic models in `api/models.py` form a strict allowlist; the raw state payload, stage outputs, `metadata`, secrets, and `before`/`after` file bodies are never returned.
+3. `reference` is emitted **verbatim** (incident-relative); only free-form check `detail` passes through `sanitize_error_message()`.
+4. Absent/partial/malformed input yields empty lists or `None` rather than a fabricated value or a `500`.
+
+**Boundary** — strictly read-only: the handler calls `repository.load()` only, never mutates state, and never applies patches. Returned `proposal_id` values are accepted directly by `POST /investigations/{id}/approval`.
+
+**Backend scope** — backend-agnostic: both `FilesystemRepository` and `PostgresRepository` reconstruct `InvestigationState` via `from_dict()`, so the projection reads an identical shape.
+
+**Tests** — 12 tests in `tests/test_investigation_result_api.py` driving the real `create_app()` app via `TestClient`.
+
+> **Status**: implementation complete, **local validation only**. Locally (Windows, no database):
+> `tests/test_investigation_result_api.py` 12 passed; full offline suite 707 passed / 48 skipped /
+> 1 warning (755 collected); incident validation 51/51; `git diff --check` clean. **No CI run exists
+> for Mission 17 yet**, and the PostgreSQL path was **not** exercised locally (Docker unavailable) —
+> the backend-agnostic claim rests on code inspection. The latest verified CI run remains Mission 16
+> ([run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), commit `aba70e1`).
+
+### 4.7 Incident Bundle Contract & Preflight Validation (Mission 18)
+
+**Problem addressed**: the shape of an "incident bundle" was implicit — scattered across agent
+defaults (`DEFAULT_RELATIVE_LOG`, `DEFAULT_RELATIVE_METRICS`, `DIFF_PATH`, `SERVICE_DIR`) and the
+`agents/metric_tools.py` docstring. An invalid bundle was only discovered once a stage ran, i.e.
+after Groq credits had been spent.
+
+**Component** — `agents/bundle_validator.py`: a deterministic, read-only validator that owns the
+contract. Zero LLM calls, no new dependencies, no infrastructure. It opens only
+`logs/application.log` and `metrics/metrics.csv` by canonical relative path; it never enumerates
+the bundle and never opens `ground_truth.md`, `results_baseline.csv`, or `baseline_summary.json`.
+
+| Entry | Required | Notes |
+|---|---|---|
+| incident directory (named `<incident_id>`) | **yes** | the only required entry |
+| `logs/application.log` | no | log evidence; Unicode-tolerant (`errors="ignore"`) |
+| `metrics/metrics.csv` | no | wide CSV; header + `timestamp` column (ISO-8601 UTC ending in `Z`, e.g. `2026-08-28T14:00:00Z`) + numeric columns |
+| `git_diff.patch` | no | unified diff evidence |
+| `service/` | no | Python source tree (`tests/`, `__pycache__`, `.pytest_cache` skipped) |
+| `docker-compose.yml` | no | deployment context; not evidence on its own |
+| `ground_truth.md` | evaluation only | never read at runtime |
+
+**Fatal vs. partial** — the pipeline is designed for partial evidence, so *no* evidence source is
+individually mandatory. Fatal: a nonexistent path (`FileNotFoundError`), a non-directory path
+(`NotADirectoryError`), an invalid or mismatched incident ID, a symlinked bundle or an entry
+symlink escaping the root, an entry whose type contradicts the contract, a declared channel
+directory (`logs/`, `metrics/`) whose expected file is absent, a present-but-empty or
+malformed `metrics/metrics.csv`, and a present-but-invalid metrics timestamp
+(`metrics_timestamp_invalid` — a `timestamp` value that is not an ISO-8601 UTC instant ending in
+`Z`, matching the documented contract and every fixture). Not fatal (warnings): an absent evidence
+source, an empty log file (`empty_log_file`), and a bundle with no evidence at all
+(`no_evidence_sources`).
+
+**Read isolation & containment ordering** — containment is verified *before* any evidence file is
+opened: a canonical evidence path (`logs/application.log` or `metrics/metrics.csv`) that resolves
+outside the bundle root is reported as `bundle_escapes_root` but is never read or parsed, so
+escaped cell content cannot leak into a `400` detail. *Residual limitation (accepted):* the bundle
+is validated before the pipeline re-reads it, so a symlink swapped in between the preflight check
+and the read is not re-checked — a narrow TOCTOU window that is documented rather than closed by
+architectural change.
+
+**Results** — `validate_incident_bundle(incident_dir, expected_id=None)` returns a frozen
+`BundleValidationResult` (never raises for content problems) carrying `evidence_sources` and
+severity-tagged `BundleIssue`s with stable codes and actionable `path: detail` messages.
+`require_valid_incident_bundle(...)` raises `FileNotFoundError` / `NotADirectoryError` /
+`InvalidIncidentBundleError`. A CLI (`python -m agents.bundle_validator <dir> [--incident-id ID]`)
+exits `0` for valid and `1` for invalid.
+
+**Where it runs** — `IncidentOrchestrator._validate_incident_dir()` invokes
+`require_valid_incident_bundle()` at the top of both `investigate()` and `resume()`, before
+`_run_pipeline()` and therefore before the first stage — so no LLM client is constructed and no
+Groq call is made for an invalid bundle. `api/errors.py` maps `InvalidIncidentBundleError` to
+`400 invalid_incident_bundle` (registered in `api/app.py`; Starlette resolves the most specific
+handler by MRO, so it wins over the `Exception` catch-all). The existing path-containment checks
+in `api/routes.py` (resolved parent must be the incident root, directory name must equal the ID,
+symlinked bundle dirs rejected) are unchanged and run before the orchestrator is called.
+
+**Compatibility** — the canonical 10 fixtures report exactly
+`("logs/application.log", "metrics/metrics.csv", "git_diff.patch", "service")` and zero warnings.
+Legacy/partial fixtures remain valid: empty incident directories, bundles with only
+`logs.txt`/`metrics.json`/`diff.patch`, and minimal `logs/`+`metrics/` bundles all pass. The
+GitHub Actions `python tests/validate_incidents.py` suite is unaffected (it still requires
+`ground_truth.md` for *evaluation*, a separate concern from the runtime contract).
+
+**Tests** — 98 tests in `tests/test_bundle_validator.py` covering the 8 required categories: valid
+canonical bundles, missing required files, empty/malformed files, legitimate partial-evidence
+bundles, invalid IDs and path traversal, actionable error messages, validation-before-LLM
+(asserting `get_llm_client` is never called), and no source mutation / no `ground_truth.md`
+access. Additional coverage enforces the metrics timestamp contract (valid `Z`-form, fractional
+seconds, malformed and offset/date-only edge cases) and file-symlink escapes for both
+`logs/application.log` and `metrics/metrics.csv` — including a file-open trace proving escaped
+content is never read.
+
+> **Status**: implementation complete, **local validation only**. Locally (Windows, no database):
+> `tests/test_bundle_validator.py` 92 passed / 6 skipped (symlinks), full offline suite 799 passed /
+> 54 skipped / 1 warning (853 collected), incident validation 51/51, `git diff --check` clean. **No CI
+> run exists for Mission 18 yet**, and PostgreSQL was not exercised locally.
