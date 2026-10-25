@@ -368,15 +368,16 @@ To prevent multiple server workers from executing or resuming the same investiga
 ### 3.6 HTTP API Architecture & Route Contracts
 
 The Sentinel 2.0 API is built on Starlette and served via Uvicorn (`api/app.py`, `api/routes.py`, `api/models.py`):
-- `GET /health`: Returns service health, persistence backend in use (`filesystem` or `postgres`), and outbox backlog status.
+- `GET /health`: Returns the allowlisted liveness payload only — `{status, service, version}` (`status: "ok"`, `service: "sentinel"`, `version: "2.0"`). It does not report the persistence backend or outbox depth.
+- `POST /incidents`: Opt-in, disabled-by-default ingestion of a JSON-inline incident bundle (`agents/bundle_ingest.py`; Mission 19 — see §4.8). Returns `201 Created` with `{incident_id, bundle_path, evidence_sources}` and a `Location` header. Replacement is unsupported (`overwrite=true` → `409 overwrite_not_supported`). Never starts an investigation.
 - `POST /investigations`: Initiates an investigation given an `incident_id`. Validates input paths.
   - **Synchronous Mode (Default)**: Blocks until pipeline completes, returning `200 OK` with full investigation state.
   - **Asynchronous Mode (`Prefer: respond-async` or `?async=true`)**: Validates input, persists initial `RUNNING` state with lease, schedules execution in a background task, and returns `202 Accepted` with `AcceptedInvestigationResponse` (`investigation_id`, `status: RUNNING`, `message`, `status_url`, `events_url`) and `Location` header.
-- `GET /investigations`: Lists investigations with pagination (`limit`, `offset`) and optional status filters.
+- `GET /investigations`: Returns `{investigations: [...]}` — every stored investigation ID via `repository.list()`. No pagination or status filtering is implemented (`limit`/`offset` are ignored).
 - `GET /investigations/{id}`: Retrieves complete state and summary for a single investigation (`200 OK` or `404 Not Found`). Immediately queryable following 202 acceptance.
 - `POST /investigations/{id}/resume`: Re-enters an interrupted or incomplete investigation (`PENDING`, `PARTIAL`, `FAILED`, or `RUNNING` with an expired lease). Rejects active unexpired leases with `409 Conflict`.
   - Supports synchronous execution (`200 OK`) and opt-in async execution (`202 Accepted` with `Prefer: respond-async` or `?async=true`).
-- `POST /investigations/{id}/approval`: Records a human decision (`decision: APPROVED | REJECTED`, `approver`, `notes`).
+- `POST /investigations/{id}/approval`: Records a human decision. The strict request body is `{proposal_id, decision, reviewer, notes?}`; `decision` accepts `approved` or `rejected`, and unknown fields are rejected (`400`). `proposal_id` values come from `GET /investigations/{id}/result`.
   > **Crucial Safety Rule**: Approval records the human decision in `ApprovalRecord` **ONLY**. It **NEVER** applies code patches to disk or modifies git state.
 - `GET /investigations/{id}/events`: Content-negotiated event retrieval endpoint supporting JSON snapshots and live SSE streaming.
 - `GET /investigations/{id}/result`: Read-only, allowlisted projection of the investigation's diagnosis (`200 OK` or `404 Not Found`). Returns hypotheses (IDs, claims, linked `evidence_ids`, verdicts), evidence (IDs, descriptions/excerpts, `file:line` references), verification results (overall verdict plus per-check `PASS`/`FAIL`/`INCONCLUSIVE` outcomes and source references) and fix proposals (IDs, summary, rationale, unified-diff `patch`, risks, rollback plan). Incomplete or in-progress investigations return empty sections with `result_available: false`; the internal state payload, raw stage outputs, `before`/`after` file bodies and `metadata` are never returned.
@@ -717,6 +718,104 @@ seconds, malformed and offset/date-only edge cases) and file-symlink escapes for
 content is never read.
 
 > **Status**: implementation complete, **local validation only**. Locally (Windows, no database):
-> `tests/test_bundle_validator.py` 92 passed / 6 skipped (symlinks), full offline suite 799 passed /
-> 54 skipped / 1 warning (853 collected), incident validation 51/51, `git diff --check` clean. **No CI
-> run exists for Mission 18 yet**, and PostgreSQL was not exercised locally.
+> `tests/test_bundle_validator.py` 92 passed / 6 skipped (symlinks), full offline suite 884 passed /
+> 55 skipped / 1 warning (939 collected), incident validation 51/51, `git diff --check` clean.
+> Missions 18 and 19 have **no CI run for Mission 19 yet**; PostgreSQL was not exercised locally.
+
+### 4.8 Safe Incident Bundle Ingestion (Mission 19)
+
+**Problem addressed**: the API could only accept an incident by `incident_id` and resolved it under
+the server's incident root, so a client needed direct write access to the server filesystem before
+any investigation could start. Mission 19 adds `POST /incidents`, letting a client submit a
+**text-only** bundle as JSON-inline content.
+
+**Component** — `agents/bundle_ingest.py` owns the whole flow (limits, path policy, strict JSON
+decoding, staging, and publishing) so the route holds no filesystem logic. Request/response schemas
+are `IncidentBundleIngestRequest` / `IncidentBundleIngestResponse` in `api/models.py`.
+
+**Opt-in, disabled by default** — `SENTINEL_ALLOW_INCIDENT_INGESTION` (read by
+`ingestion_enabled()`, mirroring the `SENTINEL_PERSISTENCE_BACKEND` convention) must be a truthy
+token (`1`/`true`/`yes`/`on`); `create_app(ingestion_enabled=...)` overrides it for tests. When
+disabled the route returns `404 ingestion_disabled` **before touching the filesystem**. Enabling it
+adds **no** authentication: it is intended for trusted/local deployments and the default bind
+address is `127.0.0.1`.
+
+**Request contract** — a strict Pydantic model (`extra="forbid"`): `incident_id` (canonical ID
+rules, shared with `POST /investigations`), `files` (non-empty object of relative POSIX path →
+UTF-8 string), and an optional boolean `overwrite` that must be omitted or `false` — `true` is
+rejected (see *Overwrite is unsupported* below). The body is decoded by
+`parse_json_object_strict()`, whose `object_pairs_hook` rejects duplicate object keys.
+
+**Path policy** — an allowlist (`validate_bundle_relative_path()`): exactly `logs/application.log`,
+`metrics/metrics.csv`, `git_diff.patch`, `docker-compose.yml`, and any file beneath `service/`.
+Rejected: non-strings, empty paths, NUL bytes, backslashes, Windows drive prefixes, absolute paths,
+empty/`.`/`..` segments, paths over 512 chars or deeper than 16 segments, reserved evaluation
+artefacts (`ground_truth.md`, `ground_truth.json`, `results_baseline.csv`, `baseline_summary.json`),
+and anything off the allowlist.
+
+**Resource limits** — `IngestionLimits` read from the environment with documented defaults: 200
+files, 2 MiB per file, 20 MiB total, and a 24 MiB raw request-body cap (headroom for JSON
+overhead). Bytes are counted over UTF-8-encoded content, **before** any staging file is created.
+The route enforces the raw body cap **while the body is read**: `_read_body_within_limit()` consumes
+`request.stream()` chunk by chunk and aborts as soon as the running total exceeds the limit, so an
+oversized request is never fully buffered or parsed. `Content-Length`, when present, is only an
+early hint (a declared value over the cap is rejected up front and a malformed one as `400`); it is
+never trusted as the enforcement mechanism, because it may be absent, chunked, or understated.
+Exceeding any limit yields `413 payload_too_large`.
+
+**Safe atomic staging & publication** — `ingest_incident_bundle()` validates the submission first,
+reserves the incident ID against concurrent same-ID ingestion (`_INFLIGHT_IDS`), and creates a unique
+`.ingest-*` staging container inside the incident root. Files are written as regular UTF-8 text with
+exclusive-create semantics (`open(..., "x")`) after a resolved-containment check against the staging
+root, so client paths and symlinks are never followed. The staged bundle must pass
+`require_valid_incident_bundle(staged_root, expected_id=incident_id)` (§4.7) before publication. Any
+failure (path, limit, validation, or write) removes the staging tree in a `finally` block and
+publishes nothing, so a partially written bundle is never visible. Publication happens inside a
+check-then-publish critical section and is a **single `os.rename` that only ever creates a new
+incident directory**: an existing entry at the target path (regular directory, file, or symlink) is
+reported as a conflict and left untouched. The lock used is the API's active-claim `_ACTIVE_LOCK`,
+and a `registry_guard` runs under it to veto publication while the incident is in
+`_ACTIVE_INVESTIGATIONS` or holds an active persisted lease.
+
+**Overwrite is unsupported** — `overwrite=true` raises `OverwriteUnsupportedError` **before any
+staging file is created** (so a rejected request writes nothing) and maps to `409
+overwrite_not_supported`. There is no portable *crash-safe*, cross-process directory-swap
+primitive, so the previous design's best-effort "move aside / move in / restore on failure" swap —
+which could permanently lose the previous valid bundle on a mid-replacement crash — was removed
+rather than presented as a guarantee it could not honour. An incident is created once; re-ingesting
+requires a new `incident_id`.
+
+**Error contract** — `404 ingestion_disabled`; `400 invalid_json` (malformed/non-object/duplicate
+keys); `400 invalid_ingest_request` (shape violations incl. invalid `incident_id`); `400
+invalid_file_path` (path policy); `400 invalid_incident_bundle` (preflight); `409 conflict` (exists,
+concurrent same-ID ingestion, or running/actively leased); `409 overwrite_not_supported`; `413
+payload_too_large`; `503 storage_unavailable`. All error bodies pass through
+`sanitize_error_message`, so absolute server paths, file contents, secrets, and ground truth never
+appear in responses.
+
+**Concurrency & coordination limitations (honest)** — the single-rename publish means two
+concurrent ingestions of the same new ID cannot both succeed (the loser's rename fails against the
+now-existing directory and conflicts), and this holds **regardless of the submissions' contents**:
+the loser only ever sees the winner's bundle, never overwriting, mixing with, or mutating it. The
+guarantee comes from the rename being the sole publish step — **not** from the in-process lock — so
+it holds across multiple Uvicorn worker processes. It is unconditional because a published bundle is
+never an *empty* directory (the service refuses an empty `files` map up front), and only an empty
+directory is what POSIX `rename` could otherwise replace (on Windows `os.rename` never replaces an
+existing entry at all). Coordination with *running investigations* is process-local (the shared
+`_ACTIVE_LOCK` / `_ACTIVE_INVESTIGATIONS` registry) plus the durable lease; across multiple worker
+processes only the durable lease is visible, but the rename still guarantees no corruption.
+`POST /incidents` never starts an investigation — clients continue with `POST /investigations`.
+
+**Tests** — `tests/test_incident_ingestion_api.py` (85 passed + 1 skipped symlink test locally;
+offline; real app + `TestClient` with isolated temp dirs, plus a raw-ASGI harness for misleading
+`Content-Length`) covers the opt-in gate, exact contents, every path-policy rejection, malformed
+bodies/IDs, all limits (including multi-byte UTF-8 and streaming enforcement with truthful,
+misleading, and chunked `Content-Length`, and a valid within-limit request), staging cleanup,
+duplicate rejection, `overwrite=true` rejection with byte-for-byte preservation of the existing
+bundle, a defense-in-depth containment check in the write helper, concurrent same-ID ingestion of
+**different** content (API-level and cross-process with the in-process registry/lock neutralised —
+exactly one `201`/publish and one `409`/conflict, the winner's files intact and no staging leaks),
+empty-bundle service refusal, active/leased refusal, a symlinked target refusal, injected storage
+failures, duplicate-never-touches-existing-bundle, no absolute-path leakage / no evaluation-file
+access, and compatibility of the existing investigation routes. The full offline suite is **884
+passed / 55 skipped** locally.

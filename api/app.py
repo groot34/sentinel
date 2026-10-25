@@ -17,6 +17,7 @@ from api.errors import (
     persistence_exception_handler,
 )
 from api.routes import (
+    create_incident,
     create_investigation,
     get_investigation,
     get_investigation_result,
@@ -25,6 +26,11 @@ from api.routes import (
     list_investigations,
     resume_investigation,
     submit_approval,
+)
+from agents.bundle_ingest import (
+    IngestionLimits,
+    ingestion_enabled as env_ingestion_enabled,
+    load_ingestion_limits,
 )
 from agents.bundle_validator import InvalidIncidentBundleError
 from core.llm.base import BaseLLMProvider
@@ -40,6 +46,8 @@ def create_app(
     repository: Optional[PersistenceRepository] = None,
     incidents_root: Optional[Path | str] = None,
     llm_client: Optional[BaseLLMProvider] = None,
+    ingestion_enabled: Optional[bool] = None,
+    ingestion_limits: Optional[IngestionLimits] = None,
 ) -> Starlette:
     """Create and configure a Starlette API instance.
 
@@ -47,12 +55,17 @@ def create_app(
         repository: Persistence repository instance (defaults to FilesystemRepository).
         incidents_root: Root directory where incident bundles live (defaults to 'incidents').
         llm_client: Optional LLM provider instance.
+        ingestion_enabled: Opt-in flag for POST /incidents. When None the flag is
+            read from SENTINEL_ALLOW_INCIDENT_INGESTION (disabled by default).
+        ingestion_limits: Optional resource limits for bundle ingestion
+            (defaults to the environment configuration).
 
     Returns:
         Configured Starlette application.
     """
     routes = [
         Route("/health", endpoint=health, methods=["GET"]),
+        Route("/incidents", endpoint=create_incident, methods=["POST"]),
         Route("/investigations", endpoint=create_investigation, methods=["POST"]),
         Route("/investigations", endpoint=list_investigations, methods=["GET"]),
         Route("/investigations/{investigation_id}", endpoint=get_investigation, methods=["GET"]),
@@ -79,5 +92,11 @@ def create_app(
     app.state.repository = repository if repository is not None else FilesystemRepository()
     app.state.incidents_root = Path(incidents_root) if incidents_root is not None else Path("incidents")
     app.state.llm_client = llm_client
+    app.state.ingestion_enabled = (
+        env_ingestion_enabled() if ingestion_enabled is None else bool(ingestion_enabled)
+    )
+    app.state.ingestion_limits = (
+        ingestion_limits if ingestion_limits is not None else load_ingestion_limits()
+    )
 
     return app

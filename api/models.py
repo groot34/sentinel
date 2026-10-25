@@ -15,6 +15,23 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 _SAFE_ID_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
 
 
+def _validate_incident_id(v: str) -> str:
+    """Apply the canonical incident-ID rules shared by all request models."""
+    if not isinstance(v, str):
+        raise ValueError("incident_id must be a string")
+    stripped = v.strip()
+    if not stripped:
+        raise ValueError("incident_id cannot be empty or whitespace")
+    if "/" in stripped or "\\" in stripped or ".." in stripped or ":" in stripped:
+        raise ValueError(f"Path traversal characters detected in incident_id: {v!r}")
+    if not _SAFE_ID_REGEX.match(stripped):
+        raise ValueError(
+            f"Invalid incident_id format: {v!r}. "
+            "Must match ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$"
+        )
+    return stripped
+
+
 class CreateInvestigationRequest(BaseModel):
     """Request schema for POST /investigations."""
     model_config = ConfigDict(extra="forbid")
@@ -24,19 +41,7 @@ class CreateInvestigationRequest(BaseModel):
     @field_validator("incident_id")
     @classmethod
     def validate_incident_id(cls, v: str) -> str:
-        if not isinstance(v, str):
-            raise ValueError("incident_id must be a string")
-        stripped = v.strip()
-        if not stripped:
-            raise ValueError("incident_id cannot be empty or whitespace")
-        if "/" in stripped or "\\" in stripped or ".." in stripped or ":" in stripped:
-            raise ValueError(f"Path traversal characters detected in incident_id: {v!r}")
-        if not _SAFE_ID_REGEX.match(stripped):
-            raise ValueError(
-                f"Invalid incident_id format: {v!r}. "
-                "Must match ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$"
-            )
-        return stripped
+        return _validate_incident_id(v)
 
 
 class HealthResponse(BaseModel):
@@ -90,6 +95,70 @@ class CreateInvestigationResponse(BaseModel):
     summary: InvestigationSummaryResponse
     stages: Dict[str, StageSummaryResponse]
     human_approval_notice: str
+
+
+class IncidentBundleIngestRequest(BaseModel):
+    """Request schema for POST /incidents (Mission 19 bundle ingestion).
+
+    Validates the *shape* of the request only. The ingestion path policy
+    (allowlist, traversal/absolute/drive/backslash/NUL rejection, reserved
+    evaluation artefacts) and the resource limits are enforced by
+    :mod:`agents.bundle_ingest`, so those failures carry their own stable
+    error codes.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: str = Field(..., description="Target incident directory identifier")
+    files: Dict[str, str] = Field(
+        ...,
+        description="Mapping of relative POSIX paths to UTF-8 text content",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "Unsupported; must be omitted or false. Replacing an existing "
+            "incident bundle is not implemented, so overwrite=true is rejected "
+            "with 409 overwrite_not_supported (default: false)."
+        ),
+    )
+
+    @field_validator("incident_id")
+    @classmethod
+    def validate_incident_id(cls, v: str) -> str:
+        return _validate_incident_id(v)
+
+    @field_validator("files", mode="before")
+    @classmethod
+    def validate_files(cls, v: Any) -> Any:
+        if not isinstance(v, dict):
+            raise ValueError("files must be a JSON object mapping relative paths to text content")
+        if not v:
+            raise ValueError("files must contain at least one entry")
+        for key, value in v.items():
+            if not isinstance(key, str):
+                raise ValueError("files keys must be strings")
+            if not isinstance(value, str):
+                raise ValueError(f"File content for {key!r} must be a UTF-8 text string")
+        return v
+
+    @field_validator("overwrite", mode="before")
+    @classmethod
+    def validate_overwrite(cls, v: Any) -> Any:
+        if not isinstance(v, bool):
+            raise ValueError("overwrite must be a boolean")
+        return v
+
+
+class IncidentBundleIngestResponse(BaseModel):
+    """Allowlisted response for POST /incidents."""
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: str
+    bundle_path: str = Field(
+        ...,
+        description="Incident-relative bundle identifier (e.g. 'incidents/<incident_id>')",
+    )
+    evidence_sources: List[str] = Field(default_factory=list)
 
 
 # Opt-in header value for asynchronous investigation dispatch (RFC 7240).

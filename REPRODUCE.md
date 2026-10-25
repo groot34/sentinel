@@ -29,16 +29,19 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome (local, Windows, no database, Mission 18): 799 passed, 54 skipped, 1 warning in ~16s
-# (54 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
+# Verified outcome (local, Windows, no database, Mission 19): 884 passed, 55 skipped, 1 warning in ~18s
+# (55 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
-#  retry tests and Mission 16's 6 outbox claim/recovery tests; 8 symlink tests skipped on
-#  Windows without Developer Mode — 2 in tests/test_api.py, 6 in tests/test_bundle_validator.py.)
+#  retry tests and Mission 16's 6 outbox claim/recovery tests; 9 symlink tests skipped on
+#  Windows without Developer Mode — 2 in tests/test_api.py, 6 in tests/test_bundle_validator.py
+#  and 1 in tests/test_incident_ingestion_api.py.)
 # Verified in CI (run 39048469043, Mission 15): the postgres job executes every PostgreSQL
 #  test and reported 733 passed, 0 skipped; the offline job reported 650 passed, 4 skipped.
 #  Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests executed.
-#  Missions 17 (12 result-endpoint tests) and 18 (98 bundle-validator tests) have local
+#  Missions 17 (12 result-endpoint tests) and 18 (98 bundle-validator tests) verified green in
+#  CI (run 39635055973, commit 07a72d5): postgres 853 passed / 0 skipped.
+#  Mission 19 (86 incident-ingestion API tests: 85 passed + 1 skipped symlink) has local
 #  validation only — no CI run yet; PostgreSQL integration was NOT run locally.
 
 # Run the 51 incident dataset invariant validation checks
@@ -176,8 +179,94 @@ clear actionable error messages (file + offending row), validation occurring bef
 
 **Validation status**: implementation complete, **local validation only**. Focused tests 92 passed /
 6 skipped locally; full offline suite 799 passed / 54 skipped / 1 warning (853 collected); incident
-validation 51/51. **No CI run exists for Mission 18 yet**, and PostgreSQL was **not** exercised
+validation 51/51. Missions 17 & 18 are CI-green in [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973)
+(commit `07a72d5`, `postgres` 853 passed / 0 skipped); PostgreSQL was **not** exercised locally.
+
+## Safe Incident Bundle Ingestion (Mission 19)
+
+The opt-in ingestion endpoint lets a client submit a text-only incident bundle as JSON-inline
+content instead of writing directly to the server filesystem. The flow and all limits live in
+`agents/bundle_ingest.py`; the request/response schemas are in `api/models.py`. The full contract
+is documented in [README §9](README.md#9-http-api) and
+[docs/ARCHITECTURE.md §4.8](docs/ARCHITECTURE.md#48-safe-incident-bundle-ingestion-mission-19).
+
+**Disabled by default.** The endpoint returns `404 ingestion_disabled` and writes nothing unless
+explicitly enabled. Enable it (and note this is *not* authentication) with:
+
+```bash
+# Enable ingestion for this server process (disabled unless set to 1/true/yes/on)
+SENTINEL_ALLOW_INCIDENT_INGESTION=1 python -m api
+```
+
+Ingest a bundle, then start an investigation against the ingested incident:
+
+```bash
+# 1. Ingest the bundle (text files only; relative POSIX paths)
+curl -i -X POST http://127.0.0.1:8000/incidents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "incident_id": "inc_local_demo",
+    "files": {
+      "logs/application.log": "2026-08-28T14:00:00Z ERROR timeout\n",
+      "metrics/metrics.csv": "timestamp,cpu\n2026-08-28T14:00:00Z,0.95\n"
+    }
+  }'
+# -> 201 Created, Location: /investigations/inc_local_demo
+#    {"incident_id":"inc_local_demo","bundle_path":"incidents/inc_local_demo",
+#     "evidence_sources":["logs/application.log","metrics/metrics.csv"]}
+
+# 2. Start an investigation with the existing endpoint
+curl -s -X POST http://127.0.0.1:8000/investigations \
+  -H "Content-Type: application/json" \
+  -d '{"incident_id": "inc_local_demo"}'
+
+# 3. Retrieve the diagnosis with the Mission 17 result endpoint
+curl -s http://127.0.0.1:8000/investigations/inc_local_demo/result
+```
+
+Allowed paths: `logs/application.log`, `metrics/metrics.csv`, `git_diff.patch`,
+`docker-compose.yml`, and any file beneath `service/`. Absolute paths, `..`, backslashes, drive
+prefixes, NUL bytes, empty segments, over-long/over-deep paths, reserved evaluation files
+(`ground_truth.md`/`.json`, `results_baseline.csv`, `baseline_summary.json`), and anything outside
+the allowlist are rejected with `400`.
+
+`overwrite` must be omitted or `false`. Replacement is **not supported**: `overwrite=true` is
+rejected with `409 overwrite_not_supported` before any file is staged. A duplicate `incident_id`
+also conflicts (`409`). To re-ingest, submit a new `incident_id`.
+
+Limits (env-overridable; counted in UTF-8 bytes; excess returns `413 payload_too_large` before any
+staging file is created): `SENTINEL_INGEST_MAX_FILES` (200), `SENTINEL_INGEST_MAX_FILE_BYTES`
+(2 MiB), `SENTINEL_INGEST_MAX_TOTAL_BYTES` (20 MiB), `SENTINEL_INGEST_MAX_REQUEST_BYTES` (24 MiB).
+
+```bash
+# Focused ingestion tests (offline; real app via TestClient, isolated temp dirs; no network)
+pytest tests/test_incident_ingestion_api.py -v
+# Verified outcome (no database): 85 passed, 1 skipped (symlink test needs Developer Mode)
+```
+
+They cover the disabled-by-default gate and explicit opt-in, exact file contents, every
+path-policy rejection, malformed/empty/duplicate-key bodies, invalid IDs and non-string values,
+per-file/total/file-count limits (including multibyte UTF-8), the request-body limit enforced while
+streaming — with a truthful `Content-Length`, with a *misleading* understated `Content-Length`, and
+with chunked bodies that omit it, plus a valid within-limit request — preflight failures with
+staging cleanup, `overwrite=true` rejection with byte-for-byte preservation of the existing bundle, a
+defense-in-depth containment check, duplicate rejection (never touching the existing bundle),
+concurrent same-ID submissions with **different** valid content (API-level and a cross-process
+simulation relying only on the atomic rename), refusal to publish for an actively investigated or
+leased incident, a symlinked-target refusal, injected storage failures, no absolute-path leakage, an
+empty-bundle refusal at the service boundary, and compatibility of the existing investigation routes.
+
+**Validation status**: implementation complete, **local validation only**. Focused tests 85 passed +
+1 skipped; full offline suite 884 passed / 55 skipped / 1 warning (939 collected); incident
+validation 51/51. **No CI run exists for Mission 19 yet**, and PostgreSQL was **not** exercised
 locally.
+
+> **Overwrite decision (honest):** a new incident is published with a single atomic `os.rename` and
+> never leaves a partial bundle visible. Replacement is deliberately **unsupported** — there is no
+> portable crash-safe, cross-process directory swap, so `overwrite=true` is refused (`409`) rather
+> than risking the previous valid bundle with a best-effort swap. Across multiple Uvicorn workers
+> the single rename still prevents corruption (the loser conflicts). Enabling the endpoint performs
+> **unauthenticated** writes to `incidents_root`.
 
 ## PostgreSQL Integration Testing
 
@@ -209,8 +298,8 @@ make test-postgres
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Locally on Windows without a DB (verified, Mission 18): 799 passed, 54 skipped, 1 warning.
-# With a local DB (expected): 845 passed, 8 skipped (Windows symlink only), 1 warning.
+# Locally on Windows without a DB (verified, Mission 19): 884 passed, 55 skipped, 1 warning.
+# With a local DB (expected): 930 passed, 9 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -300,6 +389,13 @@ cp .env.example .env
 # PostgreSQL backend:
 #   SENTINEL_PERSISTENCE_BACKEND=postgres
 #   SENTINEL_DATABASE_URL=postgresql://sentinel:password@localhost:5432/sentinel_db
+#
+# Incident-bundle ingestion (POST /incidents) is DISABLED by default:
+#   SENTINEL_ALLOW_INCIDENT_INGESTION=1        # enable (1/true/yes/on); NOT authentication
+#   SENTINEL_INGEST_MAX_FILES=200              # per-submission file count
+#   SENTINEL_INGEST_MAX_FILE_BYTES=2097152     # 2 MiB per file (UTF-8 bytes)
+#   SENTINEL_INGEST_MAX_TOTAL_BYTES=20971520   # 20 MiB total content (UTF-8 bytes)
+#   SENTINEL_INGEST_MAX_REQUEST_BYTES=25165824 # 24 MiB request body
 ```
 
 ### CLI options

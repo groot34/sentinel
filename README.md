@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **799 passed, 54 skipped** offline (Mission 18); **743 passed, 0 skipped** live PostgreSQL 16 CI (Mission 16) |
+| Automated tests | — | **884 passed, 55 skipped** offline (Mission 19); **853 passed, 0 skipped** live PostgreSQL 16 CI (run 39635055973, Missions 17 & 18) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 54 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 8 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests), giving 799 passed / 54 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Mission 17 adds 12 result-endpoint tests and Mission 18 adds 98 bundle-validator tests (92 passing, 6 symlink tests skipped on this Windows account), taking the suite from 755 to 853 collected; both missions have **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 55 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 884 passed / 55 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests, taking the suite from 853 to 939 collected; Mission 19 has **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally.)*
 
 ---
 
@@ -208,6 +208,12 @@ An **incident bundle** is a directory whose name is the incident ID. Commands ac
 path (`python -m agents.orchestrator --incident-dir incidents/<incident_id>`) and the API
 accepts it by ID (`POST /investigations {"incident_id": "<incident_id>"}`, resolved under
 `--incidents-root`, default `incidents/`).
+
+There are two ways to get a bundle under the incident root: place the directory on the server
+filesystem yourself, or — when the opt-in ingestion endpoint is enabled —
+`POST /incidents` to submit the text files as JSON (see
+[§10.9 Ingest an Incident Bundle](#9-ingest-an-incident-bundle-mission-19--opt-in-disabled-by-default)).
+Ingestion writes exactly the same bundle layout and enforces a strict subset of this contract.
 
 ```
 incidents/<incident_id>/
@@ -409,21 +415,23 @@ cp .env.example .env
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
 # Verified in CI (run 39048469043, Mission 15): 733 passed, 0 skipped with live PostgreSQL 16.
-# Verified locally without a database (Mission 18): 799 passed, 54 skipped, 1 warning in ~16s
-# (54 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
+# Verified locally without a database (Mission 19): 884 passed, 55 skipped, 1 warning in ~18s
+# (55 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
 #  unset/unreachable — including Mission 15's 4 transient-failure retry tests and Mission 16's
-#  6 outbox claim/recovery tests; 8 Windows symlink tests skipped for non-admin accounts
-#  without Developer Mode — 2 in tests/test_api.py and 6 in tests/test_bundle_validator.py.
+#  6 outbox claim/recovery tests; 9 Windows symlink tests skipped for non-admin accounts
+#  without Developer Mode — 2 in tests/test_api.py, 6 in tests/test_bundle_validator.py and
+#  1 in tests/test_incident_ingestion_api.py.
 #  Mission 14 added 18 tests beyond the 652/32 Mission 13 baseline; Mission 15 added 25
 #  tests in tests/test_pg_retry.py (21 offline, 4 live PostgreSQL); Mission 16 added 10 tests
 #  — 4 offline worker tests in tests/test_event_worker.py and 6 live PostgreSQL outbox tests in
 #  tests/test_outbox.py; Mission 17 added 12 result-endpoint tests in
 #  tests/test_investigation_result_api.py; Mission 18 added 98 bundle-validator tests in
-#  tests/test_bundle_validator.py.)
+#  tests/test_bundle_validator.py; Mission 19 added 86 incident-ingestion API tests in
+#  tests/test_incident_ingestion_api.py, 85 passing + 1 symlink test skipped on Windows.)
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
 # Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres job (PostgreSQL 16) 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests ran.
-# Missions 17 and 18 have local validation only — no CI run yet; PostgreSQL was not tested locally.
+# Missions 17, 18 and 19 have local validation only — no CI run yet; PostgreSQL was not tested locally.
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -471,13 +479,32 @@ python -m api.event_worker --interval 1.0
 make worker
 ```
 
+### Configuration
+
+The launcher calls `load_dotenv()` before reading any environment variable, so values in `.env`
+are applied automatically (shell values take precedence).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SENTINEL_PERSISTENCE_BACKEND` | `filesystem` | `filesystem` or `postgres` |
+| `SENTINEL_PERSISTENCE_ROOT` | `.sentinel_persistence` | Root dir for the filesystem backend |
+| `SENTINEL_DATABASE_URL` | — | PostgreSQL connection URL (`postgres` backend only) |
+| `GROQ_API_KEY` / `GROQ_MODEL` | — / `openai/gpt-oss-120b` | Required when investigations are submitted |
+| `SENTINEL_ALLOW_INCIDENT_INGESTION` | `false` | **Opt-in** switch for `POST /incidents` (Mission 19). Any value other than `1`/`true`/`yes`/`on` leaves it disabled |
+| `SENTINEL_INGEST_MAX_FILES` | `200` | Max files per ingested bundle |
+| `SENTINEL_INGEST_MAX_FILE_BYTES` | `2097152` | Max UTF-8 bytes per ingested file |
+| `SENTINEL_INGEST_MAX_TOTAL_BYTES` | `20971520` | Max total UTF-8 bytes per ingested bundle |
+| `SENTINEL_INGEST_MAX_REQUEST_BYTES` | `25165824` | Max raw JSON request body size |
+
 ### Core API Endpoints & Examples
 
 #### 1. System Health Check
 ```bash
 curl -s http://127.0.0.1:8000/health
-# {"status":"ok","persistence":"filesystem","outbox":{"pending":0,"processed":0,"failed":0},"timestamp":"..."}
+# {"status":"ok","service":"sentinel","version":"2.0"}
 ```
+Returns the allowlisted liveness payload only (`status`, `service`, `version`); it does not report
+persistence backend or outbox depth.
 
 #### 2. Create & Run an Investigation
 
@@ -513,8 +540,11 @@ Initial state is persisted and lease claimed before the `202 Accepted` response 
 
 #### 3. List Investigations
 ```bash
-curl -s "http://127.0.0.1:8000/investigations?limit=10&offset=0"
+curl -s http://127.0.0.1:8000/investigations
+# {"investigations":["inc_01_n_plus_one_query", ...]}
 ```
+Returns every stored investigation ID via `repository.list()`. The endpoint does **not** support
+pagination (`limit`/`offset` query parameters are ignored).
 
 #### 4. Retrieve Investigation Details
 ```bash
@@ -537,8 +567,11 @@ curl -s -X POST http://127.0.0.1:8000/investigations/<investigation_id>/resume \
 # IMPORTANT: This records the decision ONLY; it NEVER modifies code files or applies patches
 curl -s -X POST http://127.0.0.1:8000/investigations/<investigation_id>/approval \
   -H "Content-Type: application/json" \
-  -d '{"decision": "APPROVED", "approver": "sre-oncall@example.com", "notes": "Verified against staging"}'
+  -d '{"proposal_id": "FIX-001", "decision": "approved", "reviewer": "sre-oncall@example.com", "notes": "Verified against staging"}'
 ```
+The request body is strictly `{proposal_id, decision, reviewer, notes?}`; unknown fields are rejected
+(`400`). `decision` accepts `approved` / `rejected` and `proposal_id` values come from
+`GET /investigations/{id}/result`.
 
 #### 7. Investigation Event History & Live SSE Streaming
 
@@ -580,6 +613,132 @@ Returns `200 OK` with `InvestigationResultResponse`:
 - `proposals`: `proposal_id`, `summary`, `rationale`, unified-diff `patch`, `risks`, `rollback_plan`.
 
 `result_available` is `true` only when at least one section is populated. In-progress or partial investigations return empty sections rather than an error, and the returned `proposal_id` values can be passed straight to `POST /investigations/{id}/approval`. Internal state, raw stage outputs, `before`/`after` file bodies and evidence `metadata` are never exposed.
+
+#### 9. Ingest an Incident Bundle (Mission 19 — opt-in, disabled by default)
+
+`POST /incidents` lets a client submit a **text-only** incident bundle as JSON so it no longer
+needs direct write access to the server filesystem. It is **disabled by default** and must be
+enabled explicitly (see [Configuration](#configuration)); enabling it does **not** add
+authentication, so a public deployment must add its own access control.
+
+```bash
+# 1) Enable once (server env): SENTINEL_ALLOW_INCIDENT_INGESTION=true
+# 2) Ingest a bundle (paths are the allowlisted incident-relative paths)
+curl -s -X POST http://127.0.0.1:8000/incidents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "incident_id": "inc_acme_oom",
+    "files": {
+      "logs/application.log": "2026-08-28T14:00:00Z ERROR pool exhausted\n",
+      "metrics/metrics.csv": "timestamp,mem_mb\n2026-08-28T14:00:00Z,1024\n",
+      "service/app.py": "def handler():\n    pass\n"
+    }
+  }'
+# 201 Created
+# Location: /investigations/inc_acme_oom
+# {"incident_id":"inc_acme_oom","bundle_path":"incidents/inc_acme_oom",
+#  "evidence_sources":["logs/application.log","metrics/metrics.csv","service"]}
+```
+
+The response carries the `incident_id`, an incident-relative `bundle_path`, the submitted
+`evidence_sources`, and a `Location` header pointing at the existing investigation resource.
+**Ingestion never starts an investigation** — the client continues with the normal workflow:
+
+```bash
+# 3) Start the investigation (existing endpoint; sync or async)
+curl -s -X POST http://127.0.0.1:8000/investigations \
+  -H "Content-Type: application/json" -d '{"incident_id": "inc_acme_oom"}'
+
+# 4) Poll or stream, then read the diagnosis
+curl -s http://127.0.0.1:8000/investigations/inc_acme_oom
+curl -N http://127.0.0.1:8000/investigations/inc_acme_oom/events -H "Accept: text/event-stream"
+curl -s http://127.0.0.1:8000/investigations/inc_acme_oom/result
+```
+
+**Request contract.** A strict JSON object with `incident_id` (canonical ID rules) and `files`
+(a **non-empty** object mapping relative POSIX paths to UTF-8 strings). An optional boolean
+`overwrite` field exists for forward compatibility but **must be omitted or `false`**:
+replacement is not implemented, so `overwrite=true` is rejected with `409 overwrite_not_supported`
+(see *Honest limitations*). Unknown fields, non-string contents, duplicate JSON keys, and
+malformed bodies are rejected.
+
+**Allowed paths (strict allowlist).** Only `logs/application.log`, `metrics/metrics.csv`,
+`git_diff.patch`, `docker-compose.yml`, and any file beneath `service/` may be submitted.
+Absolute paths, `..`, backslashes, Windows drive prefixes, NUL bytes, empty path segments, paths
+longer than 512 characters or deeper than 16 segments, reserved evaluation artefacts
+(`ground_truth.md`, `ground_truth.json`, `results_baseline.csv`, `baseline_summary.json`), and any
+path outside the allowlist are rejected with `400 invalid_file_path`.
+
+**Resource limits** (environment-configurable; UTF-8 **bytes**, not characters):
+
+| Limit | Default | Environment variable |
+|---|---|---|
+| Maximum files | 200 | `SENTINEL_INGEST_MAX_FILES` |
+| Maximum size per file | 2 MiB | `SENTINEL_INGEST_MAX_FILE_BYTES` |
+| Maximum total content | 20 MiB | `SENTINEL_INGEST_MAX_TOTAL_BYTES` |
+| Maximum raw request body | 24 MiB | `SENTINEL_INGEST_MAX_REQUEST_BYTES` |
+
+Limits are checked against the parsed content **before** any staging file is written. The raw
+request-body limit is enforced **while the body is being read**: the request stream is consumed
+chunk by chunk and reading stops the moment the limit is exceeded, so an oversized or chunked body
+is never fully buffered or parsed. `Content-Length` is never trusted as authoritative — it may be
+absent (chunked) or understated — so the limit is always re-checked against the bytes actually
+received. Exceeding any limit returns `413 payload_too_large`.
+
+**Error responses.**
+
+| Status | `error` | When |
+|---|---|---|
+| `404` | `ingestion_disabled` | Endpoint not enabled (default). No filesystem access occurs |
+| `400` | `invalid_json` | Malformed body, non-object body, or duplicate JSON key |
+| `400` | `invalid_ingest_request` | Request shape violation (unknown field, empty/absent `files`, non-string content, non-boolean `overwrite`, invalid `incident_id`) |
+| `400` | `invalid_file_path` | Path policy violation (see allowlist above) |
+| `400` | `invalid_incident_bundle` | Bundle fails the Mission 18 preflight validator |
+| `409` | `conflict` | Incident already exists (replacement unsupported), a concurrent ingestion for the same ID is in flight, or the incident is running / actively leased |
+| `409` | `overwrite_not_supported` | `overwrite=true` was requested. Rejected before any staging file is written |
+| `413` | `payload_too_large` | A configured size or count limit was exceeded |
+| `503` | `storage_unavailable` | Incident root missing/unwritable, or a staging/publish write failed |
+
+Error bodies never include file contents, secrets, evaluation ground truth, or absolute server
+filesystem paths (messages pass through `sanitize_error_message`).
+
+**Safety & atomicity.** Files are written as regular UTF-8 text files beneath a fresh, unique
+staging directory inside the incident root, with containment verified before every write and
+exclusive-create semantics so no client-controlled path or symlink is ever followed. The staged
+bundle must then pass `require_valid_incident_bundle(staged_root, expected_id=<incident_id>)`
+before it is published. Any failure removes the staging tree and publishes nothing, so a client
+never observes a partially written bundle. Publication is a **single atomic `rename`** that only
+ever creates a new incident directory: an existing entry at the target path — regular directory,
+file, or symlink — is reported as `409 conflict` and left completely untouched. The rename is the
+sole publish step, so it is the publish — not any in-process lock — that makes two concurrent
+ingestions of the same new ID exclusive **across processes**: the loser's rename fails against the
+now-existing directory and is mapped to a conflict. This holds unconditionally because a published
+bundle always contains at least one file (the service rejects an empty bundle), so the target is
+never the empty directory that POSIX `rename` would overwrite; a losing publish never mixes with or
+mutates the winner's files.
+
+**Overwrite is not supported.** `overwrite=true` is rejected with `409 overwrite_not_supported`
+before any staging file is written. There is no portable *crash-safe*, cross-process directory-swap
+primitive: a best-effort "move aside, move in, restore on failure" swap could permanently destroy
+the previous valid bundle if the process died mid-replacement. Rather than claim a guarantee it
+cannot honour, Sentinel refuses replacement. To re-ingest an incident, submit a **new**
+`incident_id`.
+
+**Honest limitations.**
+- An incident is created once. A duplicate `incident_id` conflicts (`409`); replacement requires a
+  genuinely crash-safe protocol that does not exist yet, so it is declined instead of approximated.
+- Coordination with running investigations is **process-local** (the same `_ACTIVE_LOCK` /
+  `_ACTIVE_INVESTIGATIONS` registry used by `POST /investigations`) plus the persisted execution
+  lease. Publishing a bundle for an incident that is running or actively leased is refused
+  (`409 conflict`). Across multiple Uvicorn worker processes only the durable lease is visible; the
+  single-rename publish keeps a cross-process duplicate from corrupting the bundle (the second
+  rename fails and conflicts). A published bundle is never an empty directory (the service refuses
+  an empty bundle), so POSIX `rename` can never replace a published target; the exclusive-publish
+  guarantee therefore does not rely on the in-process lock or on the two submissions being
+  byte-identical.
+- Enabling the endpoint without authentication permits anyone who can reach the server to publish
+  incidents. Keep the default bind address (`127.0.0.1`) or add real authentication/authorization in
+  front of it.
 
 ---
 
@@ -654,13 +813,14 @@ without double-claiming or losing work.
 2. **Ground Truth Isolation**: The Sentinel pipeline and API runtime **never** read `ground_truth.md` or baseline evaluation results. Only the post-run evaluation harness accesses ground truth.
 3. **Secret Masking**: All exception handlers, logs, and telemetry sanitize API keys to prevent secret leakage.
 4. **Deterministic Verification**: Hypotheses are falsified using pure Python AST analysis, log scanning, and invariant checking with zero LLM inference.
+5. **Path-Confined Ingestion**: `POST /incidents` is disabled by default; when enabled it writes only regular UTF-8 text files beneath a freshly created staging directory inside the incident root, with containment verified before every write and no client-supplied path or symlink ever followed. Failed ingestions publish nothing. Absolute server paths, file contents, and secrets are never returned in error responses.
 
 ---
 
 ## 13. Documentation & Verification References
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, and SSE).
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, ingestion, and SSE).
 - **[docs/CURRENT_STATE_AUDIT.md](docs/CURRENT_STATE_AUDIT.md)** — Exhaustive repository state audit, current test counts, verified capabilities, and unresolved items.
-- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 18.
+- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 19.
 - **[REPRODUCE.md](REPRODUCE.md)** — Complete guide for setting up, running offline tests, launching the API server, querying endpoints, and executing benchmark evaluations.
-- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 18 engineering work.
+- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 19 engineering work.

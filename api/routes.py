@@ -15,7 +15,21 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from agents.approval_gate import _build_approval_record
-from agents.bundle_validator import require_valid_incident_bundle
+from agents.bundle_ingest import (
+    DuplicateJsonKeyError,
+    IncidentBusyError,
+    IncidentConflictError,
+    IngestionLimits,
+    InvalidBundlePathError,
+    MalformedRequestError,
+    OverwriteUnsupportedError,
+    PayloadTooLargeError,
+    StorageUnavailableError,
+    ingest_incident_bundle,
+    load_ingestion_limits,
+    parse_json_object_strict,
+)
+from agents.bundle_validator import InvalidIncidentBundleError, require_valid_incident_bundle
 from agents.orchestrator import IncidentOrchestrator
 from api.errors import error_json_response, sanitize_error_message
 from api.models import (
@@ -33,6 +47,8 @@ from api.models import (
     GetInvestigationResponse,
     HealthResponse,
     HypothesisResultResponse,
+    IncidentBundleIngestRequest,
+    IncidentBundleIngestResponse,
     InvestigationResultResponse,
     InvestigationSummaryResponse,
     ListInvestigationsResponse,
@@ -579,6 +595,156 @@ def health(request: Request) -> JSONResponse:
     """GET /health - Liveness probe."""
     resp = HealthResponse()
     return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def _get_ingestion_limits(request: Request) -> IngestionLimits:
+    """Return the effective ingestion limits configured on the application."""
+    limits = getattr(request.app.state, "ingestion_limits", None)
+    return limits if isinstance(limits, IngestionLimits) else load_ingestion_limits()
+
+
+async def _read_body_within_limit(request: Request, limit: int) -> Optional[bytes]:
+    """Read the request body, aborting as soon as it exceeds *limit* bytes.
+
+    The body is consumed from the ASGI stream one chunk at a time and reading
+    stops the moment the accumulated size would exceed *limit*, so an oversized
+    or chunked request is never fully buffered or parsed. Returns ``None`` when
+    the limit is exceeded (the caller maps this to ``413 payload_too_large``).
+    ``Content-Length`` is not trusted here — it may be absent (chunked) or
+    understated — so the limit is enforced against the bytes actually received.
+    """
+    chunks: List[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def create_incident(request: Request) -> JSONResponse:
+    """POST /incidents - Ingest a JSON-inline incident bundle.
+
+    Disabled by default: the endpoint must be explicitly enabled via the
+    ``SENTINEL_ALLOW_INCIDENT_INGESTION`` opt-in (or ``create_app``). When
+    disabled it returns a documented 404 without touching the filesystem.
+
+    Enabling this endpoint does **not** add authentication; it is intended for
+    trusted/local deployments only. Ingestion never starts an investigation —
+    clients use POST /investigations afterwards.
+    """
+    if not bool(getattr(request.app.state, "ingestion_enabled", False)):
+        return error_json_response(
+            404,
+            "ingestion_disabled",
+            "Incident bundle ingestion is disabled. Set "
+            "SENTINEL_ALLOW_INCIDENT_INGESTION=true to enable it.",
+        )
+
+    limits = _get_ingestion_limits(request)
+
+    # Early guard: reject an oversized request before reading the body.
+    declared_length = request.headers.get("content-length")
+    if declared_length:
+        try:
+            declared = int(declared_length)
+        except (TypeError, ValueError):
+            return error_json_response(400, "invalid_json", "Invalid Content-Length header.")
+        if declared > limits.max_request_bytes:
+            return error_json_response(
+                413, "payload_too_large", "Request body exceeds the configured limit."
+            )
+
+    try:
+        import anyio
+        raw_body = anyio.from_thread.run(
+            _read_body_within_limit, request, limits.max_request_bytes
+        )
+    except Exception:
+        return error_json_response(400, "invalid_json", "Could not read the request body.")
+
+    if raw_body is None:
+        return error_json_response(
+            413, "payload_too_large", "Request body exceeds the configured limit."
+        )
+
+    try:
+        decoded = raw_body.decode("utf-8") if raw_body else ""
+    except UnicodeDecodeError:
+        return error_json_response(400, "invalid_json", "Request body must be UTF-8 encoded JSON.")
+
+    try:
+        body = parse_json_object_strict(decoded)
+    except DuplicateJsonKeyError as exc:
+        return error_json_response(400, "invalid_json", str(exc))
+    except MalformedRequestError as exc:
+        return error_json_response(400, "invalid_json", str(exc))
+
+    if not body:
+        return error_json_response(400, "invalid_ingest_request", "Request body must be a JSON object.")
+
+    try:
+        req_model = IncidentBundleIngestRequest.model_validate(body)
+    except Exception as exc:
+        return error_json_response(400, "invalid_ingest_request", str(exc))
+
+    incidents_root = Path(getattr(request.app.state, "incidents_root", Path("incidents")))
+    repository = getattr(request.app.state, "repository", None)
+
+    def _registry_guard() -> None:
+        """Veto the publish when the incident is running or actively leased.
+
+        Executed by the ingestion service while it holds the active-claim lock,
+        so an investigation cannot be claimed between this check and the publish.
+        """
+        if req_model.incident_id in _ACTIVE_INVESTIGATIONS:
+            raise IncidentBusyError(
+                f"Incident '{req_model.incident_id}' is currently running an investigation."
+            )
+        if repository is not None:
+            state = repository.load(req_model.incident_id)
+            if state is not None and state.is_lease_active():
+                raise IncidentBusyError(
+                    f"Incident '{req_model.incident_id}' is actively leased by another worker."
+                )
+
+    try:
+        ingested = ingest_incident_bundle(
+            incidents_root,
+            req_model.incident_id,
+            req_model.files,
+            overwrite=req_model.overwrite,
+            limits=limits,
+            registry_lock=_ACTIVE_LOCK,
+            registry_guard=_registry_guard,
+        )
+    except OverwriteUnsupportedError as exc:
+        return error_json_response(409, "overwrite_not_supported", str(exc))
+    except MalformedRequestError as exc:
+        return error_json_response(400, "invalid_ingest_request", str(exc))
+    except (IncidentBusyError, IncidentConflictError) as exc:
+        return error_json_response(409, "conflict", str(exc))
+    except InvalidBundlePathError as exc:
+        return error_json_response(400, "invalid_file_path", str(exc))
+    except PayloadTooLargeError as exc:
+        return error_json_response(413, "payload_too_large", str(exc))
+    except InvalidIncidentBundleError as exc:
+        return error_json_response(400, "invalid_incident_bundle", str(exc))
+    except StorageUnavailableError as exc:
+        return error_json_response(503, "storage_unavailable", str(exc))
+
+    root_name = incidents_root.name or "incidents"
+    resp_model = IncidentBundleIngestResponse(
+        incident_id=ingested.incident_id,
+        bundle_path=f"{root_name}/{ingested.incident_id}",
+        evidence_sources=list(ingested.evidence_sources),
+    )
+    return JSONResponse(
+        status_code=201,
+        content=resp_model.model_dump(),
+        headers={"Location": f"/investigations/{ingested.incident_id}"},
+    )
 
 
 def create_investigation(request: Request) -> JSONResponse:

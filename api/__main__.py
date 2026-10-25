@@ -14,6 +14,13 @@ Environment variables (read after loading .env):
     SENTINEL_DATABASE_URL          PostgreSQL connection URL (postgres backend only)
     GROQ_API_KEY                   Required when investigations are submitted
     GROQ_MODEL                     LLM model override (default: openai/gpt-oss-120b)
+
+Incident-bundle ingestion is DISABLED unless explicitly enabled:
+    SENTINEL_ALLOW_INCIDENT_INGESTION   '1'/'true'/'yes'/'on' enables POST /incidents
+    SENTINEL_INGEST_MAX_FILES           Max files per submission (default: 200)
+    SENTINEL_INGEST_MAX_FILE_BYTES      Max UTF-8 bytes per file (default: 2097152)
+    SENTINEL_INGEST_MAX_TOTAL_BYTES     Max total UTF-8 bytes (default: 20971520)
+    SENTINEL_INGEST_MAX_REQUEST_BYTES   Max request body bytes (default: 25165824)
 """
 
 from __future__ import annotations
