@@ -7,8 +7,10 @@ from typing import Optional
 
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
 from starlette.routing import Route
 
+from api.auth import ApiKeyAuthMiddleware, AuthConfig, load_auth_config
 from api.errors import (
     concurrency_exception_handler,
     generic_exception_handler,
@@ -48,6 +50,9 @@ def create_app(
     llm_client: Optional[BaseLLMProvider] = None,
     ingestion_enabled: Optional[bool] = None,
     ingestion_limits: Optional[IngestionLimits] = None,
+    auth_enabled: Optional[bool] = None,
+    api_key: Optional[str] = None,
+    auth_protect_reads: Optional[bool] = None,
 ) -> Starlette:
     """Create and configure a Starlette API instance.
 
@@ -59,10 +64,29 @@ def create_app(
             read from SENTINEL_ALLOW_INCIDENT_INGESTION (disabled by default).
         ingestion_limits: Optional resource limits for bundle ingestion
             (defaults to the environment configuration).
+        auth_enabled: Enable the API-key guard. When None the flag is read from
+            SENTINEL_API_AUTH_ENABLED (disabled by default).
+        api_key: Static API key required when auth is enabled. When None the key
+            is read from SENTINEL_API_KEY.
+        auth_protect_reads: Also protect safe methods (GET/HEAD/OPTIONS) when
+            True. When None the flag is read from SENTINEL_API_AUTH_PROTECT_READS
+            (disabled by default). /health always stays public.
 
     Returns:
         Configured Starlette application.
+
+    Raises:
+        AuthConfigurationError: When authentication is enabled without a usable
+            key (fails closed rather than serving unprotected requests).
     """
+    # Resolve (and validate) authentication config before building the app so a
+    # misconfiguration fails closed at construction time.
+    auth_config: AuthConfig = load_auth_config(
+        enabled=auth_enabled,
+        api_key=api_key,
+        protect_reads=auth_protect_reads,
+    )
+
     routes = [
         Route("/health", endpoint=health, methods=["GET"]),
         Route("/incidents", endpoint=create_incident, methods=["POST"]),
@@ -87,8 +111,12 @@ def create_app(
         debug=False,
         routes=routes,
         exception_handlers=exception_handlers,
+        middleware=[Middleware(ApiKeyAuthMiddleware, config=auth_config)],
     )
 
+    # Expose a redacted view: enablement state is introspectable, but the
+    # secret is retained only inside the middleware, never on app.state.
+    app.state.auth_config = auth_config.redacted()
     app.state.repository = repository if repository is not None else FilesystemRepository()
     app.state.incidents_root = Path(incidents_root) if incidents_root is not None else Path("incidents")
     app.state.llm_client = llm_client

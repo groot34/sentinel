@@ -21,6 +21,15 @@ Incident-bundle ingestion is DISABLED unless explicitly enabled:
     SENTINEL_INGEST_MAX_FILE_BYTES      Max UTF-8 bytes per file (default: 2097152)
     SENTINEL_INGEST_MAX_TOTAL_BYTES     Max total UTF-8 bytes (default: 20971520)
     SENTINEL_INGEST_MAX_REQUEST_BYTES   Max request body bytes (default: 25165824)
+
+API-key authentication is DISABLED unless explicitly enabled:
+    SENTINEL_API_AUTH_ENABLED           '1'/'true'/'yes'/'on' enables the guard
+    SENTINEL_API_KEY                    Required (non-empty) when the guard is enabled
+    SENTINEL_API_AUTH_PROTECT_READS     '1'/'true'/'yes'/'on' also protects GET/HEAD/OPTIONS
+                                        (/health stays public)
+
+When the guard is enabled, every method other than GET/HEAD/OPTIONS must send
+``Authorization: Bearer <SENTINEL_API_KEY>``.
 """
 
 from __future__ import annotations
@@ -98,8 +107,16 @@ def main() -> None:
     # llm_client is intentionally omitted — the orchestrator creates its own client
     # lazily via get_llm_client() when an investigation is submitted.
     from api.app import create_app
+    from api.auth import AuthConfigurationError
 
-    app = create_app(repository=repository, incidents_root=incidents_root)
+    try:
+        app = create_app(repository=repository, incidents_root=incidents_root)
+    except AuthConfigurationError as exc:
+        # Fail closed: never start with authentication enabled but unusable.
+        # The message is authored by the auth config loader and never contains
+        # the configured key value.
+        print(f"ERROR: Invalid authentication configuration: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # Start Uvicorn.
     import uvicorn

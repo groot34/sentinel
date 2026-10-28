@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **884 passed, 55 skipped** offline (Mission 19); **853 passed, 0 skipped** live PostgreSQL 16 CI (run 39635055973, Missions 17 & 18) |
+| Automated tests | — | **947 passed, 55 skipped** offline (Mission 20); **853 passed, 0 skipped** live PostgreSQL 16 CI (run 39635055973, Missions 17 & 18) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 55 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 884 passed / 55 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests, taking the suite from 853 to 939 collected; Mission 19 has **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 55 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 947 passed / 55 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests (853 → 939 collected) and Mission 20 adds 63 API-key authentication tests (939 → 1002 collected); Missions 19 and 20 have **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally.)*
 
 ---
 
@@ -415,7 +415,7 @@ cp .env.example .env
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
 # Verified in CI (run 39048469043, Mission 15): 733 passed, 0 skipped with live PostgreSQL 16.
-# Verified locally without a database (Mission 19): 884 passed, 55 skipped, 1 warning in ~18s
+# Verified locally without a database (Mission 20): 947 passed, 55 skipped, 1 warning in ~14s
 # (55 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
 #  unset/unreachable — including Mission 15's 4 transient-failure retry tests and Mission 16's
 #  6 outbox claim/recovery tests; 9 Windows symlink tests skipped for non-admin accounts
@@ -428,10 +428,11 @@ pytest
 #  tests/test_investigation_result_api.py; Mission 18 added 98 bundle-validator tests in
 #  tests/test_bundle_validator.py; Mission 19 added 86 incident-ingestion API tests in
 #  tests/test_incident_ingestion_api.py, 85 passing + 1 symlink test skipped on Windows.)
+#  Mission 20 added 63 API-key authentication tests in tests/test_api_auth.py (all offline).
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
 # Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres job (PostgreSQL 16) 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests ran.
-# Missions 17, 18 and 19 have local validation only — no CI run yet; PostgreSQL was not tested locally.
+# Missions 17, 18, 19 and 20 have local validation only — no CI run yet; PostgreSQL was not tested locally.
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -495,6 +496,50 @@ are applied automatically (shell values take precedence).
 | `SENTINEL_INGEST_MAX_FILE_BYTES` | `2097152` | Max UTF-8 bytes per ingested file |
 | `SENTINEL_INGEST_MAX_TOTAL_BYTES` | `20971520` | Max total UTF-8 bytes per ingested bundle |
 | `SENTINEL_INGEST_MAX_REQUEST_BYTES` | `25165824` | Max raw JSON request body size |
+| `SENTINEL_API_AUTH_ENABLED` | `false` | **Opt-in** API-key guard (Mission 20). `1`/`true`/`yes`/`on` enable it; `0`/`false`/`no`/`off`, absent, or empty leave it disabled; any other non-empty value is treated as disabled and logged so a typo cannot silently disable the guard |
+| `SENTINEL_API_KEY` | — | Static API key. **Required** (non-empty) when the guard is enabled, or the server refuses to start |
+| `SENTINEL_API_AUTH_PROTECT_READS` | `false` | Also protect `GET`/`HEAD`/`OPTIONS`. `/health` always stays public |
+
+### API-Key Authentication (Mission 20)
+
+Authentication is **disabled by default**, so local workflows are unchanged. Enable it for any
+deployment reachable beyond `127.0.0.1`:
+
+```bash
+# server environment
+export SENTINEL_API_AUTH_ENABLED=true
+export SENTINEL_API_KEY='<a long random secret>'
+# optional: also protect read endpoints
+export SENTINEL_API_AUTH_PROTECT_READS=true
+```
+
+**Policy.** Every HTTP method other than `GET`, `HEAD` and `OPTIONS` is protected automatically
+(`POST /incidents`, `POST /investigations`, `…/resume`, `…/approval`) — a future mutating route is
+protected without further wiring. Set `SENTINEL_API_AUTH_PROTECT_READS=true` to extend the same
+guard to read endpoints; `GET /health` stays public in all cases. With the guard enabled, send:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/investigations \
+  -H "Authorization: Bearer $SENTINEL_API_KEY" \
+  -H "Content-Type: application/json" -d '{"incident_id":"inc_01_n_plus_one_query"}'
+```
+
+**Behaviour.** Missing or invalid credentials return the same generic
+`401 {"error":"unauthorized","detail":"Missing or invalid API credentials."}` with
+`WWW-Authenticate: Bearer`, so the response is not an oracle; the check happens **before** the
+request body is read. Exactly one `Authorization` header is required — duplicate headers are
+rejected rather than trusting the first value. Valid credentials preserve existing route behaviour
+exactly. If authentication is enabled without a non-empty `SENTINEL_API_KEY`, app construction
+raises and the server exits non-zero (fails closed) rather than serving unprotected requests. The
+key is compared with `hmac.compare_digest` over UTF-8 bytes and is never logged, echoed or included
+in errors.
+
+**Enabling authentication never enables incident ingestion** — `SENTINEL_ALLOW_INCIDENT_INGESTION`
+remains an independent opt-in.
+
+**Honest limitations.** This is a single static shared key: no OAuth/JWT, user accounts, roles,
+rotation or rate limiting. Browsers' `EventSource` cannot send an `Authorization` header, so
+protecting the SSE endpoint (`GET …/events`) requires a header-capable client.
 
 ### Core API Endpoints & Examples
 

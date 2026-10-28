@@ -819,3 +819,70 @@ empty-bundle service refusal, active/leased refusal, a symlinked target refusal,
 failures, duplicate-never-touches-existing-bundle, no absolute-path leakage / no evaluation-file
 access, and compatibility of the existing investigation routes. The full offline suite is **884
 passed / 55 skipped** locally.
+
+### 4.9 API-Key Authentication (Mission 20)
+
+**Problem addressed**: every HTTP endpoint — including the state-changing `POST /investigations`,
+`…/resume`, `…/approval`, and (when opted in) `POST /incidents` — was served without any
+authentication. The default bind address is `127.0.0.1`, which bounds exposure locally, but any
+networked deployment had no way to require a credential.
+
+**Component** — `api/auth.py` owns a small, dependency-free guard: `AuthConfig`,
+`load_auth_config()`, `AuthConfigurationError`, and `ApiKeyAuthMiddleware`. `create_app()` gained
+optional `auth_enabled` / `api_key` / `auth_protect_reads` parameters (explicit values win; `None`
+reads the environment, mirroring `ingestion_enabled`) and installs the guard as middleware. The
+secret is held only inside the middleware; `create_app()` exposes a **redacted** view (no key) as
+`app.state.auth_config` so enablement is introspectable without retaining a second copy.
+
+**Opt-in, disabled by default** — `SENTINEL_API_AUTH_ENABLED` must be a truthy token
+(`1`/`true`/`yes`/`on`); while disabled the middleware is inert and behaviour is identical to
+before. `SENTINEL_API_KEY` supplies the static key and `SENTINEL_API_AUTH_PROTECT_READS` optionally
+extends protection to `GET`/`HEAD`/`OPTIONS`. A non-empty value that is neither a recognised truthy
+nor falsey token is treated as **disabled** and logged (sanitised — the value itself is not echoed),
+so a typo cannot silently disable the guard.
+
+**Policy** — every method other than `GET`, `HEAD`, `OPTIONS` is protected automatically, so a
+future mutating route is protected without further wiring. `GET /health` is always public (liveness
+probes must not require credentials). Read endpoints stay open unless read protection is enabled;
+this preserves local workflows, and operators exposing the API on a network should enable it.
+
+**Transport & comparison** — clients send `Authorization: Bearer <key>`. The middleware parses the
+scheme case-insensitively and compares tokens with `hmac.compare_digest` over UTF-8-encoded `bytes`
+on both sides, so a non-ASCII credential can never raise or take a data-dependent code path.
+**Exactly one** `Authorization` header is required; duplicate headers are rejected outright rather
+than silently trusting the first value (proxies and servers disagree on which one wins). Missing
+and invalid credentials share one generic `401 {"error":"unauthorized"}` response (with
+`WWW-Authenticate: Bearer`), so the response is not an oracle. The key is never logged, echoed, or
+included in an error payload.
+
+**Pure ASGI, not `BaseHTTPMiddleware`** — for authorised requests the middleware forwards the
+original `receive`/`send` to the downstream app, so Server-Sent Events streaming (§3.7) and
+Starlette `BackgroundTask` dispatch are byte-for-byte unaffected. For rejected requests it
+short-circuits with a `JSONResponse` **before** the downstream app runs, so a protected request body
+is never read (important for the streamed-body limit in §4.8).
+
+**Fail closed** — `load_auth_config()` raises `AuthConfigurationError` when authentication is
+enabled without a non-empty key, so `create_app()` cannot construct such an app and
+`python -m api` prints a sanitised error and exits `1` instead of silently serving unprotected
+requests.
+
+**Independence** — authentication and ingestion are orthogonal: enabling the guard never enables
+`POST /incidents`, which keeps its own `SENTINEL_ALLOW_INCIDENT_INGESTION` opt-in (§4.8).
+
+**Limitations (honest)** — a single static shared key: **no** OAuth/JWT issuance, user accounts,
+roles/RBAC, rate limiting, or key rotation. Browsers' `EventSource` cannot set an `Authorization`
+header, so protecting the SSE endpoint requires a header-capable client; the endpoint remains
+unguarded by default for exactly that reason.
+
+**Tests** — `tests/test_api_auth.py` (63 passed locally; offline; real app + `TestClient` plus
+direct ASGI-level middleware calls) covers disabled-by-default compatibility, credential rejection
+(missing/wrong/empty/malformed-scheme/non-ASCII via raw ASGI header bytes), valid credentials
+preserving synchronous and asynchronous dispatch plus resume/approval pass-through, ingestion
+independence, fail-closed construction and `python -m api` startup, secret non-leakage, that
+`hmac.compare_digest` is actually invoked, the read-protection policy with `/health` public, SSE
+pass-through with unmodified streaming messages, a fail-closed route-coverage regression over every
+non-safe method, and rejection before the request body is consumed. It also covers indistinguishable
+missing-vs-wrong responses, duplicate `Authorization` header rejection, the sanitised warning for an
+unrecognised `SENTINEL_API_AUTH_ENABLED` value, accepted truthy values, `HEAD`/`OPTIONS` handling,
+header-name case handling, and that `app.state.auth_config` does not retain the secret. The full
+offline suite is now **947 passed / 55 skipped** locally.

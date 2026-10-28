@@ -29,7 +29,7 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome (local, Windows, no database, Mission 19): 884 passed, 55 skipped, 1 warning in ~18s
+# Verified outcome (local, Windows, no database, Mission 20): 947 passed, 55 skipped, 1 warning in ~14s
 # (55 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
 #  retry tests and Mission 16's 6 outbox claim/recovery tests; 9 symlink tests skipped on
@@ -43,6 +43,8 @@ pytest
 #  CI (run 39635055973, commit 07a72d5): postgres 853 passed / 0 skipped.
 #  Mission 19 (86 incident-ingestion API tests: 85 passed + 1 skipped symlink) has local
 #  validation only — no CI run yet; PostgreSQL integration was NOT run locally.
+#  Mission 20 (63 API-key authentication tests in tests/test_api_auth.py, all offline) also has
+#  local validation only — no CI run yet. Adding it took the offline suite from 884 to 947 passed.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -268,6 +270,76 @@ locally.
 > the single rename still prevents corruption (the loser conflicts). Enabling the endpoint performs
 > **unauthenticated** writes to `incidents_root`.
 
+## API-Key Authentication (Mission 20)
+
+An opt-in, static API-key guard protects every state-changing HTTP route. It lives in
+`api/auth.py` as a small **pure ASGI middleware** (not Starlette's `BaseHTTPMiddleware`) so SSE
+streaming and background-task dispatch are preserved. See
+[docs/ARCHITECTURE.md §4.9](docs/ARCHITECTURE.md#49-api-key-authentication-mission-20) and
+[README §API-Key Authentication](README.md#api-key-authentication-mission-20).
+
+**Disabled by default** for backward compatibility. Enable it with `SENTINEL_API_AUTH_ENABLED`
+and a non-empty `SENTINEL_API_KEY`:
+
+```bash
+# Enable the guard for this server process (disabled unless set to 1/true/yes/on)
+SENTINEL_API_AUTH_ENABLED=1 SENTINEL_API_KEY="$(cat /run/secrets/sentinel_api_key)" python -m api
+```
+
+When enabled, **all methods other than `GET`/`HEAD`/`OPTIONS` are protected** (so future mutating
+routes are covered automatically). `SENTINEL_API_AUTH_PROTECT_READS=true` additionally protects
+`GET`/`HEAD`/`OPTIONS`, except `/health`, which stays public. Send the key as a bearer token:
+
+```bash
+# Authorised request (mutating routes need the header when auth is enabled)
+curl -s -X POST http://127.0.0.1:8000/investigations \
+  -H "Authorization: Bearer $SENTINEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"incident_id": "inc_01_n_plus_one_query"}'
+
+# Missing/invalid credentials -> 401 with WWW-Authenticate: Bearer
+curl -i -X POST http://127.0.0.1:8000/investigations -d '{}'
+# HTTP/1.1 401 Unauthorized
+# WWW-Authenticate: Bearer
+# {"error":"unauthorized","detail":"Missing or invalid API credentials."}
+```
+
+The key is compared with `hmac.compare_digest` over UTF-8 bytes, and one generic `401` is returned
+for both missing and invalid credentials (no distinguishing oracle). Exactly one `Authorization`
+header is required — duplicate headers are rejected rather than trusting the first value. An
+unrecognised non-empty `SENTINEL_API_AUTH_ENABLED` value is treated as disabled but logged
+(sanitised), so a typo cannot silently disable the guard. Enabling authentication is
+**independent** of incident ingestion: `SENTINEL_ALLOW_INCIDENT_INGESTION` still governs
+`POST /incidents`. If authentication is enabled and the key is missing/blank, `create_app` raises
+and `python -m api` prints a sanitised error and exits non-zero — the server never starts
+half-configured.
+
+Limitations (honest): this is a single **static** key shared by all callers — no per-user identity,
+roles, rotation, or rate limiting; and browser `EventSource` cannot set an `Authorization` header,
+so protecting the SSE stream requires a client that can send headers (e.g. `fetch`-based SSE or a
+proxy).
+
+```bash
+# Focused authentication tests (offline; real middleware + app; no network, no database)
+pytest tests/test_api_auth.py -v
+# Verified outcome (no database): 63 passed
+```
+
+They cover default-disabled compatibility, missing/wrong/empty/malformed-scheme/non-ASCII
+credentials, valid credentials on sync + async investigation creation, resume/approval routes,
+ingestion independence, fail-closed construction (argument and environment) plus non-zero startup
+exit without credential leakage, secret non-leakage in responses/logs, `hmac.compare_digest` usage,
+read-protection off/on with `/health` public, SSE streaming intact, a route-coverage regression
+test proving every non-safe method is protected by default, rejection before a protected request
+body is consumed, indistinguishable missing-vs-wrong responses, duplicate `Authorization` header
+rejection, the sanitised warning for an unrecognised `SENTINEL_API_AUTH_ENABLED` value, accepted
+truthy values, `HEAD`/`OPTIONS` handling, header-name case handling, and that `app.state.auth_config`
+does not retain the secret.
+
+**Validation status**: implementation complete, **local validation only**. Focused tests 63 passed;
+full offline suite 947 passed / 55 skipped / 1 warning (1002 collected); incident validation 51/51.
+**No CI run exists for Mission 20 yet**, and PostgreSQL was **not** exercised locally.
+
 ## PostgreSQL Integration Testing
 
 All live PostgreSQL integration tests are guarded by `@pytest.mark.skipif(not POSTGRES_AVAILABLE, ...)`
@@ -298,8 +370,8 @@ make test-postgres
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Locally on Windows without a DB (verified, Mission 19): 884 passed, 55 skipped, 1 warning.
-# With a local DB (expected): 930 passed, 9 skipped (Windows symlink only), 1 warning.
+# Locally on Windows without a DB (verified, Mission 20): 947 passed, 55 skipped, 1 warning.
+# With a local DB (expected): 993 passed, 9 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -396,6 +468,11 @@ cp .env.example .env
 #   SENTINEL_INGEST_MAX_FILE_BYTES=2097152     # 2 MiB per file (UTF-8 bytes)
 #   SENTINEL_INGEST_MAX_TOTAL_BYTES=20971520   # 20 MiB total content (UTF-8 bytes)
 #   SENTINEL_INGEST_MAX_REQUEST_BYTES=25165824 # 24 MiB request body
+#
+# API-key authentication is DISABLED by default and independent of ingestion:
+#   SENTINEL_API_AUTH_ENABLED=1                # enable the guard (1/true/yes/on)
+#   SENTINEL_API_KEY=change-me                 # REQUIRED and non-blank when enabled (never commit a real key)
+#   SENTINEL_API_AUTH_PROTECT_READS=false      # also protect GET/HEAD/OPTIONS (except /health)
 ```
 
 ### CLI options
@@ -652,6 +729,9 @@ curl -N "http://127.0.0.1:8000/investigations/inc_01_n_plus_one_query/events?las
   state modifications raise `ConcurrencyError` mapped to HTTP `409 Conflict`.
 - **Synchronous requests.** Each investigation occupies the server for the full pipeline
   duration. Concurrent requests for the same incident return `409 Conflict`.
+- **Authentication is opt-in and static.** Without `SENTINEL_API_AUTH_ENABLED`, every route is
+  unauthenticated (including the mutating endpoints and, if enabled, ingestion). When enabled it is
+  a single shared key with no identity, roles, rotation, or rate limiting.
 
 ---
 

@@ -47,6 +47,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     """Handle Starlette HTTPExceptions with standard format."""
     code_map = {
         400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
         404: "not_found",
         409: "conflict",
         500: "internal_error",

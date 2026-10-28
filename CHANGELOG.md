@@ -2,6 +2,37 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission20] - Unreleased (implementation complete; local validation only)
+
+### Added
+- **Configurable API-key authentication guard (`api/auth.py`)** — a small, dependency-free, opt-in guard for the HTTP API. **Disabled by default**, so existing local workflows are unchanged; enable it with `SENTINEL_API_AUTH_ENABLED=1` (or `true`/`yes`/`on`). Absent, empty, or recognised-falsey (`0`/`false`/`no`/`off`) values leave it disabled; any other **non-empty, unrecognised** value is treated as disabled **and logged** (sanitised — the value itself is never echoed), so a typo cannot silently disable the guard.
+  - **Policy**: every method other than `GET`/`HEAD`/`OPTIONS` is protected automatically (`POST /incidents`, `POST /investigations`, `…/resume`, `…/approval`), so a future mutating route is protected without further wiring. `SENTINEL_API_AUTH_PROTECT_READS=1` extends the same guard to read endpoints; `GET /health` always stays public.
+  - **Transport**: `Authorization: Bearer <key>`. Missing or invalid credentials return a single generic `401 {"error":"unauthorized","detail":"Missing or invalid API credentials."}` with a `WWW-Authenticate: Bearer` header — the response never distinguishes "missing" from "wrong". **Exactly one** `Authorization` header is required; duplicate headers are rejected rather than silently trusting the first value.
+  - **Pure ASGI middleware** (`ApiKeyAuthMiddleware`), deliberately **not** `BaseHTTPMiddleware`: authorised requests are forwarded with the original `receive`/`send`, so SSE streaming and Starlette `BackgroundTask` dispatch are unaffected, and rejection happens **before** the downstream app runs (so a protected request body is never read).
+  - **Constant-time comparison** with `hmac.compare_digest` over UTF-8-encoded `bytes` on both sides, so a non-ASCII credential can never raise or take a data-dependent path.
+  - **Fail closed**: `load_auth_config()` raises `AuthConfigurationError` when authentication is enabled without a non-empty key, so the app cannot be constructed — and the process cannot start — with the guard enabled but unusable.
+
+### Changed
+- **`api/app.py`**: `create_app()` gained optional `auth_enabled` / `api_key` / `auth_protect_reads` parameters (explicit values win; `None` reads the environment, mirroring `ingestion_enabled`). Authentication is validated **before** the app is built and is installed as pure-ASGI middleware; a **redacted** view (no key) is exposed as `app.state.auth_config`, so the secret is held only inside the middleware rather than in a second in-memory copy.
+- **`api/__main__.py`**: `create_app()` is wrapped so an `AuthConfigurationError` prints a sanitised `ERROR: Invalid authentication configuration: …` to stderr and exits `1` instead of serving unprotected requests. Module docstring documents the new environment variables.
+- **`api/errors.py`**: added `401 → unauthorized` and `403 → forbidden` to the `http_exception_handler` code map, reusing the existing sanitised `{"error","detail"}` convention.
+- **`.env.example`**: added `SENTINEL_API_AUTH_ENABLED`, `SENTINEL_API_KEY` (empty placeholder — never a real secret) and `SENTINEL_API_AUTH_PROTECT_READS`.
+
+### Security / Boundaries
+- Authentication is off by default; when enabled, mutating endpoints require a valid key before any work (or body read) happens.
+- The configured key is never logged, echoed, or included in an error payload; comparison is constant-time over bytes.
+- **Authentication never enables incident ingestion** — `SENTINEL_ALLOW_INCIDENT_INGESTION` remains an independent opt-in, and enabling the guard does not change ingestion behaviour.
+- Read endpoints (`GET /investigations`, `…/{id}`, `…/result`, `…/events`) remain **open by default** so local workflows are unchanged; operators on a networked deployment should set `SENTINEL_API_AUTH_PROTECT_READS=1`. Browsers' `EventSource` cannot send an `Authorization` header, so protecting `GET …/events` requires a header-capable client.
+- Deliberately **not** implemented (documented as limitations): OAuth/JWT issuance, user accounts, roles/RBAC, rate limiting, key rotation. This is a single static shared key.
+
+### Tests
+- **`tests/test_api_auth.py`** — 63 offline tests driving the real `create_app()` app through `TestClient` plus direct ASGI-level middleware calls: disabled-by-default compatibility; missing/wrong/empty/malformed-scheme/non-ASCII credentials (raw ASGI header bytes); valid credentials preserving synchronous and asynchronous dispatch plus resume/approval routes; ingestion remaining independently disabled; fail-closed construction with a missing or blank key (argument and environment); `python -m api` startup exiting non-zero without exposing the key; secret non-leakage in responses and logs; `hmac.compare_digest` actually being invoked; read-protection off vs on with `/health` public; SSE pass-through and streaming-message integrity; a fail-closed route-coverage regression over every non-safe method; and rejection occurring before the request body is consumed.
+- **Hardening tests** (same file): missing vs incorrect credentials produce an identical status, body and challenge (no oracle); duplicate `Authorization` headers are rejected at both the ASGI and HTTP layers; a non-empty unrecognised `SENTINEL_API_AUTH_ENABLED` value logs a sanitised warning and stays disabled (while recognised true/falsey values and absent/empty values never warn); accepted truthy values (`1`/`true`/`yes`/`on`, case/whitespace-insensitive); `HEAD`/`OPTIONS` safe-method handling with and without read protection; header-name case handling; and that `app.state.auth_config` does not retain the secret.
+
+### Notes / Limitations
+- **Validation status**: implementation complete, **local validation only**. Locally (Windows, no database): focused auth tests **63 passed**; full offline suite **947 passed / 55 skipped / 1 warning** (+63 vs Mission 19's 884); incident validation **51/51**; `git diff --check` clean. **No CI run exists for Mission 20 yet** (the latest verified CI run remains Mission 16, [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918), commit `aba70e1`), and **PostgreSQL integration is not required by these tests and was not run locally**.
+- No OAuth, JWT issuance, user accounts, RBAC, rate limiting, key-rotation UI, database migration, or new dependency was added; investigation semantics are unchanged.
+
 ## [2.0.0-mission19] - Unreleased (implementation complete; local validation only)
 
 ### Added
