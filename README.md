@@ -498,7 +498,8 @@ are applied automatically (shell values take precedence).
 | `SENTINEL_INGEST_MAX_REQUEST_BYTES` | `25165824` | Max raw JSON request body size |
 | `SENTINEL_API_AUTH_ENABLED` | `false` | **Opt-in** API-key guard (Mission 20). `1`/`true`/`yes`/`on` enable it; `0`/`false`/`no`/`off`, absent, or empty leave it disabled; any other non-empty value is treated as disabled and logged so a typo cannot silently disable the guard |
 | `SENTINEL_API_KEY` | — | Static API key. **Required** (non-empty) when the guard is enabled, or the server refuses to start |
-| `SENTINEL_API_AUTH_PROTECT_READS` | `false` | Also protect `GET`/`HEAD`/`OPTIONS`. `/health` always stays public |
+| `SENTINEL_API_AUTH_PROTECT_READS` | `false` | Also protect `GET`/`HEAD`/`OPTIONS`. `/health` and `/ready` stay public for safe methods only; a non-safe method on either path remains protected |
+| `SENTINEL_READINESS_TIMEOUT_SECONDS` | `2.0` | HTTP response deadline for the public `GET /ready` dependency check. Absent or invalid values fall back to `2.0`; valid positive values are capped at `30.0`. Bounds the response, not the underlying operation — see the readiness note below |
 
 ### API-Key Authentication (Mission 20)
 
@@ -516,7 +517,8 @@ export SENTINEL_API_AUTH_PROTECT_READS=true
 **Policy.** Every HTTP method other than `GET`, `HEAD` and `OPTIONS` is protected automatically
 (`POST /incidents`, `POST /investigations`, `…/resume`, `…/approval`) — a future mutating route is
 protected without further wiring. Set `SENTINEL_API_AUTH_PROTECT_READS=true` to extend the same
-guard to read endpoints; `GET /health` stays public in all cases. With the guard enabled, send:
+guard to read endpoints; `GET /health` and `GET /ready` stay public in all cases, while a non-safe
+method on either path remains protected. With the guard enabled, send:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/investigations \
@@ -550,6 +552,28 @@ curl -s http://127.0.0.1:8000/health
 ```
 Returns the allowlisted liveness payload only (`status`, `service`, `version`); it does not report
 persistence backend or outbox depth.
+
+#### 1b. Readiness Check
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/ready
+# 200
+curl -s http://127.0.0.1:8000/ready
+# {"status":"ready","checks":{"persistence":"ok"}}
+```
+Unlike `/health`, `/ready` performs a real, read-only check of the persistence backend and returns
+`200` only when it answers within `SENTINEL_READINESS_TIMEOUT_SECONDS` (default `2.0`; valid positive
+values are capped at `30.0`); otherwise it returns `503` with
+`{"status":"not_ready","checks":{"persistence":"unavailable"}}`. The body is a
+fixed allowlist that never exposes exception messages, paths, credentials, DSNs or connection
+details. `GET /ready` stays public even when `SENTINEL_API_AUTH_PROTECT_READS=true`; non-safe methods on the same path remain protected.
+
+Probes run on a dedicated two-worker executor with non-blocking admission control: excess requests
+fail fast with the same `503` body rather than queueing, and a probe that outlives the response
+deadline keeps its slot until the underlying operation actually completes, so abandoned work stays
+bounded. Note that the timeout bounds the **HTTP response deadline only**, not necessarily the
+lifetime of a blocked filesystem syscall or PostgreSQL operation: that work is not strictly
+cancellable and can outlive the deadline, but it remains constrained by the readiness admission
+capacity (the two slots above).
 
 #### 2. Create & Run an Investigation
 

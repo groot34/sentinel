@@ -369,6 +369,7 @@ To prevent multiple server workers from executing or resuming the same investiga
 
 The Sentinel 2.0 API is built on Starlette and served via Uvicorn (`api/app.py`, `api/routes.py`, `api/models.py`):
 - `GET /health`: Returns the allowlisted liveness payload only — `{status, service, version}` (`status: "ok"`, `service: "sentinel"`, `version: "2.0"`). It does not report the persistence backend or outbox depth.
+- `GET /ready`: Operational **readiness** probe (Mission 21). Runs a real, read-only persistence check (`PersistenceRepository.probe()`) and returns `200` with `{status: "ready", checks: {persistence: "ok"}}` when the backend answers within `SENTINEL_READINESS_TIMEOUT_SECONDS` (default `2.0`), otherwise `503` with `{status: "not_ready", checks: {persistence: "unavailable"}}`. The body is a fixed allowlist — exception messages, paths, credentials, DSNs and connection details are never exposed. Safe methods (`GET`, `HEAD`, and `OPTIONS`) remain exempt from authentication under read protection; non-safe methods remain protected when authentication is enabled (see *Readiness Probe Semantics* below).
 - `POST /incidents`: Opt-in, disabled-by-default ingestion of a JSON-inline incident bundle (`agents/bundle_ingest.py`; Mission 19 — see §4.8). Returns `201 Created` with `{incident_id, bundle_path, evidence_sources}` and a `Location` header. Replacement is unsupported (`overwrite=true` → `409 overwrite_not_supported`). Never starts an investigation.
 - `POST /investigations`: Initiates an investigation given an `incident_id`. Validates input paths.
   - **Synchronous Mode (Default)**: Blocks until pipeline completes, returning `200 OK` with full investigation state.
@@ -382,6 +383,35 @@ The Sentinel 2.0 API is built on Starlette and served via Uvicorn (`api/app.py`,
 - `GET /investigations/{id}/events`: Content-negotiated event retrieval endpoint supporting JSON snapshots and live SSE streaming.
 - `GET /investigations/{id}/result`: Read-only, allowlisted projection of the investigation's diagnosis (`200 OK` or `404 Not Found`). Returns hypotheses (IDs, claims, linked `evidence_ids`, verdicts), evidence (IDs, descriptions/excerpts, `file:line` references), verification results (overall verdict plus per-check `PASS`/`FAIL`/`INCONCLUSIVE` outcomes and source references) and fix proposals (IDs, summary, rationale, unified-diff `patch`, risks, rollback plan). Incomplete or in-progress investigations return empty sections with `result_available: false`; the internal state payload, raw stage outputs, `before`/`after` file bodies and `metadata` are never returned.
   - The returned `proposal_id` values are interoperable with `POST /investigations/{id}/approval`.
+
+#### Readiness Probe Semantics (Mission 21)
+
+`GET /ready` separates **liveness** (`/health`, a static always-200 payload) from **readiness** (does
+the persistence dependency actually answer?).
+
+- **Read-only probe**: `PersistenceRepository.probe()` is a new non-abstract method whose default
+  implementation calls `self.list()`. `PostgresRepository` overrides it with a lightweight `SELECT 1`
+  that acquires a pooled connection under a bounded acquisition timeout and pins the statement with a
+  transaction-scoped `SET LOCAL statement_timeout`. The probe never mutates state, starts no
+  investigation, and makes no LLM call.
+- **Bounded, fail-fast admission**: probes execute on a dedicated module-level
+  `ThreadPoolExecutor(max_workers=2, thread_name_prefix="sentinel-ready")` guarded by a non-blocking
+  `BoundedSemaphore(2)`. Requests beyond that capacity are rejected immediately with the standard
+  `503` body instead of being queued, so the executor's internal queue can never grow unbounded.
+- **Slot retention on timeout**: the admission slot is released by a `Future` done-callback, i.e. when
+  the underlying operation **actually finishes** — not when the HTTP response deadline expires.
+  Abandoned work therefore stays bounded by the fixed capacity. This deliberately avoids an AnyIO
+  `CapacityLimiter`, which would release its token as soon as the waiting coroutine is cancelled
+  while the worker thread keeps running.
+- **Deadline**: `SENTINEL_READINESS_TIMEOUT_SECONDS` (default `2.0`) bounds the *HTTP response*.
+  Absent, empty, non-numeric, non-finite, zero or negative values fall back to `2.0`; valid positive
+  values are capped at `30.0` seconds so one request cannot pin a slot indefinitely. The deadline
+  does not cancel the underlying call.
+- **Honest limitation**: the deadline bounds the response, not necessarily the lifetime of a blocked
+  filesystem syscall or a stalled PostgreSQL operation — neither the default probe nor the
+  `PostgresRepository` override can strictly bound every such operation. That work is not strictly
+  cancellable and can outlive the deadline, but it remains constrained by the readiness admission
+  capacity (two slots).
 
 #### Asynchronous Dispatch Lifecycle & Limitations
 1. **Durable Ownership & Persistence Pre-Condition (Before `202 Accepted`)**:
@@ -842,9 +872,11 @@ nor falsey token is treated as **disabled** and logged (sanitised — the value 
 so a typo cannot silently disable the guard.
 
 **Policy** — every method other than `GET`, `HEAD`, `OPTIONS` is protected automatically, so a
-future mutating route is protected without further wiring. `GET /health` is always public (liveness
-probes must not require credentials). Read endpoints stay open unless read protection is enabled;
-this preserves local workflows, and operators exposing the API on a network should enable it.
+future mutating route is protected without further wiring. `GET /health` and `GET /ready` bypass
+authentication for safe methods (`GET`/`HEAD`/`OPTIONS`) only — liveness and readiness probes must
+not require credentials, while a non-safe method on either path remains protected when the guard is
+enabled. Read endpoints stay open unless read protection is enabled; this preserves local workflows,
+and operators exposing the API on a network should enable it.
 
 **Transport & comparison** — clients send `Authorization: Bearer <key>`. The middleware parses the
 scheme case-insensitively and compares tokens with `hmac.compare_digest` over UTF-8-encoded `bytes`

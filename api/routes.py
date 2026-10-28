@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
+import math
+import os
 import threading
 import time
 from pathlib import Path
@@ -54,6 +57,7 @@ from api.models import (
     ListInvestigationsResponse,
     PREFER_ASYNC_HEADER_VALUE,
     ProposalResultResponse,
+    ReadinessResponse,
     StageSummaryResponse,
     SubmitApprovalRequest,
     SubmitApprovalResponse,
@@ -595,6 +599,134 @@ def health(request: Request) -> JSONResponse:
     """GET /health - Liveness probe."""
     resp = HealthResponse()
     return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+# ---------------------------------------------------------------------------
+# Operational readiness (GET /ready)
+#
+# /ready performs a real, read-only check of the persistence backend and
+# reports 200 (ready) or a fixed 503 (not ready). Probes run on a dedicated
+# executor with fixed admission capacity: at most _READY_MAX_CONCURRENCY probes
+# run at once, and a probe that outlives the HTTP deadline keeps its slot until
+# the underlying operation actually finishes, so abandoned work cannot
+# accumulate. Anything beyond that capacity fails fast with the same fixed 503.
+# The admission cap lives here rather than in an AnyIO limiter, which would
+# release its token as soon as the waiting coroutine is cancelled.
+# ---------------------------------------------------------------------------
+
+ENV_READINESS_TIMEOUT_SECONDS = "SENTINEL_READINESS_TIMEOUT_SECONDS"
+DEFAULT_READINESS_TIMEOUT_SECONDS = 2.0
+#: Upper bound on the configured readiness HTTP deadline. A larger configured
+#: value would let a single request pin a scarce admission slot (and an AnyIO
+#: worker thread) for an arbitrarily long time, so valid values above this
+#: ceiling are clamped down to it rather than honoured.
+MAX_READINESS_TIMEOUT_SECONDS = 30.0
+
+_READY_MAX_WORKERS = 2
+_READY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_READY_MAX_WORKERS, thread_name_prefix="sentinel-ready"
+)
+# Capacity is derived from the executor's *actual* worker count rather than a
+# duplicated literal, so the admission cap and the worker count cannot drift
+# apart: every admitted probe is guaranteed a free worker and therefore never
+# queues in the executor.
+_READY_MAX_CONCURRENCY = _READY_EXECUTOR._max_workers
+_READY_SLOTS = threading.BoundedSemaphore(_READY_MAX_CONCURRENCY)
+
+_READINESS_READY_BODY = ReadinessResponse(status="ready", checks={"persistence": "ok"})
+_READINESS_NOT_READY_BODY = ReadinessResponse(
+    status="not_ready", checks={"persistence": "unavailable"}
+)
+
+
+def _parse_readiness_timeout(raw: Optional[str]) -> float:
+    """Parse the readiness deadline, falling back to the default when invalid.
+
+    An absent, empty, non-numeric, non-finite, zero or negative value yields the
+    default; a valid value above :data:`MAX_READINESS_TIMEOUT_SECONDS` is clamped
+    down to that ceiling. The configured value is never echoed back to a caller.
+    """
+    if raw is None:
+        return DEFAULT_READINESS_TIMEOUT_SECONDS
+    token = str(raw).strip()
+    if not token:
+        return DEFAULT_READINESS_TIMEOUT_SECONDS
+    try:
+        value = float(token)
+    except (TypeError, ValueError):
+        return DEFAULT_READINESS_TIMEOUT_SECONDS
+    if not math.isfinite(value) or value <= 0.0:
+        return DEFAULT_READINESS_TIMEOUT_SECONDS
+    return min(value, MAX_READINESS_TIMEOUT_SECONDS)
+
+
+def _readiness_timeout_seconds() -> float:
+    """Resolve the configured readiness HTTP deadline in seconds."""
+    return _parse_readiness_timeout(os.getenv(ENV_READINESS_TIMEOUT_SECONDS))
+
+
+def _release_ready_slot(future: "concurrent.futures.Future") -> None:
+    """Release the admission slot once the probe has actually finished.
+
+    Registered as a done callback so that a probe which outlives the HTTP
+    deadline keeps holding its slot until the underlying operation returns.
+    """
+    _READY_SLOTS.release()
+
+
+def _readiness_response(ready: bool) -> JSONResponse:
+    """Build the fixed allowlisted readiness response (200 ready / 503 not)."""
+    if ready:
+        return JSONResponse(status_code=200, content=_READINESS_READY_BODY.model_dump())
+    return JSONResponse(status_code=503, content=_READINESS_NOT_READY_BODY.model_dump())
+
+
+def readiness(request: Request) -> JSONResponse:
+    """GET /ready - Readiness probe backed by a real persistence check.
+
+    Returns 200 only when the persistence backend answered the read-only probe
+    within the configured deadline. Every failure — backend error, response
+    deadline exceeded, absent repository, or exhausted admission capacity — maps
+    to the same fixed, sanitised 503 body; backend details (exception messages,
+    paths, credentials, DSNs, connection details) are never exposed.
+    """
+    repository = getattr(request.app.state, "repository", None)
+    if repository is None:
+        return _readiness_response(ready=False)
+
+    # Non-blocking admission control: refuse excess work instead of queueing it.
+    if not _READY_SLOTS.acquire(blocking=False):
+        logger.warning("Readiness probe rejected: admission capacity exhausted")
+        return _readiness_response(ready=False)
+
+    try:
+        future = _READY_EXECUTOR.submit(repository.probe)
+    except Exception as exc:  # noqa: BLE001 - scheduling failure must fail closed
+        _READY_SLOTS.release()
+        logger.warning("Readiness probe could not be scheduled (%s)", type(exc).__name__)
+        return _readiness_response(ready=False)
+
+    # The slot is held until the probe genuinely completes, not until the
+    # response is sent, so a timed-out probe does not free capacity early.
+    future.add_done_callback(_release_ready_slot)
+
+    try:
+        future.result(timeout=_readiness_timeout_seconds())
+    except concurrent.futures.TimeoutError:
+        # ``concurrent.futures.TimeoutError`` is the builtin ``TimeoutError``, so
+        # this branch also catches a probe that raised ``TimeoutError`` itself. A
+        # finished future means the probe failed on its own; only an unfinished
+        # future is a genuine response-deadline expiry. Both yield the same fixed
+        # 503 body, but the distinction is kept in the log for operability.
+        if future.done():
+            logger.warning("Readiness probe failed (TimeoutError)")
+        else:
+            logger.warning("Readiness probe exceeded the response deadline")
+        return _readiness_response(ready=False)
+    except Exception as exc:  # noqa: BLE001 - any probe failure means "not ready"
+        logger.warning("Readiness probe failed (%s)", type(exc).__name__)
+        return _readiness_response(ready=False)
+    return _readiness_response(ready=True)
 
 
 def _get_ingestion_limits(request: Request) -> IngestionLimits:

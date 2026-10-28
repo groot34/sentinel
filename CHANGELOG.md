@@ -2,6 +2,25 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission21] - Unreleased (implementation complete; local validation only)
+
+### Added
+- **Operational readiness endpoint (`GET /ready`)** — a public dependency check that reports whether the persistence backend is actually reachable, complementing the static liveness probe. `GET /health` is unchanged (still a fixed `{"status","service","version"}` liveness payload).
+  - **Contract**: `200` with `{"status":"ready","checks":{"persistence":"ok"}}` when the backend answered the probe within the deadline, otherwise `503` with `{"status":"not_ready","checks":{"persistence":"unavailable"}}`. The schema is a fixed allowlist — backend exception messages, paths, credentials, DSNs and connection details are never projected into the response (or the logs).
+  - **Read-only probe** (`PersistenceRepository.probe()`): a new non-abstract method whose default implementation calls `self.list()`. `PostgresRepository` overrides it with a lightweight `SELECT 1` that uses the existing pool, a bounded per-acquisition timeout, and a transaction-scoped `SET LOCAL statement_timeout`. No migration, dependency, or persistence-semantics change.
+  - **Bounded, fail-fast admission control**: probes run on a dedicated module-level `ThreadPoolExecutor(max_workers=2, thread_name_prefix="sentinel-ready")` guarded by a non-blocking `BoundedSemaphore(2)`. Excess requests are rejected immediately with the standard `503` body instead of being queued, and a probe that outlives the HTTP deadline keeps its capacity slot until the underlying operation actually finishes — so abandoned work stays bounded and cannot accumulate.
+  - **`SENTINEL_READINESS_TIMEOUT_SECONDS`** (default `2.0`): HTTP response deadline for `/ready`. Absent, empty, non-numeric, non-finite, zero, or negative values fall back to `2.0`, and valid positive values are capped at `30.0`; the configured value is never echoed to a caller. The bound applies to the HTTP response only — it does not guarantee the lifetime of a blocked filesystem or PostgreSQL operation, which remains constrained by the readiness admission capacity.
+
+### Changed
+- **`api/app.py`**: registered `Route("/ready", endpoint=readiness, methods=["GET"])`. `/health` is untouched.
+- **`api/auth.py`**: added `/ready` to `PUBLIC_PATHS`, so it remains reachable when `SENTINEL_API_AUTH_PROTECT_READS=1`; every other route keeps its existing protection policy.
+- **`api/models.py`**: added the allowlisted `ReadinessResponse` model.
+- **`.env.example`**: added `SENTINEL_READINESS_TIMEOUT_SECONDS=2.0`.
+
+### Notes / Limitations
+- **Known limitation**: the filesystem probe and PostgreSQL network I/O are **not** strictly bounded by the HTTP deadline — a blocked syscall or network operation can outlive the response. Such work is nevertheless capped by the readiness admission capacity (two slots), and a slot is only returned when the operation genuinely completes.
+- **Validation status**: implementation complete, **local validation only**. `tests/test_api_readiness.py` — 35 focused offline tests (and 64 in `tests/test_api_auth.py`); full offline suite **983 passed / 55 skipped / 1 warning**; incident validation 51/51; `git diff --check` clean. **No CI run exists for Mission 21 yet**, and **PostgreSQL integration was not exercised locally** (the `PostgresRepository.probe()` override is unverified against a live database).
+
 ## [2.0.0-mission20] - Unreleased (implementation complete; local validation only)
 
 ### Added

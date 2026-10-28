@@ -19,7 +19,9 @@ Design rules
 * Only ``GET``, ``HEAD`` and ``OPTIONS`` are considered safe. Every other method
   is protected automatically, so a future mutating route is protected without
   further wiring. Optional read protection (``SENTINEL_API_AUTH_PROTECT_READS``)
-  extends the guard to safe methods; ``/health`` stays public regardless.
+  extends the guard to safe methods; the public probe paths (``/health`` and
+  ``/ready``) stay reachable for **safe methods only** — a non-safe method on the
+  same path is still guarded.
 * The guard is a **pure ASGI** middleware, not ``BaseHTTPMiddleware``: for
   authorised requests the same ``receive``/``send`` callables are passed to the
   downstream app unchanged, so Server-Sent Events streaming and Starlette
@@ -60,8 +62,11 @@ _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 #: Methods treated as safe (idempotent, non-mutating) unless read protection is on.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-#: Paths that stay public even when read protection is enabled.
-PUBLIC_PATHS = frozenset({"/health"})
+#: Paths whose safe-method requests stay public even when read protection is on.
+#: The exemption is method-scoped: a non-safe method on one of these paths is
+#: still guarded, so a future mutating route added here cannot be silently
+#: exposed by an entry in this set.
+PUBLIC_PATHS = frozenset({"/health", "/ready"})
 
 _BEARER_PREFIX = "bearer "
 
@@ -193,12 +198,13 @@ class ApiKeyAuthMiddleware:
         if not self.config.enabled or scope.get("type") != "http":
             return False
 
-        path = scope.get("path", "")
-        if path in PUBLIC_PATHS:
-            return False
-
         method = str(scope.get("method") or "GET").upper()
         if method in SAFE_METHODS:
+            # The public probe paths bypass the guard for safe methods only. A
+            # non-safe method on the same path does not reach this branch, so it
+            # still hits the default-deny return below.
+            if scope.get("path", "") in PUBLIC_PATHS:
+                return False
             # Safe methods are only guarded when read protection is explicitly on.
             return self.config.protect_reads
         return True

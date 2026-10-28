@@ -431,6 +431,24 @@ def test_health_stays_public_under_read_protection(incidents_root: Path):
     assert client.get("/health").status_code == 200
 
 
+def test_public_probe_paths_bypass_auth_for_safe_methods_only(incidents_root: Path):
+    """`/health` and `/ready` are public for safe methods, guarded otherwise.
+
+    The public-path exemption is method-scoped: a non-safe method on the same
+    path is default-denied by the guard (401) rather than reaching the router.
+    """
+    client = _enabled_client(incidents_root, protect_reads=True)
+
+    # Safe methods stay reachable without credentials.
+    assert client.get("/health").status_code == 200
+    assert client.get("/ready").status_code == 200
+    assert client.head("/health").status_code == 200
+
+    # Non-safe methods on the same public paths are still protected.
+    assert client.post("/health").status_code == 401
+    assert client.post("/ready").status_code == 401
+
+
 def test_read_protection_on_accepts_valid_credential(incidents_root: Path):
     client = _enabled_client(incidents_root, protect_reads=True)
     assert client.get("/investigations", headers=_bearer(SECRET_KEY)).status_code == 200

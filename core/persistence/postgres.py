@@ -36,6 +36,11 @@ from core.persistence.retry import (
 
 SCHEMA_FILE = Path(__file__).parent / "sql" / "001_initial_schema.sql"
 
+#: Bounded connection-acquisition timeout (seconds) for the readiness probe.
+#: Caps how long the probe waits for a pooled connection, independently of the
+#: HTTP response deadline enforced by the API layer.
+_PROBE_ACQUISITION_TIMEOUT_SECONDS = 2.0
+
 
 class PostgresRepository(PersistenceRepository):
     """PostgreSQL implementation of PersistenceRepository."""
@@ -468,6 +473,38 @@ class PostgresRepository(PersistenceRepository):
                     return [row[0] for row in cur.fetchall()]
         except psycopg.Error as e:
             raise PersistenceError(f"Database error listing investigations: {e}") from e
+
+    def probe(self) -> None:
+        """Lightweight, read-only readiness probe backed by ``SELECT 1``.
+
+        Acquires a pooled connection with a bounded acquisition timeout and
+        caps the server-side statement via a transaction-scoped
+        ``SET LOCAL statement_timeout``, so neither a saturated pool nor a
+        stuck query can pin the probe indefinitely.
+
+        Limitations: ``SET LOCAL`` bounds *server-side* statement execution and
+        the acquisition timeout bounds *pool waits*, but neither bounds every
+        possible network stall — a partially established connection can still
+        block beyond the HTTP response deadline. The API layer keeps such
+        abandoned probes bounded by its fixed readiness admission capacity.
+
+        Raises:
+            PersistenceError: If the database is unreachable or the probe fails.
+        """
+        statement_timeout_ms = max(1, int(_PROBE_ACQUISITION_TIMEOUT_SECONDS * 1000))
+        try:
+            with self._pool.connection(timeout=_PROBE_ACQUISITION_TIMEOUT_SECONDS) as conn:
+                with conn.cursor() as cur:
+                    # Transaction-scoped: applies only while this implicit
+                    # transaction is open, so it cannot leak to other users of
+                    # the pooled connection. Skipped in autocommit mode, where
+                    # a local setting would be a no-op.
+                    if not conn.autocommit:
+                        cur.execute(f"SET LOCAL statement_timeout = {statement_timeout_ms}")
+                    cur.execute("SELECT 1;")
+                    cur.fetchone()
+        except psycopg.Error as e:
+            raise PersistenceError("Database readiness probe failed") from e
 
     # -----------------------------------------------------------------------
     # Outbox Event Persistence Methods

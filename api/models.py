@@ -53,6 +53,20 @@ class HealthResponse(BaseModel):
     version: str = "2.0"
 
 
+class ReadinessResponse(BaseModel):
+    """Readiness probe response for GET /ready.
+
+    A fixed allowlist: only the overall status plus a ``checks`` object whose
+    values are stable, non-descriptive status tokens. Backend exception
+    messages, paths, credentials, DSNs and connection details are never
+    projected into this payload.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    status: str = "ready"
+    checks: Dict[str, str] = Field(default_factory=dict)
+
+
 class StageSummaryResponse(BaseModel):
     """Allowlisted summary of an individual pipeline stage."""
     model_config = ConfigDict(extra="forbid")

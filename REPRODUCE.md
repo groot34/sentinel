@@ -288,7 +288,7 @@ SENTINEL_API_AUTH_ENABLED=1 SENTINEL_API_KEY="$(cat /run/secrets/sentinel_api_ke
 
 When enabled, **all methods other than `GET`/`HEAD`/`OPTIONS` are protected** (so future mutating
 routes are covered automatically). `SENTINEL_API_AUTH_PROTECT_READS=true` additionally protects
-`GET`/`HEAD`/`OPTIONS`, except `/health`, which stays public. Send the key as a bearer token:
+`GET`/`HEAD`/`OPTIONS`, except `/health` and `/ready`, which stay public for those safe methods (a non-safe method on either path is still protected). Send the key as a bearer token:
 
 ```bash
 # Authorised request (mutating routes need the header when auth is enabled)
@@ -329,7 +329,7 @@ They cover default-disabled compatibility, missing/wrong/empty/malformed-scheme/
 credentials, valid credentials on sync + async investigation creation, resume/approval routes,
 ingestion independence, fail-closed construction (argument and environment) plus non-zero startup
 exit without credential leakage, secret non-leakage in responses/logs, `hmac.compare_digest` usage,
-read-protection off/on with `/health` public, SSE streaming intact, a route-coverage regression
+read-protection off/on with safe-method `/health` and `/ready` public, SSE streaming intact, a route-coverage regression
 test proving every non-safe method is protected by default, rejection before a protected request
 body is consumed, indistinguishable missing-vs-wrong responses, duplicate `Authorization` header
 rejection, the sanitised warning for an unrecognised `SENTINEL_API_AUTH_ENABLED` value, accepted
@@ -472,7 +472,10 @@ cp .env.example .env
 # API-key authentication is DISABLED by default and independent of ingestion:
 #   SENTINEL_API_AUTH_ENABLED=1                # enable the guard (1/true/yes/on)
 #   SENTINEL_API_KEY=change-me                 # REQUIRED and non-blank when enabled (never commit a real key)
-#   SENTINEL_API_AUTH_PROTECT_READS=false      # also protect GET/HEAD/OPTIONS (except /health)
+#   SENTINEL_API_AUTH_PROTECT_READS=false      # also protect GET/HEAD/OPTIONS (except safe-method /health and /ready)
+#
+# Readiness probe (Mission 21):
+#   SENTINEL_READINESS_TIMEOUT_SECONDS=2.0     # HTTP deadline for GET /ready (invalid values fall back to 2.0; valid positive values capped at 30.0)
 ```
 
 ### CLI options
@@ -490,6 +493,23 @@ cp .env.example .env
 curl http://127.0.0.1:8000/health
 # {"status":"ok","service":"sentinel","version":"2.0"}
 ```
+
+### Readiness check (Mission 21)
+
+```bash
+# Public for safe methods even under SENTINEL_API_AUTH_PROTECT_READS=true
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/ready
+# 200
+curl -s http://127.0.0.1:8000/ready
+# {"status":"ready","checks":{"persistence":"ok"}}
+# -> 503 {"status":"not_ready","checks":{"persistence":"unavailable"}} when persistence is unreachable
+```
+`/ready` runs a real, read-only persistence probe (bounded by `SENTINEL_READINESS_TIMEOUT_SECONDS`,
+default `2.0`; valid positive values capped at `30.0`) on a two-worker executor with fail-fast
+admission control; the body is a fixed allowlist and never exposes exceptions, paths, credentials or
+DSNs. The timeout bounds the **HTTP response deadline only**, not necessarily the lifetime of a
+blocked filesystem or PostgreSQL operation — such work is not strictly cancellable and can outlive the
+deadline, but it remains constrained by the readiness admission capacity (two slots).
 
 ## Event Delivery Worker
 

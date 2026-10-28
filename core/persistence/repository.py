@@ -155,3 +155,16 @@ class PersistenceRepository(ABC):
             Sorted list of investigation IDs that have valid-looking state.
         """
         raise NotImplementedError
+
+    def probe(self) -> None:
+        """Perform a lightweight, read-only readiness probe.
+
+        The default implementation lists investigation IDs, which exercises the
+        storage backend without mutating it. Subclasses with a cheaper or more
+        representative health check may override this, but any override must
+        stay read-only and must raise on failure.
+
+        Raises:
+            PersistenceError: If the backend is unreachable or the probe fails.
+        """
+        self.list()

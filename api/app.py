@@ -26,6 +26,7 @@ from api.routes import (
     health,
     list_investigation_events,
     list_investigations,
+    readiness,
     resume_investigation,
     submit_approval,
 )
@@ -70,7 +71,8 @@ def create_app(
             is read from SENTINEL_API_KEY.
         auth_protect_reads: Also protect safe methods (GET/HEAD/OPTIONS) when
             True. When None the flag is read from SENTINEL_API_AUTH_PROTECT_READS
-            (disabled by default). /health always stays public.
+            (disabled by default). /health and /ready stay public for safe
+            methods only.
 
     Returns:
         Configured Starlette application.
@@ -89,6 +91,7 @@ def create_app(
 
     routes = [
         Route("/health", endpoint=health, methods=["GET"]),
+        Route("/ready", endpoint=readiness, methods=["GET"]),
         Route("/incidents", endpoint=create_incident, methods=["POST"]),
         Route("/investigations", endpoint=create_investigation, methods=["POST"]),
         Route("/investigations", endpoint=list_investigations, methods=["GET"]),
