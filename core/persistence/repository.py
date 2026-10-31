@@ -168,3 +168,14 @@ class PersistenceRepository(ABC):
             PersistenceError: If the backend is unreachable or the probe fails.
         """
         self.list()
+
+    def close(self) -> None:
+        """Release any resources owned by this repository.
+
+        The default implementation is a no-op: in-memory and filesystem
+        backends hold no resource that requires explicit cleanup. Backends that
+        own a connection pool (such as ``PostgresRepository``) override this.
+        Implementations must tolerate being called more than once, since
+        application shutdown may release resources more than once.
+        """
+        return None

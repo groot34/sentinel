@@ -8,6 +8,11 @@ Usage:
     python -m api --incidents-root /path/to/incidents
 
 Environment variables (read after loading .env):
+    LOG_LEVEL                      Application log level for the API and the
+                                   event worker (DEBUG/INFO/WARNING/ERROR/
+                                   CRITICAL; default: INFO)
+    INCIDENTS_DIR                  Incident-bundles directory (default:
+                                   'incidents'); overridden by --incidents-root
     SENTINEL_PERSISTENCE_BACKEND   'filesystem' (default) or 'postgres'
     SENTINEL_PERSISTENCE_ROOT      Root dir for filesystem backend
                                    (default: .sentinel_persistence)
@@ -35,8 +40,12 @@ When the guard is enabled, every method other than GET/HEAD/OPTIONS must send
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+#: Environment variable holding the incident-bundles directory.
+ENV_INCIDENTS_DIR = "INCIDENTS_DIR"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -67,7 +76,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         dest="incidents_root",
         help=(
-            "Path to the incident bundles directory "
+            "Path to the incident bundles directory. Overrides the "
+            "INCIDENTS_DIR environment variable "
             "(default: 'incidents' relative to the working directory)."
         ),
     )
@@ -85,6 +95,12 @@ def main() -> None:
     from dotenv import load_dotenv
     load_dotenv()
 
+    # Configure application logging from LOG_LEVEL. The same helper is used by
+    # the event worker, so both processes honour one setting. Only Sentinel's own
+    # loggers are levelled; uvicorn keeps its own --log-level.
+    from core.logging_config import configure_logging
+    configure_logging()
+
     # Select persistence backend from environment (populated above from .env if present).
     # SENTINEL_PERSISTENCE_BACKEND: 'filesystem' (default) or 'postgres'
     # SENTINEL_PERSISTENCE_ROOT:   filesystem root dir (default: .sentinel_persistence)
@@ -98,9 +114,16 @@ def main() -> None:
         print(f"ERROR: Failed to initialise persistence backend: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Resolve incidents root: None preserves create_app()'s own default of Path("incidents").
+    # Resolve incidents root. Precedence: --incidents-root, then INCIDENTS_DIR,
+    # then None so create_app() keeps its own Path("incidents") default. That
+    # default matches the Compose volume mounted at /app/incidents.
+    incidents_root_value = args.incidents_root
+    if incidents_root_value is None:
+        raw_incidents_dir = os.getenv(ENV_INCIDENTS_DIR)
+        incidents_root_value = raw_incidents_dir.strip() if raw_incidents_dir else None
+        incidents_root_value = incidents_root_value or None
     incidents_root: Path | None = (
-        Path(args.incidents_root) if args.incidents_root is not None else None
+        Path(incidents_root_value) if incidents_root_value is not None else None
     )
 
     # Construct the Starlette application.

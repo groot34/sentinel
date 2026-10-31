@@ -1,0 +1,21 @@
+# Sentinel — test/development-only dependencies.
+#
+# Layered on top of the pinned runtime set so a single install gives a complete
+# working environment:
+#
+#     pip install -r requirements-dev.txt
+#
+# The API Docker image must NOT use this file; it installs
+# requirements-runtime.txt only.
+
+-r requirements-runtime.txt
+
+# --- Direct development/test dependencies ----------------------------------
+# pytest is held at 8.2.2 on purpose: the 9.x line aggravates flakiness in the
+# timing-sensitive SSE keep-alive test.
+pytest==8.2.2
+
+# --- Transitive development/test dependencies ------------------------------
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
@@ -21,6 +24,7 @@ from api.errors import (
 from api.routes import (
     create_incident,
     create_investigation,
+    create_readiness_runtime,
     get_investigation,
     get_investigation_result,
     health,
@@ -28,6 +32,7 @@ from api.routes import (
     list_investigations,
     readiness,
     resume_investigation,
+    shutdown_readiness_executor,
     submit_approval,
 )
 from agents.bundle_ingest import (
@@ -43,6 +48,40 @@ from core.persistence import (
     PersistenceError,
     PersistenceRepository,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def _shutdown_application(app: Starlette) -> None:
+    """Release every resource owned by the application. Single-shot.
+
+    Runs in the lifespan's ``finally`` block, so teardown still happens when
+    startup or request handling has failed. The call is idempotent: a second
+    shutdown (for example a duplicate signal handler) must not close the
+    repository pool or the readiness executor twice.
+
+    Closing a connection pool is blocking — it waits for the pool's worker
+    threads, bounded by the pool's own close timeout — so it is off-loaded to a
+    worker thread rather than stalling the event loop. Each resource is released
+    independently: a failure in one is logged and must not abort the other.
+    """
+    if getattr(app.state, "shutdown_complete", False):
+        return
+    app.state.shutdown_complete = True
+
+    repository = getattr(app.state, "repository", None)
+    runtime = getattr(app.state, "readiness_runtime", None)
+
+    if repository is not None:
+        try:
+            # PersistenceRepository.close() is a no-op for backends without a
+            # pool (filesystem, in-memory) and closes the pool for PostgreSQL.
+            await asyncio.to_thread(repository.close)
+        except Exception as exc:  # noqa: BLE001 - teardown must not raise
+            logger.warning("Repository close failed (%s)", type(exc).__name__)
+
+    if runtime is not None:
+        shutdown_readiness_executor(runtime.executor)
 
 
 def create_app(
@@ -110,16 +149,40 @@ def create_app(
         Exception: generic_exception_handler,
     }
 
+    @contextlib.asynccontextmanager
+    async def lifespan(app: Starlette) -> AsyncIterator[None]:
+        """Own and release the resources belonging to this application instance.
+
+        Startup creates the readiness probe runtime this application owns;
+        requests are not served until it completes. Teardown sits in ``finally``
+        so resources are still released when startup fails part-way or request
+        handling has crashed. The repository is released through
+        ``PersistenceRepository.close`` — a no-op for backends without a pool —
+        and the readiness executor is shut down without waiting on abandoned
+        probes, so shutdown cannot hang the API indefinitely.
+        """
+        try:
+            app.state.readiness_runtime = create_readiness_runtime()
+            app.state.shutdown_complete = False
+            yield
+        finally:
+            await _shutdown_application(app)
+
     app = Starlette(
         debug=False,
         routes=routes,
         exception_handlers=exception_handlers,
         middleware=[Middleware(ApiKeyAuthMiddleware, config=auth_config)],
+        lifespan=lifespan,
     )
 
     # Expose a redacted view: enablement state is introspectable, but the
     # secret is retained only inside the middleware, never on app.state.
     app.state.auth_config = auth_config.redacted()
+    # The application owns the repository for the duration of its lifespan: an
+    # injected repository (created by the entry point) and the default
+    # filesystem repository are both released on shutdown. The default is a
+    # no-op, so backends without a pool keep working unchanged.
     app.state.repository = repository if repository is not None else FilesystemRepository()
     app.state.incidents_root = Path(incidents_root) if incidents_root is not None else Path("incidents")
     app.state.llm_client = llm_client

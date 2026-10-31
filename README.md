@@ -487,6 +487,8 @@ are applied automatically (shell values take precedence).
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `LOG_LEVEL` | `INFO` | Application log level, applied identically by the API and the event worker (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, case-insensitive). Absent, empty or unrecognised values fall back to `INFO`. Only Sentinel's own loggers are levelled — third-party libraries keep their own levels, and Uvicorn keeps its `--log-level` flag |
+| `INCIDENTS_DIR` | `incidents` | Directory holding the incident bundles, read by the API launcher for bundle validation and ingestion. Overridden by the `--incidents-root` CLI flag. The default matches the Compose volume mounted at `/app/incidents` |
 | `SENTINEL_PERSISTENCE_BACKEND` | `filesystem` | `filesystem` or `postgres` |
 | `SENTINEL_PERSISTENCE_ROOT` | `.sentinel_persistence` | Root dir for the filesystem backend |
 | `SENTINEL_DATABASE_URL` | — | PostgreSQL connection URL (`postgres` backend only) |

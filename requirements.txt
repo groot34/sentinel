@@ -1,10 +1,12 @@
-pydantic>=2.0.0
-jsonschema>=4.20.0
-python-dotenv>=1.0.0
-pytest>=8.0.0
-requests>=2.31.0
-groq>=0.9.0
-psycopg[binary]>=3.1.0
-psycopg-pool>=3.2.0
-starlette>=1.0.0
-uvicorn>=0.20.0
+# Sentinel dependency entry point — installs the full development environment
+# (runtime + test/dev tooling):
+#
+#     pip install -r requirements.txt
+#
+# Layered structure:
+#   requirements-runtime.txt  production pins only (used by the Docker image)
+#   requirements-dev.txt      test/dev pins, layered on the runtime pins
+#
+# This file stays the single documented install command so the existing
+# workflow (Makefile `setup`, CI, README/REPRODUCE instructions) is unchanged.
+-r requirements-dev.txt

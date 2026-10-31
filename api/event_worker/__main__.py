@@ -7,6 +7,8 @@ Usage:
 
 Environment variables:
     SENTINEL_DATABASE_URL  PostgreSQL connection URL (required)
+    LOG_LEVEL              Application log level, shared with the API
+                           (DEBUG/INFO/WARNING/ERROR/CRITICAL; default: INFO)
 """
 
 from __future__ import annotations

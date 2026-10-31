@@ -1,5 +1,5 @@
-# Sentinel 2.0 - Local Development PostgreSQL Service
-# LOCAL DEVELOPMENT ONLY - Do not use for production deployments.
+# Sentinel 2.0 — Local Development Stack
+# LOCAL DEVELOPMENT ONLY — Do not use for production deployments.
 #
 # Schema Ownership Note:
 # Schema migrations are authoritatively owned and managed by the Sentinel application
@@ -8,28 +8,101 @@
 # cause dual-execution ambiguities with the application migration runner.
 # Both fresh instances and existing volumes are safely initialized via:
 #   python -m core.persistence.schema apply
+# This Compose file does NOT run migrations. Apply them explicitly from the host, e.g.
+#   make db-migrate
+#
+# Services:
+#   postgres         PostgreSQL 16 — durable state shared by the API and the outbox worker.
+#   sentinel-api     HTTP API (`python -m api`, the image's default CMD) on container port 8000.
+#   sentinel-worker  Outbox delivery worker (`python -m api.event_worker`).
+#
+# Both application services reuse the one image built from ./Dockerfile, run as the
+# image's non-root user (uid 10001), and reach PostgreSQL through the service name
+# `postgres` on the Compose network. Credentials are taken from the host environment
+# with local-development defaults; no secret is committed and no populated .env is
+# required.
 
-version: "3.8"
-
+# Shared configuration for the two application services.
+x-sentinel-service: &sentinel-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: ${SENTINEL_IMAGE:-sentinel-api:local}
+  restart: unless-stopped
+  # tini as PID 1 reaps children and forwards SIGTERM/SIGINT to the Python process.
+  init: true
+  depends_on:
+    postgres:
+      condition: service_healthy
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: sentinel-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: sentinel_dev_password
-      POSTGRES_DB: sentinel_db
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel_db}
+    # Bound to loopback only so the local-development database is not reachable from
+    # outside the host. Host port is configurable via POSTGRES_HOST_PORT.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - sentinel_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel} -d ${POSTGRES_DB:-sentinel_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  sentinel-api:
+    <<: *sentinel-service
+    environment:
+      # PostgreSQL is the shared backend for the API and the worker.
+      SENTINEL_PERSISTENCE_BACKEND: postgres
+      SENTINEL_DATABASE_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel_dev_password}@postgres:5432/${POSTGRES_DB:-sentinel_db}
+      # LLM credentials are passed through from the host; never committed here.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      # Safe defaults preserved: ingestion and API-key auth stay opt-in, and the
+      # /ready HTTP deadline keeps its documented default.
+      SENTINEL_ALLOW_INCIDENT_INGESTION: ${SENTINEL_ALLOW_INCIDENT_INGESTION:-false}
+      SENTINEL_API_AUTH_ENABLED: ${SENTINEL_API_AUTH_ENABLED:-false}
+      SENTINEL_API_KEY: ${SENTINEL_API_KEY:-}
+      SENTINEL_API_AUTH_PROTECT_READS: ${SENTINEL_API_AUTH_PROTECT_READS:-false}
+      SENTINEL_READINESS_TIMEOUT_SECONDS: ${SENTINEL_READINESS_TIMEOUT_SECONDS:-2.0}
+    # Container port 8000 is the image's uvicorn port; the host side is configurable.
+    ports:
+      - "${SENTINEL_API_HOST_PORT:-8000}:8000"
+    volumes:
+      # Incident bundles are read (investigation) and written (opt-in ingestion) here.
+      - sentinel_incidents:/app/incidents
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+
+  sentinel-worker:
+    <<: *sentinel-service
+    # The image's default CMD starts the HTTP API; the worker is a different run mode.
+    command: ["python", "-m", "api.event_worker"]
+    # The image HEALTHCHECK probes GET /ready, which only the API serves. Disable it
+    # for the worker so it is not reported unhealthy by design.
+    healthcheck:
+      disable: true
+    environment:
+      # The worker hard-requires the PostgreSQL backend (atomic outbox claims) and
+      # needs no other configuration.
+      SENTINEL_PERSISTENCE_BACKEND: postgres
+      SENTINEL_DATABASE_URL: postgresql://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel_dev_password}@postgres:5432/${POSTGRES_DB:-sentinel_db}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+
 volumes:
   sentinel_pgdata:
+  # Incident bundles, persisted independently of the API container lifecycle.
+  sentinel_incidents:

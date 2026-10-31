@@ -454,6 +454,10 @@ cp .env.example .env
 #   GROQ_API_KEY=gsk_your_key_here
 #   GROQ_MODEL=openai/gpt-oss-120b   (already the default)
 #
+# Runtime configuration:
+#   LOG_LEVEL=INFO                  # api + worker application log level (DEBUG/INFO/WARNING/ERROR/CRITICAL; invalid values fall back to INFO)
+#   INCIDENTS_DIR=incidents         # incident bundles directory (overridden by --incidents-root)
+#
 # Persistence (filesystem is the default, no extra config needed):
 #   SENTINEL_PERSISTENCE_BACKEND=filesystem
 #   SENTINEL_PERSISTENCE_ROOT=.sentinel_persistence
@@ -485,7 +489,7 @@ cp .env.example .env
 | `--host` | `127.0.0.1` | Bind address |
 | `--port` | `8000` | Listen port |
 | `--log-level` | `info` | Uvicorn log level (`debug`, `info`, `warning`, `error`) |
-| `--incidents-root` | `incidents` | Path to incident bundles directory |
+| `--incidents-root` | `INCIDENTS_DIR`, else `incidents` | Path to incident bundles directory (overrides the `INCIDENTS_DIR` environment variable) |
 
 ### Health check
 

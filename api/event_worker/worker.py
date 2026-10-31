@@ -17,14 +17,17 @@ from __future__ import annotations
 import logging
 import os
 import random
+import signal
 import socket
-import time
+import threading
+import time  # poll-loop pacing; also patched by tests to assert no in-batch sleeping
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from core.events.base import DomainEvent
 from core.events.bus import EventBus, InMemoryEventBus
+from core.logging_config import configure_logging
 from core.persistence.outbox import OutboxEvent
 from core.persistence.postgres import PostgresRepository
 
@@ -72,6 +75,22 @@ def _missing_delivery_methods(repository: object) -> list:
     ]
 
 
+def _close_repository(repository: object) -> None:
+    """Release resources owned by the worker's repository on exit.
+
+    Called on the normal shutdown path, never from a signal handler. A backend
+    without a pool (or a fake without ``close``) is a no-op; a failure is logged
+    rather than raised, because the process is exiting anyway.
+    """
+    close = getattr(repository, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception as exc:  # noqa: BLE001 - exiting must not fail
+        logger.warning("Repository close failed (%s)", type(exc).__name__)
+
+
 class EventDeliveryWorker:
     """Background worker that delivers outbox events to EventBus."""
 
@@ -116,10 +135,65 @@ class EventDeliveryWorker:
         self.retry_max_delay = retry_max_delay
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._rng = rng or random.Random()
+        # Shutdown signal/state for the delivery loop. Set once by a signal
+        # handler or a direct call, then observed by the loop between batches.
+        self._shutdown_event = threading.Event()
         self._running = False
 
+    @property
+    def shutdown_requested(self) -> bool:
+        """True once a clean shutdown has been requested."""
+        return self._shutdown_event.is_set()
+
+    def install_signal_handlers(
+        self, signals: Sequence[int] = (signal.SIGTERM, signal.SIGINT)
+    ) -> None:
+        """Route SIGTERM/SIGINT to a shutdown request.
+
+        The installed handler only records the request: it performs no database
+        access and no cleanup, so it is safe to run at signal time. Signals the
+        platform cannot handle, or a call from a non-main thread, are skipped
+        rather than raising.
+        """
+        for sig in signals:
+            try:
+                signal.signal(sig, self.request_shutdown)
+            except (ValueError, OSError) as exc:
+                logger.debug("Cannot install handler for signal %s: %s", sig, exc)
+
+    def request_shutdown(
+        self, signum: Optional[int] = None, frame: object = None
+    ) -> None:
+        """Request a clean shutdown of the delivery loop.
+
+        Signal-handler safe: it only sets a flag. The loop observes it and stops
+        before starting the next batch, so the batch already in flight finishes
+        on the normal delivery path. Repeated calls are harmless.
+        """
+        self._shutdown_event.set()
+        self._running = False
+
+    def stop(self) -> None:
+        """Request the worker loop to stop at the next iteration."""
+        self.request_shutdown()
+
     def start(self) -> None:
-        """Start the event delivery worker loop until :meth:`stop` is called."""
+        """Run the delivery loop until :meth:`request_shutdown` is called.
+
+        A shutdown request stops the loop before it begins another batch and
+        wakes the poll wait immediately, so the batch already in flight finishes
+        without the worker waiting out the poll interval. Any claim that an
+        interrupted batch could not complete is left in the outbox for the
+        claim-expiry sweep to recover — shutdown never marks an undelivered
+        event as delivered.
+        """
+        if self._shutdown_event.is_set():
+            logger.info(
+                "Event delivery worker %s not started: shutdown already requested",
+                self.worker_id,
+            )
+            return
+
         self._running = True
         logger.info("Event delivery worker %s started", self.worker_id)
 
@@ -130,13 +204,12 @@ class EventDeliveryWorker:
                 except Exception as e:  # noqa: BLE001 - keep the loop alive
                     logger.exception("Error in event delivery worker: %s", e)
                 # Sleep between polling cycles only; never inside the batch loop.
-                time.sleep(self.poll_interval)
+                # Waiting on the flag instead of sleeping lets a shutdown request
+                # interrupt the wait immediately.
+                if self._shutdown_event.wait(self.poll_interval):
+                    break
         finally:
             logger.info("Event delivery worker %s stopped", self.worker_id)
-
-    def stop(self) -> None:
-        """Request the worker loop to stop at the next iteration."""
-        self._running = False
 
     def _process_batch(self) -> None:
         """Recover abandoned claims, then claim and deliver a batch of events."""
@@ -268,11 +341,9 @@ def main() -> None:
 
     load_dotenv()
 
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    # Configure logging from LOG_LEVEL (shared with the API entry point, so both
+    # processes honour the same setting; defaults to INFO).
+    configure_logging()
 
     from core.persistence.factory import get_repository
     from core.persistence.repository import PersistenceError
@@ -304,10 +375,19 @@ def main() -> None:
 
     # Create and start worker
     worker = EventDeliveryWorker(repository=repository)
+    # Route SIGTERM/SIGINT to a flag-only shutdown request. Under `init: true`,
+    # tini is PID 1 and forwards both signals to this process, so Docker's
+    # `stop` reaches us here rather than killing us outright.
+    worker.install_signal_handlers()
     try:
         worker.start()
     except KeyboardInterrupt:
-        worker.stop()
+        # Only reachable if the SIGINT handler could not be installed.
+        worker.request_shutdown()
+    finally:
+        # Release the worker's own resources on the normal exit path (never from
+        # a signal handler). Bounded by the pool's own close timeout.
+        _close_repository(repository)
 
 
 if __name__ == "__main__":

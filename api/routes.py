@@ -10,6 +10,7 @@ import math
 import os
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -623,6 +624,10 @@ DEFAULT_READINESS_TIMEOUT_SECONDS = 2.0
 MAX_READINESS_TIMEOUT_SECONDS = 30.0
 
 _READY_MAX_WORKERS = 2
+# Module-level fallback executor/slots, created at import time. An application
+# that runs its lifespan owns its own runtime (see create_readiness_runtime);
+# these defaults are used only when the lifespan never started, which is the
+# case for a client built without entering its context manager.
 _READY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_READY_MAX_WORKERS, thread_name_prefix="sentinel-ready"
 )
@@ -632,6 +637,50 @@ _READY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 # queues in the executor.
 _READY_MAX_CONCURRENCY = _READY_EXECUTOR._max_workers
 _READY_SLOTS = threading.BoundedSemaphore(_READY_MAX_CONCURRENCY)
+
+
+@dataclass(frozen=True)
+class ReadinessRuntime:
+    """The readiness probe resources owned by a single application instance.
+
+    ``executor`` runs the probes and ``slots`` bounds how many may run at once.
+    They are created together from one worker count so the admission cap and the
+    worker count cannot drift apart, and an application that owns a runtime can
+    dispose of exactly the workers it started.
+    """
+
+    executor: concurrent.futures.ThreadPoolExecutor
+    slots: threading.BoundedSemaphore
+
+
+def create_readiness_runtime() -> ReadinessRuntime:
+    """Create a fresh, application-owned readiness runtime.
+
+    Used by the application lifespan so that the executor and admission
+    semaphore belong to one application instance rather than to the process.
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=_READY_MAX_WORKERS, thread_name_prefix="sentinel-ready"
+    )
+    return ReadinessRuntime(
+        executor=executor,
+        slots=threading.BoundedSemaphore(executor._max_workers),
+    )
+
+
+def shutdown_readiness_executor(executor: concurrent.futures.Executor) -> None:
+    """Dispose of a readiness executor without waiting on abandoned probes.
+
+    ``wait=False`` abandons any probe still running instead of awaiting it, so
+    shutdown cannot hang on a stuck persistence backend; ``shutdown`` is
+    idempotent, so a repeated call is harmless. A failure is logged rather than
+    raised, because one faulty resource must not abort application teardown.
+    """
+    try:
+        executor.shutdown(wait=False, cancel_futures=False)
+    except Exception as exc:  # noqa: BLE001 - shutdown must never raise
+        logger.warning("Readiness executor shutdown failed (%s)", type(exc).__name__)
+
 
 _READINESS_READY_BODY = ReadinessResponse(status="ready", checks={"persistence": "ok"})
 _READINESS_NOT_READY_BODY = ReadinessResponse(
@@ -665,15 +714,6 @@ def _readiness_timeout_seconds() -> float:
     return _parse_readiness_timeout(os.getenv(ENV_READINESS_TIMEOUT_SECONDS))
 
 
-def _release_ready_slot(future: "concurrent.futures.Future") -> None:
-    """Release the admission slot once the probe has actually finished.
-
-    Registered as a done callback so that a probe which outlives the HTTP
-    deadline keeps holding its slot until the underlying operation returns.
-    """
-    _READY_SLOTS.release()
-
-
 def _readiness_response(ready: bool) -> JSONResponse:
     """Build the fixed allowlisted readiness response (200 ready / 503 not)."""
     if ready:
@@ -694,21 +734,28 @@ def readiness(request: Request) -> JSONResponse:
     if repository is None:
         return _readiness_response(ready=False)
 
+    # Use the runtime this application created in its lifespan; fall back to the
+    # module-level defaults when the lifespan never started (for example a test
+    # client that is not entered as a context manager).
+    runtime = getattr(request.app.state, "readiness_runtime", None)
+    executor = runtime.executor if runtime is not None else _READY_EXECUTOR
+    slots = runtime.slots if runtime is not None else _READY_SLOTS
+
     # Non-blocking admission control: refuse excess work instead of queueing it.
-    if not _READY_SLOTS.acquire(blocking=False):
+    if not slots.acquire(blocking=False):
         logger.warning("Readiness probe rejected: admission capacity exhausted")
         return _readiness_response(ready=False)
 
     try:
-        future = _READY_EXECUTOR.submit(repository.probe)
+        future = executor.submit(repository.probe)
     except Exception as exc:  # noqa: BLE001 - scheduling failure must fail closed
-        _READY_SLOTS.release()
+        slots.release()
         logger.warning("Readiness probe could not be scheduled (%s)", type(exc).__name__)
         return _readiness_response(ready=False)
 
     # The slot is held until the probe genuinely completes, not until the
     # response is sent, so a timed-out probe does not free capacity early.
-    future.add_done_callback(_release_ready_slot)
+    future.add_done_callback(lambda _future: slots.release())
 
     try:
         future.result(timeout=_readiness_timeout_seconds())

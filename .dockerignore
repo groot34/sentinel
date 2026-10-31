@@ -1,0 +1,81 @@
+# Build-context exclusions for the Sentinel 2.0 API image.
+#
+# Goal: the image must only ever contain the runtime code declared in the
+# Dockerfile (api/, agents/, core/, schemas/ plus requirements-runtime.txt).
+# Everything below is either a secret, a test/eval artefact, local state or
+# editor noise.
+# Note: requirements-runtime.txt, api/, agents/, core/ and schemas/ are
+# intentionally NOT excluded — the application needs them at build or run time.
+
+# --- Version control -------------------------------------------------------
+.git/
+.github/
+.gitignore
+
+# --- Local secrets / environment ------------------------------------------
+.env
+.env.*
+*.env
+*.env.*
+
+# --- Test-only executable code --------------------------------------------
+tests/
+Makefile
+pytest.ini
+
+# --- Incident datasets + evaluation artefacts -----------------------------
+incidents/
+eval/
+trajectories/
+
+# --- Documentation and standalone helper scripts --------------------------
+docs/
+scripts/
+*.md
+run_fix_proposals.py
+run_hypothesis_verification.py
+
+# --- Python caches / bytecode / build output ------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Test / coverage caches -----------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# --- Virtual environments --------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- Local runtime state ---------------------------------------------------
+.sentinel_persistence/
+
+# --- Local logs, temporary files and editor artefacts ----------------------
+*.log
+*.tmp
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.kiro/
+
+# --- Container/deployment metadata not needed inside the image ------------
+Dockerfile
+.dockerignore
+docker-compose.yml
