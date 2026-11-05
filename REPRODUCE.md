@@ -29,7 +29,7 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome (local, Windows, no database, Mission 20): 947 passed, 55 skipped, 1 warning in ~14s
+# Verified outcome (local, Windows, no database, Mission 22): 1061 passed, 55 skipped, 1 warning in ~15s
 # (55 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
 #  retry tests and Mission 16's 6 outbox claim/recovery tests; 9 symlink tests skipped on
@@ -45,6 +45,13 @@ pytest
 #  validation only — no CI run yet; PostgreSQL integration was NOT run locally.
 #  Mission 20 (63 API-key authentication tests in tests/test_api_auth.py, all offline) also has
 #  local validation only — no CI run yet. Adding it took the offline suite from 884 to 947 passed.
+#  Mission 21 (35 readiness tests in tests/test_api_readiness.py, plus one safe-method auth
+#  regression test in tests/test_api_auth.py, all offline) has local validation only — no CI run
+#  yet (1002 → 1038 collected).
+#  Mission 22 Tasks 1–7 (78 tests: tests/test_app_lifecycle.py, tests/test_config_env.py and
+#  tests/test_worker_shutdown.py for Tasks 1–6, plus 28 in tests/test_pg_pool_config.py for Task 7)
+#  also has local validation only — no CI run yet (1038 → 1116 collected). Current offline figure:
+#  1061 passed / 55 skipped / 1 warning.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -337,7 +344,7 @@ truthy values, `HEAD`/`OPTIONS` handling, header-name case handling, and that `a
 does not retain the secret.
 
 **Validation status**: implementation complete, **local validation only**. Focused tests 63 passed;
-full offline suite 947 passed / 55 skipped / 1 warning (1002 collected); incident validation 51/51.
+full offline suite 1061 passed / 55 skipped / 1 warning (1116 collected); incident validation 51/51.
 **No CI run exists for Mission 20 yet**, and PostgreSQL was **not** exercised locally.
 
 ## PostgreSQL Integration Testing
@@ -370,8 +377,8 @@ make test-postgres
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Locally on Windows without a DB (verified, Mission 20): 947 passed, 55 skipped, 1 warning.
-# With a local DB (expected): 993 passed, 9 skipped (Windows symlink only), 1 warning.
+# Locally on Windows without a DB (verified, Mission 22): 1061 passed, 55 skipped, 1 warning.
+# With a local DB (expected): 1107 passed, 9 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -422,6 +429,83 @@ The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
 > (`Total skipped: 0`; all 6 live outbox tests executed) and `offline` **654 passed, 4 skipped**;
 > migrations `001`–`003` applied and schema verification passed; incident validation 51/51 in both jobs.
 
+## Containerised Deployment (Mission 22)
+
+The `Dockerfile` and `docker-compose.yml` at the repository root run the API and the
+outbox worker against a PostgreSQL 16 container. This is a **local-development** stack
+(`docker-compose.yml` says so explicitly); it is not a production deployment guide.
+
+### Image (`Dockerfile`)
+
+- Base image `python:3.12-slim`, `WORKDIR /app`.
+- **Runtime-only dependencies**: `pip install -r requirements-runtime.txt`. Test/dev
+  tooling (`pytest`, `requests`, …) is layered in `requirements-dev.txt`, which is **not**
+  installed into the image. `requirements.txt` remains an umbrella over the dev layer for
+  CI and local use.
+- Only `api/`, `agents/`, `core/` and `schemas/` are copied; tests and datasets are excluded
+  via `.dockerignore`.
+- Runs as the **non-root** user `sentinel` (UID 10001). `/app/.sentinel_persistence` and
+  `/app/incidents` are created and `chown`-ed in the image so named/bind volumes mounted at
+  those paths inherit writable ownership.
+- `EXPOSE 8000`; `HEALTHCHECK` probes `GET /ready` using the Python standard library
+  (`urllib.request`) — no `curl`/`wget` is added.
+- `CMD ["python", "-m", "api", "--host", "0.0.0.0", "--port", "8000"]` — exec form, so
+  uvicorn receives `SIGTERM` directly and shuts down gracefully.
+
+### Compose stack (`docker-compose.yml`)
+
+| Service | Image / build | Notes |
+|---------|---------------|-------|
+| `postgres` | `postgres:16-alpine` | Named volume `sentinel_pgdata`; `pg_isready` healthcheck; host port bound to loopback `127.0.0.1:${POSTGRES_HOST_PORT:-5432}` |
+| `sentinel-api` | built from `./Dockerfile` | Container port 8000 published as `${SENTINEL_API_HOST_PORT:-8000}`; `sentinel_incidents` volume on `/app/incidents`; limits 1.0 CPU / 1 GB |
+| `sentinel-worker` | same image | `command: ["python", "-m", "api.event_worker"]`; its inherited `/ready` healthcheck is disabled; limits 0.5 CPU / 512 MB |
+
+Both application services use `restart: unless-stopped`, `init: true` (tini as PID 1) and
+depend on `postgres` reaching `service_healthy` before starting.
+
+```bash
+# Build and start the stack in the background
+docker compose up -d --build
+
+# Follow logs
+docker compose logs -f sentinel-api sentinel-worker
+
+# Apply migrations from the host (the stack does NOT run migrations)
+make db-migrate
+
+# Stop the stack, keeping the data volumes
+docker compose down
+
+# Stop and delete the volumes (destroys all local data)
+docker compose down -v
+```
+
+**Migration ownership:** schema migrations are owned by the application migration engine
+(`core.persistence.schema`); Compose deliberately does **not** mount SQL into
+`/docker-entrypoint-initdb.d/`. Apply them explicitly (`make db-migrate` /
+`python -m core.persistence.schema apply`).
+
+### Local development vs container deployment
+
+- **Local (no container):** `python -m api` and `python -m api.event_worker` run directly
+  against `.env`; the API binds `127.0.0.1` and is not exposed.
+- **Container:** bind `0.0.0.0` (the image default) and let the Compose network resolve
+  `postgres` by service name. `SENTINEL_DATABASE_URL` must point at the `postgres` service
+  host inside the Compose network.
+
+### Lifecycle and shutdown
+
+- The Starlette application `lifespan` builds the persistence repository, readiness runtime
+  and (when the app owns the pool) the PostgreSQL pool, and tears them down on shutdown.
+  Shutdown is **idempotent** (guarded by `app.state.shutdown_complete`) and closes the pool
+  off the event loop (`asyncio.to_thread`); the readiness executor is shut down
+  non-blockingly so abandoned probes cannot hang exit.
+- The worker stops on `SIGTERM`/`SIGINT` via a minimal signal handler that only sets a
+  shutdown flag; the batch in progress finishes and the loop exits before the next poll.
+- **Limitation:** an in-flight synchronous PostgreSQL call cannot be forcibly interrupted.
+  A blocked batch is stopped by the orchestrator and its un-acknowledged claims are
+  recovered once the 300 s claim TTL expires (see the worker section above).
+
 
 ## Starting the API Server
 
@@ -465,6 +549,14 @@ cp .env.example .env
 # PostgreSQL backend:
 #   SENTINEL_PERSISTENCE_BACKEND=postgres
 #   SENTINEL_DATABASE_URL=postgresql://sentinel:password@localhost:5432/sentinel_db
+#   SENTINEL_PG_POOL_MIN_SIZE=1          # min pooled connections (default 1, ≥ 1)
+#   SENTINEL_PG_POOL_MAX_SIZE=10         # max pooled connections (default 10, ≥ min)
+#   SENTINEL_PG_POOL_TIMEOUT_SECONDS=30.0 # seconds to wait for a pooled connection (default 30.0)
+#   # Transient-contention retry (SQLSTATE 40001/40P01); malformed values are clamped, not rejected:
+#   SENTINEL_PG_RETRY_MAX_ATTEMPTS=5     # default 5
+#   SENTINEL_PG_RETRY_BASE_DELAY=0.05    # base backoff seconds, default 0.05
+#   SENTINEL_PG_RETRY_MAX_DELAY=1.0      # backoff ceiling seconds, default 1.0 (also capped at 30.0)
+#   # The pool settings are validated once and shared by both the API and the worker.
 #
 # Incident-bundle ingestion (POST /incidents) is DISABLED by default:
 #   SENTINEL_ALLOW_INCIDENT_INGESTION=1        # enable (1/true/yes/on); NOT authentication
@@ -525,6 +617,12 @@ PostgreSQL persistence.
 # Start the event worker (requires PostgreSQL backend configured)
 python -m api.event_worker
 
+# The worker takes no command-line arguments — there is no --interval flag (the
+# poll interval is the internal constant DEFAULT_POLL_INTERVAL_SECONDS = 5.0 s)
+# and no `make worker` target. It stops on SIGTERM/SIGINT: the signal handler only
+# sets a shutdown flag, the current batch finishes, and the loop exits before the
+# next poll (the poll interval is interruptible).
+
 # The worker will:
 # 1. Release expired claims (crash recovery) and atomically claim a batch of
 #    eligible events using SELECT ... FOR UPDATE SKIP LOCKED, so concurrent
@@ -544,11 +642,21 @@ delivery. The destination is an in-process `EventBus`, so exactly-once
 **Configuration:**
 - `SENTINEL_DATABASE_URL` must be set (PostgreSQL required)
 - Worker uses the same `event_outbox` table as the API server
-- Claim visibility timeout defaults to 300 s; retry attempt limit defaults to 5
-- No additional environment variables needed
+- Claim visibility timeout is the internal constant `DEFAULT_CLAIM_TTL_SECONDS = 300 s`
+  (not env-configurable); expired claims are released on the next poll, which is how a
+  crashed or `SIGKILL`-ed worker's in-flight batch is recovered
+- Retry attempt limit defaults to 5 and is overridable via `SENTINEL_PG_RETRY_MAX_ATTEMPTS`
+  (`SENTINEL_PG_RETRY_BASE_DELAY` / `SENTINEL_PG_RETRY_MAX_DELAY` control the backoff)
+- PostgreSQL connection pooling is shared with the API and configured through the
+  `SENTINEL_PG_POOL_*` variables (see **Configuration** above)
 
 **Note:** The worker is optional. If not running, events will accumulate in the
 outbox table and can be delivered later when the worker starts.
+
+> **Limitation:** because delivery is synchronous, an in-flight PostgreSQL call inside a
+> batch cannot be forcibly interrupted. A `SIGTERM`/`SIGINT` stops the worker between
+> batches; if a batch is blocked on I/O, the worker is stopped by the orchestrator and the
+> un-acknowledged claim is recovered after the 300 s claim TTL expires.
 
 ### Submit an investigation (synchronous)
 

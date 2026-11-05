@@ -5,7 +5,7 @@ Provides durable repository interfaces and implementations for InvestigationStat
 
 from core.persistence.factory import get_repository
 from core.persistence.filesystem import FilesystemRepository
-from core.persistence.postgres import PostgresRepository
+from core.persistence.postgres import PoolConfig, PostgresRepository, pool_config_from_env
 from core.persistence.repository import ConcurrencyError, PersistenceError, PersistenceRepository
 
 __all__ = [
@@ -13,6 +13,8 @@ __all__ = [
     "PersistenceError",
     "PersistenceRepository",
     "FilesystemRepository",
+    "PoolConfig",
     "PostgresRepository",
     "get_repository",
+    "pool_config_from_env",
 ]

@@ -14,13 +14,13 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **947 passed, 55 skipped** offline (Mission 20); **853 passed, 0 skipped** live PostgreSQL 16 CI (run 39635055973, Missions 17 & 18) |
+| Automated tests | — | **1061 passed, 55 skipped** offline (Mission 22, local); **853 passed, 0 skipped** live PostgreSQL 16 CI (run 39635055973, Missions 17 & 18) |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 55 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 947 passed / 55 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests (853 → 939 collected) and Mission 20 adds 63 API-key authentication tests (939 → 1002 collected); Missions 19 and 20 have **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally.)*
+*(Note: without PostgreSQL or Windows symlink privileges, 55 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 1061 passed / 55 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests (853 → 939 collected), Mission 20 adds 63 API-key authentication tests (939 → 1002 collected), Mission 21 adds 35 readiness tests plus one safe-method auth regression test (1002 → 1038 collected) and Mission 22 Tasks 1–7 add 78 tests (1038 → 1116 collected); Missions 19–22 have **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally. The current offline figure is **1061 passed / 55 skipped / 1 warning** (Windows, no database).)*
 
 ---
 
@@ -415,7 +415,7 @@ cp .env.example .env
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
 # Verified in CI (run 39048469043, Mission 15): 733 passed, 0 skipped with live PostgreSQL 16.
-# Verified locally without a database (Mission 20): 947 passed, 55 skipped, 1 warning in ~14s
+# Verified locally without a database (Mission 22): 1061 passed, 55 skipped, 1 warning in ~15s
 # (55 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
 #  unset/unreachable — including Mission 15's 4 transient-failure retry tests and Mission 16's
 #  6 outbox claim/recovery tests; 9 Windows symlink tests skipped for non-admin accounts
@@ -429,10 +429,15 @@ pytest
 #  tests/test_bundle_validator.py; Mission 19 added 86 incident-ingestion API tests in
 #  tests/test_incident_ingestion_api.py, 85 passing + 1 symlink test skipped on Windows.)
 #  Mission 20 added 63 API-key authentication tests in tests/test_api_auth.py (all offline).
+#  Mission 21 added 35 readiness tests in tests/test_api_readiness.py (all offline) plus one
+#  safe-method auth regression test in tests/test_api_auth.py.
+#  Mission 22 added 78 tests: 234-line tests/test_app_lifecycle.py, 271-line tests/test_config_env.py,
+#  329-line tests/test_worker_shutdown.py (Tasks 1–6) and 28 tests in tests/test_pg_pool_config.py
+#  (Task 7). Total collected: 1116.
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
 # Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres job (PostgreSQL 16) 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests ran.
-# Missions 17, 18, 19 and 20 have local validation only — no CI run yet; PostgreSQL was not tested locally.
+# Missions 17–22 have local validation only — no CI run yet; PostgreSQL was not tested locally.
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -473,12 +478,15 @@ make serve
 When configured with `SENTINEL_PERSISTENCE_BACKEND=postgres`, start the background outbox worker:
 
 ```bash
-# Polls outbox and dispatches events reliably
-python -m api.event_worker --interval 1.0
-
-# Or via Makefile
-make worker
+# Polls the outbox and dispatches events reliably (requires the PostgreSQL backend)
+python -m api.event_worker
 ```
+
+The worker takes **no command-line arguments**: the poll interval (5 s), batch size (100) and
+claim TTL (300 s) are internal constants; the retry attempt limit and backoff are the
+`SENTINEL_PG_RETRY_*` settings in the table below. There is **no `make worker` target**.
+To run the worker in the containerised stack, start the Compose `sentinel-worker` service (see
+[Containerised Deployment](#13-containerised-deployment-mission-22)).
 
 ### Configuration
 
@@ -492,6 +500,12 @@ are applied automatically (shell values take precedence).
 | `SENTINEL_PERSISTENCE_BACKEND` | `filesystem` | `filesystem` or `postgres` |
 | `SENTINEL_PERSISTENCE_ROOT` | `.sentinel_persistence` | Root dir for the filesystem backend |
 | `SENTINEL_DATABASE_URL` | — | PostgreSQL connection URL (`postgres` backend only) |
+| `SENTINEL_PG_POOL_MIN_SIZE` | `1` | Minimum pooled PostgreSQL connections (postgres backend). Shared by the API and the worker |
+| `SENTINEL_PG_POOL_MAX_SIZE` | `10` | Maximum pooled PostgreSQL connections |
+| `SENTINEL_PG_POOL_TIMEOUT_SECONDS` | `30.0` | Seconds a caller waits to acquire a pooled connection |
+| `SENTINEL_PG_RETRY_MAX_ATTEMPTS` | `5` | Bounded retry attempts for transient PostgreSQL contention errors (SQLSTATE `40001`/`40P01`). Out-of-range values are clamped, not rejected |
+| `SENTINEL_PG_RETRY_BASE_DELAY` | `0.05` | Base delay (seconds) for exponential retry backoff (full jitter) |
+| `SENTINEL_PG_RETRY_MAX_DELAY` | `1.0` | Upper bound (seconds) for the retry backoff ceiling (also capped at `30.0`) |
 | `GROQ_API_KEY` / `GROQ_MODEL` | — / `openai/gpt-oss-120b` | Required when investigations are submitted |
 | `SENTINEL_ALLOW_INCIDENT_INGESTION` | `false` | **Opt-in** switch for `POST /incidents` (Mission 19). Any value other than `1`/`true`/`yes`/`on` leaves it disabled |
 | `SENTINEL_INGEST_MAX_FILES` | `200` | Max files per ingested bundle |
@@ -888,10 +902,135 @@ without double-claiming or losing work.
 
 ---
 
-## 13. Documentation & Verification References
+## 13. Containerised Deployment (Mission 22)
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, ingestion, and SSE).
+Sentinel 2.0 can be deployed as three containers — the API, the outbox worker, and PostgreSQL — built
+from a single image. This section documents the delivered Mission 22 behaviour. **Local development
+(`python -m api` / `python -m api.event_worker` against a filesystem backend) needs none of it.**
+
+### Image (`Dockerfile`)
+
+- **Base**: `python:3.12-slim`, `WORKDIR /app`.
+- **Runtime dependencies only**: the image installs `requirements-runtime.txt` (pinned production
+  dependencies). Test/dev tooling is deliberately absent.
+- **Application code**: `api/`, `agents/`, `core/` (including `core/persistence/sql/`) and
+  `schemas/` are copied in. Tests, incident datasets, evaluation fixtures and local secrets are
+  excluded by `.dockerignore` and never enter the build context.
+- **Non-root runtime**: the image creates a dedicated unprivileged user (`sentinel`, **UID 10001**)
+  and runs as it (`USER sentinel`). `/app/.sentinel_persistence` and `/app/incidents` are created and
+  `chown`ed to that user so the non-root process can write them, including when a fresh named volume
+  is mounted at `/app/incidents` (Docker would otherwise create the mount point as `root:root`).
+- **Health check**: a standard-library-only `HEALTHCHECK` (`urllib.request`; no `curl`/`wget` added)
+  probes `GET /ready` and exits non-zero on a non-200 or connection failure.
+- **Default command**: `python -m api --host 0.0.0.0 --port 8000` (bound to all interfaces for
+  container use). The exec form keeps Python as PID 1 so Uvicorn receives `SIGTERM` directly.
+
+### Runtime vs. development dependencies
+
+Dependencies are tiered so the image never carries test tooling:
+
+| File | Contents |
+|---|---|
+| `requirements-runtime.txt` | Pinned production dependencies (installed in the image) |
+| `requirements-dev.txt` | `-r requirements-runtime.txt` **plus** pinned test tooling (e.g. `pytest`) |
+| `requirements.txt` | `-r requirements-dev.txt` — umbrella that preserves existing CI/Makefile workflows |
+
+### Compose stack (`docker-compose.yml`)
+
+Local-development orchestration only (not a production deployment).
+
+| Service | Image / command | Notes |
+|---|---|---|
+| `postgres` | `postgres:16-alpine` | Named volume `sentinel_pgdata`; host port `${POSTGRES_HOST_PORT:-5432}` bound to loopback; `pg_isready` healthcheck |
+| `sentinel-api` | image default `CMD` (`python -m api`) | `SENTINEL_PERSISTENCE_BACKEND=postgres`; `sentinel_incidents` volume mounted at `/app/incidents`; host port `${SENTINEL_API_HOST_PORT:-8000}`; limits 1.0 CPU / 1 GB |
+| `sentinel-worker` | `python -m api.event_worker` | `SENTINEL_PERSISTENCE_BACKEND=postgres`; image `HEALTHCHECK` disabled (it serves no `/ready`); limits 0.5 CPU / 512 MB |
+
+- The two application services share one image (an `x-sentinel-service` anchor), run with
+  **`init: true`** so tini reaps children and forwards `SIGTERM`/`SIGINT` to the Python process, and
+  wait for PostgreSQL via `depends_on: postgres (condition: service_healthy)`.
+- Credentials are taken from the host environment with local-development defaults; **no secret is
+  committed** and a populated `.env` is not required.
+- **Schema migrations are not run by Compose.** Migrations stay owned by the application migration
+  runner (`core.persistence.schema`); SQL files are deliberately *not* mounted into
+  `/docker-entrypoint-initdb.d/`, which would double-execute against fresh volumes. Apply migrations
+  explicitly (e.g. `make db-migrate`) after the database is healthy.
+
+```bash
+# Build the image and start the full stack (postgres + api + worker)
+docker compose build
+docker compose up -d
+
+# Follow the API logs; check container health
+docker compose logs -f sentinel-api
+docker compose ps
+
+# Apply migrations once the database is healthy
+make db-migrate
+
+# Stop the containers (data volumes are preserved)
+docker compose stop
+# Or remove the containers and the Compose network (volumes still preserved)
+docker compose down
+
+# Teardown including the named volumes (destroys PostgreSQL data and ingested bundles)
+docker compose down -v
+```
+
+`make db-up` starts **only** the `postgres` service; use `docker compose up -d` for the whole stack.
+
+### API lifecycle & graceful shutdown
+
+`create_app()` (`api/app.py`) installs a Starlette **lifespan** context manager:
+
+- **Startup** creates the readiness runtime this application owns; requests are not served until it
+  completes.
+- **Shutdown** runs in a `finally` block, so resources are released even when startup fails part-way
+  or request handling has crashed. It is **idempotent** (`app.state.shutdown_complete`), so a second
+  shutdown (e.g. a duplicate signal) never closes a pool or executor twice.
+- Shutdown is **non-blocking**: the PostgreSQL pool is closed through
+  `asyncio.to_thread(repository.close)`, so a blocking `pool.close()` cannot stall the event loop,
+  and the readiness executor is shut down **without waiting** on abandoned probes so a stuck probe
+  cannot hang shutdown. The pool is only closed when the application owns it (a caller-injected pool
+  remains the caller's responsibility).
+
+### Worker shutdown & expired-claim recovery
+
+The event worker (`python -m api.event_worker`) installs minimal handlers for `SIGTERM`/`SIGINT`
+that only set a `threading.Event` — no database access or cleanup runs at signal time. The poll loop
+waits on that event (`Event.wait(timeout)`), so a stop request interrupts the wait immediately and
+the loop exits **before starting another batch**; the batch already in flight completes on the normal
+delivery path. Handler registration tolerates signals the platform or thread cannot trap.
+
+If a worker is killed mid-batch, any claim it could not finalise stays in `event_outbox` and is
+returned to `pending` by the **claim-expiry sweep** (default TTL 300 s) on the next poll, where
+another worker can reclaim it — shutdown never marks an undelivered event as delivered.
+
+> **Limitation**: an **in-flight database call cannot be forcibly interrupted.** Graceful shutdown
+> stops new work from starting and lets an in-progress batch finish, but a synchronous PostgreSQL
+> operation already executing is not cancellable; its claim is recovered by the expiry sweep rather
+> than by interrupting the call.
+
+### Health vs. readiness
+
+- `GET /health` is a static **liveness** payload (`{"status":"ok","service":"sentinel","version":"2.0"}`)
+  and does not touch dependencies.
+- `GET /ready` performs a real, read-only persistence probe (bounded by
+  `SENTINEL_READINESS_TIMEOUT_SECONDS`, default `2.0`) and returns `503` when storage is unreachable.
+  The container `HEALTHCHECK` and any orchestrator should probe `/ready`. Both endpoints stay public
+  for safe methods.
+
+### Configuration
+
+All runtime configuration is environment-driven and shared by the API and the worker; see the
+[Configuration](#configuration) table in §10 and [`.env.example`](.env.example). `LOG_LEVEL` and
+`INCIDENTS_DIR` are the two general-purpose knobs; the PostgreSQL pool and retry settings are
+documented there too. The previously documented `SENTINEL_ENV` variable was removed — it was never
+read by the runtime.
+
+## 14. Documentation & Verification References
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, ingestion, SSE, containerised deployment, and lifecycle hardening).
 - **[docs/CURRENT_STATE_AUDIT.md](docs/CURRENT_STATE_AUDIT.md)** — Exhaustive repository state audit, current test counts, verified capabilities, and unresolved items.
-- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 19.
+- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 22.
 - **[REPRODUCE.md](REPRODUCE.md)** — Complete guide for setting up, running offline tests, launching the API server, querying endpoints, and executing benchmark evaluations.
-- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 19 engineering work.
+- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 22 engineering work.

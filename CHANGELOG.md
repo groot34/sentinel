@@ -2,6 +2,36 @@
 
 All notable changes and iterative improvements to the Sentinel project will be documented in this file.
 
+## [2.0.0-mission22] - Unreleased (implementation complete; local validation only)
+
+Production-readiness and deployment hardening: Sentinel now runs as a containerised stack (API +
+worker + PostgreSQL) with a single, environment-driven configuration, a deterministic
+startup/shutdown lifecycle, and a non-root runtime image. **Task 9 was not started.** (Task 8 was a
+documentation-only reconciliation and changes no runtime behaviour.)
+
+### Added
+- **Container image (`Dockerfile`)**: `python:3.12-slim` base; installs **runtime dependencies only** from `requirements-runtime.txt`; copies `api/`, `agents/`, `core/` and `schemas/`. The image runs as a dedicated **non-root user** (`sentinel`, UID 10001), pre-creates and `chown`s `/app/.sentinel_persistence` and `/app/incidents` so the non-root process can write them on a fresh volume, exposes port `8000`, and defines a standard-library-only `HEALTHCHECK` (`urllib.request`, no `curl`) that probes `GET /ready`. The default `CMD` is `python -m api --host 0.0.0.0 --port 8000` (bound to all interfaces for container use).
+- **`.dockerignore`**: excludes tests, incident datasets, evaluation fixtures, local secrets (`*.env`), `Makefile`, `pytest.ini`, `docs/`, Markdown and the Docker files themselves from the build context and the image.
+- **Tiered requirements**: `requirements-runtime.txt` (pinned production dependencies), `requirements-dev.txt` (layers `-r requirements-runtime.txt` plus pinned test tooling), and an umbrella `requirements.txt` (`-r requirements-dev.txt`) so existing CI/Makefile workflows are unchanged. Test-only dependencies are no longer installed in the runtime image.
+- **`docker-compose.yml` stack** (local development): `postgres` (PostgreSQL 16, host port configurable via `POSTGRES_HOST_PORT`, named volume `sentinel_pgdata`, `pg_isready` healthcheck), `sentinel-api`, and `sentinel-worker`, sharing one image via an `x-sentinel-service` anchor. The application services use `init: true` (tini forwards SIGTERM/SIGINT), `depends_on: postgres (condition: service_healthy)`, `restart: unless-stopped`, resource limits (API 1.0 CPU / 1 GB; worker 0.5 CPU / 512 MB), and a `sentinel_incidents` named volume mounted at `/app/incidents`. The worker disables the image healthcheck (it serves no `/ready`). Schema migrations are **not** run by Compose; they remain owned by the application migration runner and applied explicitly (e.g. `make db-migrate`).
+- **Application lifecycle** (`api/app.py`): a Starlette `lifespan` context manager creates the readiness runtime on startup and releases owned resources in a `finally` block, so teardown still runs after a failed start or a request crash. Shutdown is **idempotent** (`app.state.shutdown_complete`) and **non-blocking**: the PostgreSQL pool is closed via `asyncio.to_thread(...)` so a blocking `pool.close()` does not stall the event loop, and the readiness executor is shut down **without waiting** on abandoned probes so a stuck probe cannot hang shutdown.
+- **Worker signal handling** (`api/event_worker/worker.py`): `SIGTERM`/`SIGINT` are routed to a minimal, flag-only handler (`threading.Event`) that performs no database or cleanup work, making it safe at signal time. The poll loop waits on that event (`Event.wait(timeout)`) so a shutdown request interrupts the wait immediately and the loop stops **before starting another batch**; the batch already in flight finishes on the normal delivery path. Handler registration is wrapped to tolerate signals the platform or thread cannot trap.
+- **Centralised logging configuration** (`core/logging_config.py`): a single `configure_logging()` helper, used by **both** entry points, applies `LOG_LEVEL` (default `INFO`; unrecognised values fall back) to Sentinel's own namespaces (`api`, `agents`, `core`) only — the root logger and Uvicorn's server loggers are left alone, so `LOG_LEVEL=DEBUG` does not flood the logs with third-party library noise.
+- **Focused tests**: `tests/test_app_lifecycle.py`, `tests/test_config_env.py`, and `tests/test_worker_shutdown.py` (Tasks 1–6), plus `tests/test_pg_pool_config.py` (Task 7, 28 tests) covering pool defaults, custom sizing/timeouts, invalid numerics, `min_size > max_size`, API/worker configuration parity, and retry/ingestion environment loading.
+
+### Changed
+- **Environment-driven PostgreSQL connection pool (Task 7)**: the previously hardcoded pool knobs are now read once from the environment by a single shared source (`core.persistence.postgres.pool_config_from_env()` → validated `PoolConfig`) and applied by **both** the API and the event worker through `get_repository()`.
+  - `SENTINEL_PG_POOL_MIN_SIZE` (default `1`), `SENTINEL_PG_POOL_MAX_SIZE` (default `10`), `SENTINEL_PG_POOL_TIMEOUT_SECONDS` (default `30.0`) — the defaults reproduce the previous behaviour exactly.
+  - Invalid or inconsistent values (`min_size` < 1, `max_size` < 1, `min_size > max_size`, a non-finite or non-positive timeout, or non-numeric input) raise a sanitised `PersistenceError` that names only the offending setting — never the connection string or credentials — so a misconfiguration fails fast at startup. Retry (`SENTINEL_PG_RETRY_*`) semantics are unchanged (those values are clamped, not rejected). No connection/idle-timeout setting is introduced, because none was configurable before.
+- **`api/__main__.py`**: `create_app()` construction is wrapped so an `AuthConfigurationError` prints a sanitised error and exits non-zero instead of serving unprotected requests; the incident-root precedence is documented as `--incidents-root` > `INCIDENTS_DIR` > default `incidents`.
+- **`.env.example`**: reconciled to the settings that are genuinely read at runtime — Groq, `LOG_LEVEL`, `INCIDENTS_DIR`, persistence, the PostgreSQL pool, `SENTINEL_PG_RETRY_*`, incident ingestion, API-key authentication and readiness. The unused `SENTINEL_ENV` (and a stale `GROQ_TEMPERATURE`) were removed; a guard test keeps `SENTINEL_ENV` from returning.
+- **`README.md` / `REPRODUCE.md` / `docs/`**: deployment and configuration documentation reconciled against the implementation, including the worker start command (which takes **no** `--interval` flag) and the removal of a documented `make worker` target that does not exist.
+
+### Notes / Limitations
+- **An in-flight database call cannot be forcibly interrupted.** Graceful shutdown stops the API from accepting new work and stops the worker before its next batch, but a synchronous PostgreSQL operation already in progress is not cancellable. For the worker, any claim that an interrupted batch could not finalise is left in the outbox for the **claim-expiry sweep** to recover (default TTL 300 s) — it is never marked delivered.
+- **Validation status**: implementation complete, **local validation only**. Locally (Windows, no database): full offline suite **1061 passed / 55 skipped / 1 warning**; incident validation 51/51; `git diff --check` clean. **No CI run exists for Mission 22 yet**, and live PostgreSQL integration (Docker) was **not** exercised locally.
+- **Task 9 was not started** and is not described by this entry.
+
 ## [2.0.0-mission21] - Unreleased (implementation complete; local validation only)
 
 ### Added

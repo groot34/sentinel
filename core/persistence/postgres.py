@@ -7,7 +7,9 @@ backed by a PostgreSQL database.
 from __future__ import annotations
 
 import json
+import math
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -42,15 +44,126 @@ SCHEMA_FILE = Path(__file__).parent / "sql" / "001_initial_schema.sql"
 _PROBE_ACQUISITION_TIMEOUT_SECONDS = 2.0
 
 
+# ---------------------------------------------------------------------------
+# Connection-pool configuration (environment-driven)
+# ---------------------------------------------------------------------------
+#
+# These are the pool knobs that were previously hardcoded in
+# :class:`PostgresRepository`. They are now overridable through the environment;
+# the defaults below reproduce the previous behaviour exactly. There is
+# deliberately no setting for the connection or idle timeout: neither was
+# configurable before, so none is introduced here (unnecessary knobs only add
+# ways to misconfigure the pool).
+
+#: Minimum number of pooled connections kept open.
+DEFAULT_POOL_MIN_SIZE = 1
+#: Maximum number of pooled connections.
+DEFAULT_POOL_MAX_SIZE = 10
+#: Maximum seconds a caller waits to acquire a pooled connection.
+DEFAULT_POOL_TIMEOUT_SECONDS = 30.0
+
+ENV_POOL_MIN_SIZE = "SENTINEL_PG_POOL_MIN_SIZE"
+ENV_POOL_MAX_SIZE = "SENTINEL_PG_POOL_MAX_SIZE"
+ENV_POOL_TIMEOUT_SECONDS = "SENTINEL_PG_POOL_TIMEOUT_SECONDS"
+
+
+@dataclass(frozen=True)
+class PoolConfig:
+    """Validated PostgreSQL connection-pool sizing and acquisition timeout.
+
+    Holds only numeric pool knobs — never a connection string or credential —
+    so it can be logged or inspected without leaking secrets. Inconsistent
+    bounds (``min_size > max_size``) and non-positive values are rejected at
+    construction time.
+    """
+
+    min_size: int = DEFAULT_POOL_MIN_SIZE
+    max_size: int = DEFAULT_POOL_MAX_SIZE
+    timeout: float = DEFAULT_POOL_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        if self.min_size < 1:
+            raise PersistenceError("PostgreSQL pool min_size must be >= 1.")
+        if self.max_size < 1:
+            raise PersistenceError("PostgreSQL pool max_size must be >= 1.")
+        if self.min_size > self.max_size:
+            raise PersistenceError(
+                "PostgreSQL pool min_size must not exceed max_size "
+                f"(min_size={self.min_size}, max_size={self.max_size})."
+            )
+        if not math.isfinite(self.timeout) or self.timeout <= 0:
+            raise PersistenceError(
+                "PostgreSQL pool timeout must be a finite number of seconds > 0."
+            )
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer pool setting, rejecting non-numeric values.
+
+    A missing or blank value yields *default*; a malformed value raises a
+    sanitised ``PersistenceError`` naming only the offending setting.
+    """
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise PersistenceError(
+            f"Invalid {name} value; expected an integer."
+        ) from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a numeric (float) pool setting, rejecting non-numeric values.
+
+    A missing or blank value yields *default*; a malformed value raises a
+    sanitised ``PersistenceError`` naming only the offending setting.
+    """
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise PersistenceError(
+            f"Invalid {name} value; expected a number."
+        ) from exc
+
+
+def pool_config_from_env() -> PoolConfig:
+    """Build the validated pool configuration from the environment.
+
+    Recognized variables (all optional; defaults preserve the previously
+    hardcoded behaviour):
+
+      * ``SENTINEL_PG_POOL_MIN_SIZE``         — default ``1``
+      * ``SENTINEL_PG_POOL_MAX_SIZE``         — default ``10``
+      * ``SENTINEL_PG_POOL_TIMEOUT_SECONDS``  — default ``30.0``
+
+    This is the single configuration source shared by the API and the event
+    worker, both of which construct their repository through
+    :func:`core.persistence.factory.get_repository`. Invalid or inconsistent
+    values raise a sanitised ``PersistenceError`` (only the offending setting
+    is named, never a connection string or credential), so a misconfiguration
+    fails fast at startup instead of silently running a wrong pool size.
+    """
+    return PoolConfig(
+        min_size=_env_int(ENV_POOL_MIN_SIZE, DEFAULT_POOL_MIN_SIZE),
+        max_size=_env_int(ENV_POOL_MAX_SIZE, DEFAULT_POOL_MAX_SIZE),
+        timeout=_env_float(ENV_POOL_TIMEOUT_SECONDS, DEFAULT_POOL_TIMEOUT_SECONDS),
+    )
+
+
 class PostgresRepository(PersistenceRepository):
     """PostgreSQL implementation of PersistenceRepository."""
 
     def __init__(
         self,
         pool_or_conninfo: Union[ConnectionPool, str],
-        min_size: int = 1,
-        max_size: int = 10,
-        timeout: float = 30.0,
+        min_size: int = DEFAULT_POOL_MIN_SIZE,
+        max_size: int = DEFAULT_POOL_MAX_SIZE,
+        timeout: float = DEFAULT_POOL_TIMEOUT_SECONDS,
         retry_policy: Optional[RetryPolicy] = None,
     ) -> None:
         """Initialize PostgresRepository with a ConnectionPool or connection string.
@@ -63,6 +176,12 @@ class PostgresRepository(PersistenceRepository):
             retry_policy: Optional bounded retry policy for transient PostgreSQL
                 contention errors (SQLSTATE 40001/40P01). Defaults to the
                 conservative policy read from the SENTINEL_PG_RETRY_* env vars.
+
+        Note:
+            The pool sizing/timeout defaults match the environment defaults
+            exposed by :func:`pool_config_from_env`; runtime callers obtain
+            both through :func:`core.persistence.factory.get_repository` so the
+            API and the event worker share one configuration source.
         """
         if isinstance(pool_or_conninfo, str):
             if not pool_or_conninfo.strip():
@@ -95,19 +214,27 @@ class PostgresRepository(PersistenceRepository):
     def from_env(
         cls,
         env_var: str = "SENTINEL_DATABASE_URL",
-        min_size: int = 1,
-        max_size: int = 10,
+        min_size: Optional[int] = None,
+        max_size: Optional[int] = None,
+        timeout: Optional[float] = None,
     ) -> PostgresRepository:
         """Construct PostgresRepository from environment variable.
 
         Args:
             env_var: Name of the environment variable containing PostgreSQL connection string.
+            min_size: Optional explicit minimum pool size. When ``None`` the
+                value is taken from the shared environment pool configuration.
+            max_size: Optional explicit maximum pool size. When ``None`` the
+                value is taken from the shared environment pool configuration.
+            timeout: Optional explicit acquisition timeout. When ``None`` the
+                value is taken from the shared environment pool configuration.
 
         Returns:
             PostgresRepository instance.
 
         Raises:
-            PersistenceError: If the environment variable is unset or empty.
+            PersistenceError: If the environment variable is unset or empty, or
+                the effective pool configuration is invalid.
         """
         conn_str = os.getenv(env_var)
         if not conn_str or not conn_str.strip():
@@ -115,7 +242,13 @@ class PostgresRepository(PersistenceRepository):
                 f"Environment variable '{env_var}' is not set or empty. "
                 "Configure a valid PostgreSQL connection URL."
             )
-        return cls(conn_str.strip(), min_size=min_size, max_size=max_size)
+        config = pool_config_from_env()
+        return cls(
+            conn_str.strip(),
+            min_size=config.min_size if min_size is None else min_size,
+            max_size=config.max_size if max_size is None else max_size,
+            timeout=config.timeout if timeout is None else timeout,
+        )
 
     def close(self) -> None:
         """Close the connection pool if owned by this repository."""

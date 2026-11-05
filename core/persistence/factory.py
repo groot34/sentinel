@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Optional
 
 from core.persistence.filesystem import FilesystemRepository
-from core.persistence.postgres import PostgresRepository
+from core.persistence.postgres import (
+    PostgresRepository,
+    pool_config_from_env,
+)
 from core.persistence.repository import PersistenceError, PersistenceRepository
 
 DEFAULT_PERSISTENCE_ROOT = ".sentinel_persistence"
@@ -48,7 +51,16 @@ def get_repository(
                 "PostgreSQL backend requested, but SENTINEL_DATABASE_URL is not configured. "
                 "Set SENTINEL_DATABASE_URL or pass database_url."
             )
-        return PostgresRepository(conn_str.strip())
+        # Single shared configuration source: both the API and the event worker
+        # construct their repository here, so pool sizing and the acquisition
+        # timeout are resolved and validated exactly once, identically.
+        pool_config = pool_config_from_env()
+        return PostgresRepository(
+            conn_str.strip(),
+            min_size=pool_config.min_size,
+            max_size=pool_config.max_size,
+            timeout=pool_config.timeout,
+        )
 
     else:
         raise PersistenceError(

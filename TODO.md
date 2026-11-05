@@ -173,20 +173,43 @@
   - 35 focused offline tests in `tests/test_api_readiness.py`.
   - **Executed locally** (Windows, no database): focused readiness tests 35 passed; focused auth tests 64 passed; full offline suite 983 passed / 55 skipped / 1 warning; incident validation 51/51; `git diff --check` clean. **No CI run for Mission 21 yet**; **PostgreSQL integration not run locally**.
   - **Known residual limitation (documented):** the deadline bounds only the HTTP response, not the underlying operation. A blocked filesystem syscall or PostgreSQL network operation can outlive the deadline; such abandoned work remains bounded solely by the two-slot readiness admission capacity.
+- [x] **Mission 22: Production Readiness & Deployment Hardening** (2026-11-05; Tasks 1–6 committed `787ec40`, Task 7 uncommitted — local validation only; CI pending; **Task 9 not started**)
+  - **Container image (`Dockerfile`)**: `python:3.12-slim`; installs runtime dependencies only from `requirements-runtime.txt`; copies `api/`, `agents/`, `core/`, `schemas/`. Runs as a dedicated **non-root** user `sentinel` (**UID 10001**), pre-creates and `chown`s `/app/.sentinel_persistence` and `/app/incidents` so a fresh mounted volume is writable; `EXPOSE 8000`; standard-library `HEALTHCHECK` (`urllib.request`, no `curl`) probing `GET /ready`; `CMD ["python","-m","api","--host","0.0.0.0","--port","8000"]` in exec form so uvicorn receives `SIGTERM` directly.
+  - **`.dockerignore`** excludes tests, incident datasets, evaluation fixtures, local secrets, docs and the Docker files themselves from the build context and image.
+  - **Tiered requirements**: `requirements-runtime.txt` (pinned production) ← `requirements-dev.txt` (adds pinned test/dev tooling) ← umbrella `requirements.txt` (`-r requirements-dev.txt`); test-only dependencies are no longer in the runtime image and existing CI/Makefile workflows are unchanged.
+  - **`docker-compose.yml`** (local development): `postgres` (PostgreSQL 16, loopback host port `${POSTGRES_HOST_PORT:-5432}`, named volume `sentinel_pgdata`, `pg_isready` healthcheck), `sentinel-api` (published `${SENTINEL_API_HOST_PORT:-8000}`, `sentinel_incidents` volume, 1.0 CPU / 1 GB) and `sentinel-worker` (`command: ["python","-m","api.event_worker"]`, inherited `/ready` healthcheck disabled, 0.5 CPU / 512 MB), sharing one image; application services use `init: true`, `restart: unless-stopped` and `depends_on: postgres (condition: service_healthy)`. Compose does **not** run migrations — they stay owned by `core.persistence.schema` and are applied explicitly (`make db-migrate`).
+  - **Application lifecycle (`api/app.py`)**: Starlette `lifespan` builds the repository, readiness runtime and owned pool and tears them down from a `finally` block (so teardown runs after a failed start too). Shutdown is **idempotent** (`app.state.shutdown_complete`) and **non-blocking** — `pool.close()` runs via `asyncio.to_thread(...)` and the readiness executor is shut down with `wait=False`; an injected pool is not closed (`_owns_pool`).
+  - **Worker signal handling (`api/event_worker/worker.py`)**: `SIGTERM`/`SIGINT` are routed to a minimal, flag-only `threading.Event` handler (no DB work); the poll loop waits on that event (`Event.wait(timeout)`) so shutdown is immediate and the loop stops **before starting another batch**; the in-flight batch finishes on the normal delivery path. Handler registration tolerates signals the platform/thread cannot trap.
+  - **Centralised logging (`core/logging_config.py`)**: a single `configure_logging()` helper used by both entry points applies `LOG_LEVEL` (default `INFO`; unrecognised → `INFO`) to Sentinel's `api`/`agents`/`core` loggers only. `INCIDENTS_DIR` sets the bundle root (`--incidents-root` overrides it); the unused `SENTINEL_ENV` was removed.
+  - **Task 7 — environment-driven PostgreSQL pool (uncommitted)**: the previously hardcoded pool knobs are now read once from `SENTINEL_PG_POOL_MIN_SIZE` (default `1`), `SENTINEL_PG_POOL_MAX_SIZE` (default `10`) and `SENTINEL_PG_POOL_TIMEOUT_SECONDS` (default `30.0`) by a single shared source (`pool_config_from_env()` → validated `PoolConfig`) used by both the API and the worker; the defaults reproduce the previous behaviour. Invalid or inconsistent values (`min<1`, `max<1`, `min>max`, non-finite/non-positive timeout, non-numeric) raise a sanitised `PersistenceError` naming only the offending setting. `SENTINEL_PG_RETRY_*` semantics are unchanged (clamped, not rejected).
+  - 78 focused tests: `tests/test_app_lifecycle.py` (10), `tests/test_config_env.py` (29), `tests/test_worker_shutdown.py` (11) and `tests/test_pg_pool_config.py` (28).
+  - **Executed locally** (Windows, no database): full offline suite 1061 passed / 55 skipped / 1 warning (1116 collected); incident validation 51/51; `git diff --check` clean. **No CI run for Mission 22 yet**; Docker/Compose and live PostgreSQL were **not** exercised locally.
+  - **Known residual limitation (documented):** an in-flight synchronous PostgreSQL call cannot be forcibly interrupted. Graceful shutdown stops the API taking new work and the worker before its next batch, but an operation already in progress is not cancellable; a worker claim that cannot be finalised is recovered by the claim-expiry sweep (default TTL 300 s) and is never marked delivered.
+  - **Task 8**: documentation-only reconciliation across `README.md`, `REPRODUCE.md`, `docs/ARCHITECTURE.md`, `docs/CURRENT_STATE_AUDIT.md`, `CHANGELOG.md` and this file; no runtime change. **Task 9 was not started.**
 
 ---
 
-## Post-Mission 19 Remaining Engineering Work
+## Post-Mission 22 Remaining Engineering Work
 - [x] **Documented Incident Bundle Contract** (Mission 18, 2026-10-21):
   - The canonical input contract is now documented in [README §6.2](README.md) and [docs/ARCHITECTURE.md §4.7](docs/ARCHITECTURE.md) with a minimal example, and enforced before any LLM call by `agents/bundle_validator.py`. The consumer-facing *diagnosis* contract (evidence → hypotheses → verification → proposals → approvals) remains exposed by `GET /investigations/{id}/result` (Mission 17).
 - [x] **Client-Side Incident Submission** (Mission 19, 2026-10-25):
   - The opt-in `POST /incidents` endpoint closes the last gap in the ingest → investigate → retrieve-result flow. Multipart/archive upload, authentication, and durable job queues remain explicitly out of scope.
-- [ ] **CI Validation for Mission 19**:
-  - Push and confirm both GitHub Actions jobs stay green (offline + live PostgreSQL 16) with the 86 new incident-ingestion tests, then record the run ID. (Missions 17 & 18 were verified green in run `39635055973`, commit `07a72d5`, PostgreSQL 853 passed / 0 skipped.)
+- [x] **Write-Endpoint Authentication** (Mission 20, committed `58c6c24`):
+  - The opt-in `SENTINEL_API_AUTH_ENABLED` guard (`api/auth.py`) protects every non-safe method with an `Authorization: Bearer` static key (`hmac.compare_digest`). Per-user identity, RBAC, key rotation, rate limiting and durable job queues remain explicitly out of scope.
+- [x] **Operational Readiness Probe** (Mission 21, committed `e140476`):
+  - `GET /ready` performs a real, read-only persistence probe with bounded, fail-fast admission control. The `PostgresRepository.probe()` override remains unverified against a live database locally.
+- [x] **Containerised, Non-Root Deployment** (Mission 22, Tasks 1–6 committed `787ec40`; Task 7 uncommitted):
+  - The runtime image, Compose stack, lifespan/shutdown hardening, worker signal handling and environment-driven PostgreSQL pool are implemented and locally validated. **Task 9 was not started.**
+- [ ] **CI Validation for Missions 19–22**:
+  - Push and confirm both GitHub Actions jobs stay green (offline + live PostgreSQL 16) with the Missions 19–22 test additions, then record the run IDs. (Missions 17 & 18 were verified green in run `39635055973`, commit `07a72d5`, PostgreSQL 853 passed / 0 skipped.) This is the single outstanding item keeping Missions 19–22 at **local validation only**.
+- [ ] **Docker / Compose End-to-End Validation**:
+  - `docker compose up --build`, apply migrations, and confirm in-container behaviour (non-root writes to mounted volumes, the API `/ready` healthcheck, and worker `SIGTERM` shutdown plus claim-expiry recovery). Not exercised locally (Docker unavailable).
 - [ ] **Distributed Task Queue Integration**:
   - Extend in-process background execution to durable external task queues (Redis Streams, Celery, Temporal, or BullMQ) across multi-node worker clusters.
 - [ ] **External Event Bus Streaming Connectors**:
   - Extend `EventDeliveryWorker` to publish outbox events to external messaging brokers (Redis Streams, Apache Kafka, or HTTP Webhook consumers).
+- [ ] **Explicit `SERIALIZABLE` isolation (optional)**:
+  - Sentinel runs at the server-default READ COMMITTED level; a future mission could adopt explicit serialisable isolation with the accompanying phantom-read guarantees and tests.
 
 ---
 

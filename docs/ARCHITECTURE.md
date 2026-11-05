@@ -917,4 +917,57 @@ non-safe method, and rejection before the request body is consumed. It also cove
 missing-vs-wrong responses, duplicate `Authorization` header rejection, the sanitised warning for an
 unrecognised `SENTINEL_API_AUTH_ENABLED` value, accepted truthy values, `HEAD`/`OPTIONS` handling,
 header-name case handling, and that `app.state.auth_config` does not retain the secret. The full
-offline suite is now **947 passed / 55 skipped** locally.
+offline suite is now **1061 passed / 55 skipped** locally (Mission 22).
+
+### 4.10 Production Readiness & Containerised Deployment (Mission 22)
+
+**Goal**: make the existing API/worker deployable as a containerised, non-root stack without
+changing runtime behaviour, and make the durable PostgreSQL settings environment-driven.
+
+**Image (`Dockerfile`)** — `python:3.12-slim`, `WORKDIR /app`. Installs **runtime-only**
+dependencies from `requirements-runtime.txt` (the split is `requirements-runtime.txt` ←
+`requirements-dev.txt` ← umbrella `requirements.txt`, so test/dev tooling is never in the
+image). Copies only `api/`, `agents/`, `core/` and `schemas/`. Runs as the non-root user
+`sentinel` (UID 10001); `/app/.sentinel_persistence` and `/app/incidents` are created and
+`chown`-ed so mounted volumes inherit writable ownership. `HEALTHCHECK` probes `GET /ready`
+via `urllib.request` (no `curl`/`wget`). `CMD ["python", "-m", "api", "--host", "0.0.0.0",
+"--port", "8000"]` in exec form so uvicorn receives `SIGTERM` directly.
+
+**Compose (`docker-compose.yml`)** — `postgres` (`postgres:16-alpine`, named volume
+`sentinel_pgdata`, `pg_isready` healthcheck, loopback-bound host port), `sentinel-api`
+(published `${SENTINEL_API_HOST_PORT:-8000}`, `sentinel_incidents` volume, 1.0 CPU / 1 GB)
+and `sentinel-worker` (`command: ["python", "-m", "api.event_worker"]`, inherited `/ready`
+healthcheck disabled, 0.5 CPU / 512 MB). Both application services use `restart:
+unless-stopped`, `init: true` and `depends_on: postgres: condition: service_healthy`. The
+stack is local-development only and does **not** run migrations (see §4.2).
+
+**Application lifecycle** — the Starlette `lifespan` (re)builds the persistence repository,
+readiness runtime and owned PostgreSQL pool. Shutdown is **idempotent** (`app.state.shutdown_complete`),
+closes the pool off the event loop (`asyncio.to_thread`) and only closes a pool the app owns
+(`_owns_pool`); the readiness executor is shut down non-blockingly (`executor.shutdown(wait=False)`),
+and cleanup runs from a `finally` block so it executes even after a startup failure.
+
+**Worker shutdown** — the worker registers `SIGTERM`/`SIGINT` handlers that only set a
+`threading.Event`; the current batch completes and the loop exits before the next poll (the
+poll interval uses `Event.wait(timeout)`, so it is interruptible). **Honest limitation**: an
+in-flight synchronous PostgreSQL call cannot be forcibly interrupted; a blocked batch is
+terminated by the orchestrator and its un-acknowledged claims are recovered once the 300 s
+claim TTL (`DEFAULT_CLAIM_TTL_SECONDS`) expires via `release_expired_claims()` (§4.5).
+
+**Environment-driven configuration (Task 7)**
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `SENTINEL_PG_POOL_MIN_SIZE` | `1` | Minimum pooled connections (≥ 1) |
+| `SENTINEL_PG_POOL_MAX_SIZE` | `10` | Maximum pooled connections (≥ min) |
+| `SENTINEL_PG_POOL_TIMEOUT_SECONDS` | `30.0` | Seconds to wait for a pooled connection (finite, > 0) |
+
+These are validated once by `pool_config_from_env()` (frozen `PoolConfig`) and shared by both
+the API and the worker; invalid numerics or `min > max` raise a clear sanitised error.
+`SENTINEL_PG_RETRY_*` (§4.4) keeps its existing clamped semantics. `LOG_LEVEL` controls the
+`api`/`agents`/`core` application loggers (never the root or uvicorn loggers); `INCIDENTS_DIR`
+sets the bundle root; the unused `SENTINEL_ENV` variable was removed.
+
+**Tests** — Mission 22 added 78 tests: `tests/test_app_lifecycle.py`, `tests/test_config_env.py`
+and `tests/test_worker_shutdown.py` (Tasks 1–6) plus 28 in `tests/test_pg_pool_config.py`
+(Task 7). Local validation only — **no CI run yet**.
