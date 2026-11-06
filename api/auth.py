@@ -65,7 +65,11 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 #: Paths whose safe-method requests stay public even when read protection is on.
 #: The exemption is method-scoped: a non-safe method on one of these paths is
 #: still guarded, so a future mutating route added here cannot be silently
-#: exposed by an entry in this set.
+#: exposed by an entry in this set. Trailing slashes are normalised away before
+#: the lookup, because the router answers ``/ready/`` with a redirect to
+#: ``/ready``: exempting one spelling but not the other would turn a public
+#: probe into a 401 under read protection. Only these two paths are ever
+#: matched, so no unrelated route can become public through this check.
 PUBLIC_PATHS = frozenset({"/health", "/ready"})
 
 _BEARER_PREFIX = "bearer "
@@ -202,8 +206,9 @@ class ApiKeyAuthMiddleware:
         if method in SAFE_METHODS:
             # The public probe paths bypass the guard for safe methods only. A
             # non-safe method on the same path does not reach this branch, so it
-            # still hits the default-deny return below.
-            if scope.get("path", "") in PUBLIC_PATHS:
+            # still hits the default-deny return below. The trailing slash is
+            # dropped so /ready/ is judged exactly like /ready.
+            if scope.get("path", "").rstrip("/") in PUBLIC_PATHS:
                 return False
             # Safe methods are only guarded when read protection is explicitly on.
             return self.config.protect_reads

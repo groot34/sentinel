@@ -29,10 +29,11 @@ cp .env.example .env
 ```bash
 # Run full unit and offline test suite — zero real Groq API calls (all LLM calls mocked)
 pytest
-# Verified outcome (local, Windows, no database, Mission 22): 1061 passed, 55 skipped, 1 warning in ~15s
-# (55 skipped: 46 integration tests requiring a live PostgreSQL instance skipped when
+# Verified outcome (local, Windows, no database, Mission 23): 1080 passed, 70 skipped, 1 warning in ~21s
+# (70 skipped: 61 integration tests requiring a live PostgreSQL instance skipped when
 #  SENTINEL_DATABASE_URL is unset/unreachable — including Mission 15's 4 transient-failure
-#  retry tests and Mission 16's 6 outbox claim/recovery tests; 9 symlink tests skipped on
+#  retry tests, Mission 16's 6 outbox claim/recovery tests, Mission 23's 12 connection-pool
+#  tests and 3 live event-ordering tests; 9 symlink tests skipped on
 #  Windows without Developer Mode — 2 in tests/test_api.py, 6 in tests/test_bundle_validator.py
 #  and 1 in tests/test_incident_ingestion_api.py.)
 # Verified in CI (run 39048469043, Mission 15): the postgres job executes every PostgreSQL
@@ -41,17 +42,34 @@ pytest
 #  postgres 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests executed.
 #  Missions 17 (12 result-endpoint tests) and 18 (98 bundle-validator tests) verified green in
 #  CI (run 39635055973, commit 07a72d5): postgres 853 passed / 0 skipped.
-#  Mission 19 (86 incident-ingestion API tests: 85 passed + 1 skipped symlink) has local
-#  validation only — no CI run yet; PostgreSQL integration was NOT run locally.
-#  Mission 20 (63 API-key authentication tests in tests/test_api_auth.py, all offline) also has
-#  local validation only — no CI run yet. Adding it took the offline suite from 884 to 947 passed.
-#  Mission 21 (35 readiness tests in tests/test_api_readiness.py, plus one safe-method auth
-#  regression test in tests/test_api_auth.py, all offline) has local validation only — no CI run
-#  yet (1002 → 1038 collected).
-#  Mission 22 Tasks 1–7 (78 tests: tests/test_app_lifecycle.py, tests/test_config_env.py and
-#  tests/test_worker_shutdown.py for Tasks 1–6, plus 28 in tests/test_pg_pool_config.py for Task 7)
-#  also has local validation only — no CI run yet (1038 → 1116 collected). Current offline figure:
-#  1061 passed / 55 skipped / 1 warning.
+#  Missions 19 (incident-ingestion API), 20 (API-key auth), 21 (readiness) and 22 (lifecycle,
+#  config, worker shutdown, pool config) are all verified green in CI (run 42043017041).
+#  Mission 23 (12 live PostgreSQL connection-pool tests in tests/test_pg_pool_live.py, 9 SSE
+#  backpressure tests in tests/test_sse_backpressure.py, 9 event-ordering tests in
+#  tests/test_event_ordering.py and 4 regression tests in tests/test_api_auth.py /
+#  tests/test_app_lifecycle.py; 1116 → 1150 collected) has local validation only — a fresh CI run
+#  against the final Mission 23 tree is still pending, but it WAS run against a live PostgreSQL 16
+#  instance locally: full suite 1141 passed / 9 skipped / 1 warning.
+#
+# Collection and skip reconciliation (verified locally, Mission 23 — three different commands):
+#  * Full offline `pytest` collects 1150 tests -> 1080 passed, 70 skipped.
+#  * The CI offline-job command sets SENTINEL_DATABASE_URL="" and adds four --ignore flags
+#    (tests/test_postgres_persistence.py, tests/test_schema_migration.py, tests/test_outbox.py,
+#    tests/test_postgres_concurrency.py). Those modules own 85 tests (48 + 20 + 13 + 4), so
+#    collection drops to 1065 -> 1037 passed, 28 skipped.
+#  * Full live PostgreSQL (SENTINEL_DATABASE_URL set): 1141 passed, 9 skipped.
+#  The skip count falls by 42 (70 -> 28) because the ignored modules own 42 PostgreSQL-guarded
+#  tests — including 18 contract tests reported under tests/test_persistence_contract.py because
+#  tests/test_postgres_persistence.py imports the un-prefixed PersistenceContractTests base class.
+#  Of the 70 offline skips, exactly 9 are Windows symlink skips and 61 are PostgreSQL-guarded:
+#    9 symlink skips (constant in every command, NOT PostgreSQL): 2 in tests/test_api.py,
+#      6 in tests/test_bundle_validator.py, 1 in tests/test_incident_ingestion_api.py. They skip
+#      locally because the Windows host lacks symlink privileges (Developer Mode) — they are
+#      skipped, not passed, and no CI result is claimed for them.
+#    61 PostgreSQL skips in the full offline run.
+#  Of the 28 skips in the CI offline-job command: 9 symlink + 19 PostgreSQL (tests/test_pg_pool_live.py
+#      12, tests/test_pg_retry.py 4, tests/test_event_ordering.py 3 — modules the job still collects).
+#  The full live PostgreSQL run keeps only the 9 Windows symlink skips; every PostgreSQL test executes.
 
 # Run the 51 incident dataset invariant validation checks
 python tests/validate_incidents.py
@@ -149,10 +167,11 @@ in-progress / partial / malformed-verification handling, `404`/`400`/`503` error
 internal-state non-leakage (exact allowlisted key sets; `before`/`after` absent), and
 preservation of the pre-existing `GET /investigations/{id}` contract.
 
-**Validation status**: implementation complete, **local validation only**. All 12 tests pass
+**Validation status**: implementation complete, validated in CI. All 12 tests pass
 locally and the full offline suite is 707 passed / 48 skipped / 1 warning (at the time of
-Mission 17; after Mission 18 the suite is 799 passed / 54 skipped). **No CI run exists
-for Mission 17 yet**, and the endpoint's PostgreSQL path was **not** exercised locally
+Mission 17; after Mission 18 the suite is 799 passed / 54 skipped). Mission 17 is CI-green in
+[run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`),
+and the endpoint's PostgreSQL path was **not** exercised locally
 (Docker unavailable) — the projection is backend-agnostic because both repositories
 reconstruct `InvestigationState` via `from_dict()`.
 
@@ -186,7 +205,7 @@ clear actionable error messages (file + offending row), validation occurring bef
 (`get_llm_client` is asserted never to be constructed), and no source mutation / no access to
 `ground_truth.md` (recorded file-open tracing plus an AST-style literal scan).
 
-**Validation status**: implementation complete, **local validation only**. Focused tests 92 passed /
+**Validation status**: implementation complete, validated in CI. Focused tests 92 passed /
 6 skipped locally; full offline suite 799 passed / 54 skipped / 1 warning (853 collected); incident
 validation 51/51. Missions 17 & 18 are CI-green in [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973)
 (commit `07a72d5`, `postgres` 853 passed / 0 skipped); PostgreSQL was **not** exercised locally.
@@ -265,10 +284,11 @@ simulation relying only on the atomic rename), refusal to publish for an activel
 leased incident, a symlinked-target refusal, injected storage failures, no absolute-path leakage, an
 empty-bundle refusal at the service boundary, and compatibility of the existing investigation routes.
 
-**Validation status**: implementation complete, **local validation only**. Focused tests 85 passed +
+**Validation status**: implementation complete. Focused tests 85 passed +
 1 skipped; full offline suite 884 passed / 55 skipped / 1 warning (939 collected); incident
-validation 51/51. **No CI run exists for Mission 19 yet**, and PostgreSQL was **not** exercised
-locally.
+validation 51/51. Mission 19 is CI-green in
+[run 42043017041](https://github.com/groot34/sentinel/actions/runs/42043017041); PostgreSQL was
+**not** exercised locally.
 
 > **Overwrite decision (honest):** a new incident is published with a single atomic `os.rename` and
 > never leaves a partial bundle visible. Replacement is deliberately **unsupported** — there is no
@@ -343,9 +363,11 @@ rejection, the sanitised warning for an unrecognised `SENTINEL_API_AUTH_ENABLED`
 truthy values, `HEAD`/`OPTIONS` handling, header-name case handling, and that `app.state.auth_config`
 does not retain the secret.
 
-**Validation status**: implementation complete, **local validation only**. Focused tests 63 passed;
+**Validation status**: implementation complete. Focused tests 63 passed;
 full offline suite 1061 passed / 55 skipped / 1 warning (1116 collected); incident validation 51/51.
-**No CI run exists for Mission 20 yet**, and PostgreSQL was **not** exercised locally.
+Mission 20 is CI-green in
+[run 42043017041](https://github.com/groot34/sentinel/actions/runs/42043017041); PostgreSQL was
+**not** exercised locally.
 
 ## PostgreSQL Integration Testing
 
@@ -377,8 +399,8 @@ make test-postgres
 
 # 5. Run the complete suite (offline + live PostgreSQL + incident validation)
 make test-all
-# Locally on Windows without a DB (verified, Mission 22): 1061 passed, 55 skipped, 1 warning.
-# With a local DB (expected): 1107 passed, 9 skipped (Windows symlink only), 1 warning.
+# Locally on Windows without a DB (verified, Mission 23): 1080 passed, 70 skipped, 1 warning.
+# With a local DB (verified, Mission 23): 1141 passed, 9 skipped (Windows symlink only), 1 warning.
 
 # 6. Stop the container (data volume preserved for next run)
 make db-down
@@ -406,9 +428,10 @@ python -m core.persistence.schema status --url "$SENTINEL_DATABASE_URL"
 ```
 
 ### CI / GitHub Actions
-The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
+The `.github/workflows/ci.yml` workflow runs three jobs on every push and PR:
 - **`offline`** — full unit and mock suite with no database; validates incident dataset; `git diff --check`.
 - **`postgres`** — starts `postgres:16-alpine`, bootstraps the schema, runs the full test suite with `SENTINEL_DATABASE_URL` set. Fails if any required PostgreSQL integration test skips.
+- **`container`** — builds the runtime image (asserting non-root UID 10001 and runtime-only dependencies), starts the Compose stack, checks `/health` and `/ready` both return 200 and the worker stays up, then tears the stack down.
 
 > **Verified live run**: GitHub Actions [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043)
 > (commit `fa4f1c7`) completed green. The `postgres` job reported **733 passed, 0 skipped** against
@@ -428,6 +451,13 @@ The `.github/workflows/ci.yml` workflow runs two jobs on every push and PR:
 > (commit `aba70e1`) passed both jobs — `postgres` (PostgreSQL 16) **743 passed, 0 skipped**
 > (`Total skipped: 0`; all 6 live outbox tests executed) and `offline` **654 passed, 4 skipped**;
 > migrations `001`–`003` applied and schema verification passed; incident validation 51/51 in both jobs.
+>
+> **Missions 17–22 baseline**: GitHub Actions
+> [run 42043017041](https://github.com/groot34/sentinel/actions/runs/42043017041) (run #12) is the
+> latest green CI baseline and covers Mission 22 along with the Mission 19–21 work. It is also the
+> last run that was executed against a tree predating Mission 23 — Mission 23's integrated changes
+> have been validated **locally only** so far, so a **fresh CI run against the final Mission 23 tree
+> is still pending**.
 
 ## Containerised Deployment (Mission 22)
 

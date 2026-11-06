@@ -1436,6 +1436,14 @@ async def _stream_investigation_events(
       closing only when a subsequent query confirms there are no remaining events.
     - Honest behaviour when event history is unsupported by the persistence backend.
     - Graceful cleanup on client disconnection / cancellation.
+
+    Persistence access is deliberately off-loaded to a worker thread. This is an
+    ``async`` generator, so it runs on the event loop, while every repository
+    method is synchronous and may block on a database round trip. Calling them
+    directly would block the single shared loop that also serves every other
+    client's keep-alives, event delivery and the lifespan shutdown, so one slow
+    query would stall unrelated connections. ``asyncio.to_thread`` keeps the
+    blocking call off the loop; the loop stays free to service everyone else.
     """
     backend_supports = getattr(repository, "supports_event_history", True)
     if not backend_supports:
@@ -1486,7 +1494,9 @@ async def _stream_investigation_events(
         cursor_found = False
         while True:
             try:
-                batch = repository.list_events(safe_id, limit=page_size, after_cursor=search_cursor)
+                batch = await asyncio.to_thread(
+                    repository.list_events, safe_id, limit=page_size, after_cursor=search_cursor
+                )
             except Exception as exc:
                 logger.warning("Error resolving cursor for investigation %s: %s", safe_id, exc)
                 yield _format_sse_event(
@@ -1528,7 +1538,9 @@ async def _stream_investigation_events(
             # 2. Query next bounded page strictly after last_cursor
             query_succeeded = False
             try:
-                events_page = repository.list_events(safe_id, limit=page_size, after_cursor=last_cursor)
+                events_page = await asyncio.to_thread(
+                    repository.list_events, safe_id, limit=page_size, after_cursor=last_cursor
+                )
                 query_succeeded = True
             except Exception as exc:
                 logger.warning("Error fetching events for investigation %s: %s", safe_id, exc)
@@ -1547,7 +1559,7 @@ async def _stream_investigation_events(
                 last_cursor = event_key(ev)
 
             # 4. Check current investigation status for terminal states
-            state = repository.load(safe_id)
+            state = await asyncio.to_thread(repository.load, safe_id)
             is_terminal = False
             if state is not None:
                 st = state.status.value if hasattr(state.status, "value") else str(state.status)

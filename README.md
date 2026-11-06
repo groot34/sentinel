@@ -14,19 +14,22 @@ chain is complete and traceable.
 |---|:---:|:---:|
 | Root-cause accuracy | 10/10 | 10/10 |
 | Verified root causes | **0/10** | **10/10** |
-| Automated tests | — | **1061 passed, 55 skipped** offline (Mission 22, local); **853 passed, 0 skipped** live PostgreSQL 16 CI (run 39635055973, Missions 17 & 18) |
+| Automated tests | — | **1080 passed, 70 skipped** offline (Mission 23, local); Missions 17–18 and 19–22 green in CI ([run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973), [run 42043017041](https://github.com/groot34/sentinel/actions/runs/42043017041)); fresh Mission 23 CI run pending |
 | Incident validation checks | — | **51 passed** |
 | Patches auto-applied | — | **0** |
 
 Sentinel's demonstrated advantage is **verification rigor**, not raw diagnostic accuracy.
 Both systems diagnose all 10 incidents correctly. Only Sentinel can prove it.
-*(Note: without PostgreSQL or Windows symlink privileges, 55 tests skip — 46 PostgreSQL live integration tests (including Mission 15's 4 retry tests and Mission 16's 6 outbox claim/recovery tests) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 1061 passed / 55 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests (853 → 939 collected), Mission 20 adds 63 API-key authentication tests (939 → 1002 collected), Mission 21 adds 35 readiness tests plus one safe-method auth regression test (1002 → 1038 collected) and Mission 22 Tasks 1–7 add 78 tests (1038 → 1116 collected); Missions 19–22 have **local validation only** — no CI run yet, and PostgreSQL was **not** tested locally. The current offline figure is **1061 passed / 55 skipped / 1 warning** (Windows, no database).)*
+*(Note: without PostgreSQL or Windows symlink privileges, 70 tests skip — 61 PostgreSQL live integration tests (Mission 15's 4 retry tests, Mission 16's 6 outbox claim/recovery tests, Mission 23's 12 connection-pool tests and 3 live event-ordering tests, plus the pre-existing persistence/concurrency/outbox/schema suite) plus 9 Windows symlink tests (2 API path-containment tests + 6 bundle-validator symlink/escape tests + 1 ingestion symlinked-target test), giving 1080 passed / 70 skipped offline. With Docker (`make db-up && make db-migrate`), all PostgreSQL integration tests execute. Mission 15 was verified green in GitHub Actions on both [run 39048469043](https://github.com/groot34/sentinel/actions/runs/39048469043) (commit `fa4f1c7`) and [run 39049346329](https://github.com/groot34/sentinel/actions/runs/39049346329) (commit `1d55db8`): `offline` job 650 passed / 4 skipped, `postgres:16-alpine` job 733 passed / 0 skipped. Mission 16 was verified green in GitHub Actions [run 39277794918](https://github.com/groot34/sentinel/actions/runs/39277794918) (commit `aba70e1`): `offline` job 654 passed / 4 skipped, `postgres:16-alpine` job 743 passed / 0 skipped, with skip enforcement reporting `Total skipped: 0` so all 6 live outbox tests executed. Missions 17 and 18 (12 result-endpoint tests + 98 bundle-validator tests) were verified green in GitHub Actions [run 39635055973](https://github.com/groot34/sentinel/actions/runs/39635055973) (commit `07a72d5`): `postgres:16-alpine` job 853 passed / 0 skipped. Mission 19 adds 86 incident-ingestion API tests (853 → 939 collected), Mission 20 adds 63 API-key authentication tests (939 → 1002 collected), Mission 21 adds 35 readiness tests plus one safe-method auth regression test (1002 → 1038 collected), Mission 22 Tasks 1–7 add 78 tests (1038 → 1116 collected) and Mission 23 adds 34 tests — 12 live PostgreSQL pool tests (`tests/test_pg_pool_live.py`), 9 SSE backpressure tests (`tests/test_sse_backpressure.py`), 9 event-ordering tests (`tests/test_event_ordering.py`) and 4 regression tests in `tests/test_api_auth.py` / `tests/test_app_lifecycle.py` (1116 → 1150 collected). Missions 19–22 are CI-validated in GitHub Actions [run 42043017041](https://github.com/groot34/sentinel/actions/runs/42043017041), although PostgreSQL was **not** tested locally through Mission 22; a **fresh CI run against the final Mission 23 tree is still pending**. Mission 23 **was** validated locally against a live PostgreSQL 16 instance (full suite 1141 passed / 9 skipped, with every offline-skipped PostgreSQL test executing) and its container stack was smoke-tested locally. The current offline figure is **1080 passed / 70 skipped / 1 warning** (Windows, no database).)*
 
 ---
 
 ## 1. Problem
 
-> **CI Status**: Two-job GitHub Actions workflow enforces both offline correctness and live PostgreSQL integration on every push and pull request. See `.github/workflows/ci.yml`.
+> **CI Status**: A three-job GitHub Actions workflow runs on every push and pull request — offline
+> correctness (no database), live PostgreSQL 16 integration, and a Compose container smoke test.
+> Missions 19–22 are green in [run 42043017041](https://github.com/groot34/sentinel/actions/runs/42043017041);
+> a fresh CI run against the final Mission 23 tree is still pending. See `.github/workflows/ci.yml`.
 
 
 Backend and on-call engineers face complex production incidents where critical signals are
@@ -415,10 +418,11 @@ cp .env.example .env
 # Run complete test suite (mocked Groq client, zero API tokens consumed)
 pytest
 # Verified in CI (run 39048469043, Mission 15): 733 passed, 0 skipped with live PostgreSQL 16.
-# Verified locally without a database (Mission 22): 1061 passed, 55 skipped, 1 warning in ~15s
-# (55 skipped: 46 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
-#  unset/unreachable — including Mission 15's 4 transient-failure retry tests and Mission 16's
-#  6 outbox claim/recovery tests; 9 Windows symlink tests skipped for non-admin accounts
+# Verified locally without a database (Mission 23): 1080 passed, 70 skipped, 1 warning in ~21s
+# (70 skipped: 61 PostgreSQL live integration tests skipped when SENTINEL_DATABASE_URL is
+#  unset/unreachable — including Mission 15's 4 transient-failure retry tests, Mission 16's
+#  6 outbox claim/recovery tests, Mission 23's 12 connection-pool tests and 3 live ordering
+#  tests; 9 Windows symlink tests skipped for non-admin accounts
 #  without Developer Mode — 2 in tests/test_api.py, 6 in tests/test_bundle_validator.py and
 #  1 in tests/test_incident_ingestion_api.py.
 #  Mission 14 added 18 tests beyond the 652/32 Mission 13 baseline; Mission 15 added 25
@@ -433,11 +437,24 @@ pytest
 #  safe-method auth regression test in tests/test_api_auth.py.
 #  Mission 22 added 78 tests: 234-line tests/test_app_lifecycle.py, 271-line tests/test_config_env.py,
 #  329-line tests/test_worker_shutdown.py (Tasks 1–6) and 28 tests in tests/test_pg_pool_config.py
-#  (Task 7). Total collected: 1116.
+#  (Task 7). Mission 23 added 34 tests: 12 live PostgreSQL pool tests in tests/test_pg_pool_live.py,
+#  9 SSE backpressure tests in tests/test_sse_backpressure.py, 9 event-ordering tests in
+#  tests/test_event_ordering.py and 4 regression tests across tests/test_api_auth.py and
+#  tests/test_app_lifecycle.py. Total collected: 1150.
 # With make db-up && make db-migrate, all PostgreSQL tests execute locally (0 skipped).
 # Mission 16 verified in CI (run 39277794918, commit aba70e1): offline 654 passed / 4 skipped;
 #  postgres job (PostgreSQL 16) 743 passed / 0 skipped (Total skipped: 0) — all 6 live outbox tests ran.
-# Missions 17–22 have local validation only — no CI run yet; PostgreSQL was not tested locally.
+#  Missions 17 & 18 verified in CI (run 39635055973, commit 07a72d5): postgres 853 passed / 0 skipped.
+#  Missions 19–22 verified in CI (run 42043017041). A fresh CI run against the final Mission 23 tree
+#  is still PENDING — Mission 23 is local-validation only.
+# Mission 23 ran the full suite against a live PostgreSQL 16 instance locally: 1141 passed / 9 skipped
+#  / 1 warning (only the 9 Windows symlink tests skip); the CI offline-job command (four PostgreSQL
+#  modules ignored, run as the CI `offline` job does) is 1037 passed / 28 skipped / 1 warning.
+# Why the CI offline command collects 1065, not 1150: it ignores four PostgreSQL modules
+#  (test_postgres_persistence.py 48, test_schema_migration.py 20, test_outbox.py 13,
+#  test_postgres_concurrency.py 4 = 85 tests), which removes 42 of the 70 skips. The remaining
+#  28 skips are 9 Windows symlink skips plus 19 PostgreSQL skips from modules it still collects
+#  (test_pg_pool_live.py 12, test_pg_retry.py 4, test_event_ordering.py 3).
 
 # Run the incident dataset invariant suite
 python tests/validate_incidents.py
@@ -514,7 +531,7 @@ are applied automatically (shell values take precedence).
 | `SENTINEL_INGEST_MAX_REQUEST_BYTES` | `25165824` | Max raw JSON request body size |
 | `SENTINEL_API_AUTH_ENABLED` | `false` | **Opt-in** API-key guard (Mission 20). `1`/`true`/`yes`/`on` enable it; `0`/`false`/`no`/`off`, absent, or empty leave it disabled; any other non-empty value is treated as disabled and logged so a typo cannot silently disable the guard |
 | `SENTINEL_API_KEY` | — | Static API key. **Required** (non-empty) when the guard is enabled, or the server refuses to start |
-| `SENTINEL_API_AUTH_PROTECT_READS` | `false` | Also protect `GET`/`HEAD`/`OPTIONS`. `/health` and `/ready` stay public for safe methods only; a non-safe method on either path remains protected |
+| `SENTINEL_API_AUTH_PROTECT_READS` | `false` | Also protect `GET`/`HEAD`/`OPTIONS`. `/health` and `/ready` stay public for safe methods only — including the trailing-slash spelling `/ready/`, which is judged identically; a non-safe method on either path remains protected |
 | `SENTINEL_READINESS_TIMEOUT_SECONDS` | `2.0` | HTTP response deadline for the public `GET /ready` dependency check. Absent or invalid values fall back to `2.0`; valid positive values are capped at `30.0`. Bounds the response, not the underlying operation — see the readiness note below |
 
 ### API-Key Authentication (Mission 20)
@@ -581,12 +598,16 @@ Unlike `/health`, `/ready` performs a real, read-only check of the persistence b
 values are capped at `30.0`); otherwise it returns `503` with
 `{"status":"not_ready","checks":{"persistence":"unavailable"}}`. The body is a
 fixed allowlist that never exposes exception messages, paths, credentials, DSNs or connection
-details. `GET /ready` stays public even when `SENTINEL_API_AUTH_PROTECT_READS=true`; non-safe methods on the same path remain protected.
+details. `GET /ready` stays public even when `SENTINEL_API_AUTH_PROTECT_READS=true`: the trailing-slash
+spelling `GET /ready/` is judged identically, so the 307 redirect Starlette issues for it is never
+answered by the auth guard as `401` first; non-safe methods on the same path remain protected.
 
-Probes run on a dedicated two-worker executor with non-blocking admission control: excess requests
-fail fast with the same `503` body rather than queueing, and a probe that outlives the response
-deadline keeps its slot until the underlying operation actually completes, so abandoned work stays
-bounded. Note that the timeout bounds the **HTTP response deadline only**, not necessarily the
+Probes run on a dedicated two-worker executor **owned by the application instance**, with non-blocking
+admission control: excess requests fail fast with the same `503` body rather than queueing, and a
+probe that outlives the response deadline keeps its slot until the underlying operation actually
+completes, so abandoned work stays bounded. The executor is released **without waiting** on abandoned
+probes during application shutdown, so a stuck probe cannot hold up exit. Note that the timeout bounds
+the **HTTP response deadline only**, not necessarily the
 lifetime of a blocked filesystem syscall or PostgreSQL operation: that work is not strictly
 cancellable and can outlive the deadline, but it remains constrained by the readiness admission
 capacity (the two slots above).
@@ -667,7 +688,7 @@ The `GET /investigations/{id}/events` endpoint provides dual-mode event access v
   curl -s http://127.0.0.1:8000/investigations/<investigation_id>/events \
     -H "Accept: application/json"
   ```
-  Returns `InvestigationEventsResponse`. On PostgreSQL, queries all events from `event_outbox` in deterministic order `(created_at ASC, event_id ASC)`. On Filesystem, returns `backend_supports_event_history: false`.
+  Returns `InvestigationEventsResponse`. On PostgreSQL, queries all events from `event_outbox` in deterministic order `(created_at ASC, event_id ASC)`. On Filesystem, returns `backend_supports_event_history: false`. Event timestamps are issued so they are strictly increasing within a single process, so the persisted order matches creation order even on hosts with a coarse clock; `event_id` remains the deterministic tie-break for equal timestamps. This guarantee is **process-local** — it is not claimed across multiple processes.
 
 - **Live Server-Sent Events (`Accept: text/event-stream`)**:
   ```bash
@@ -680,7 +701,7 @@ The `GET /investigations/{id}/events` endpoint provides dual-mode event access v
     -H "Accept: text/event-stream" \
     -H "Last-Event-ID: evt_01J9X..."
   ```
-  Streams real-time events, periodically emits `: keep-alive\n\n` comments, safely drains all pending persisted events, and closes cleanly without emitting synthetic frames upon reaching a terminal state (`COMPLETED`, `FAILED`, `PARTIAL`). If an unresolvable cursor is supplied, the server returns HTTP 200, emits an SSE comment notice, and restarts streaming from the beginning (never failing with HTTP 400).
+  Streams real-time events, periodically emits `: keep-alive\n\n` comments, safely drains all pending persisted events, and closes cleanly without emitting synthetic frames upon reaching a terminal state (`COMPLETED`, `FAILED`, `PARTIAL`). If an unresolvable cursor is supplied, the server returns HTTP 200, emits an SSE comment notice, and restarts streaming from the beginning (never failing with HTTP 400). Persistence reads inside the stream run off the event loop (`asyncio.to_thread`), so a slow or blocked database call cannot starve keepalives for other connected clients or delay shutdown; this uses the loop's default thread pool, so many concurrent streams against a slow database can contend for those shared threads (a capacity limit, not a correctness one).
 
 #### 8. Retrieve Investigation Result
 
@@ -990,8 +1011,8 @@ docker compose down -v
 - Shutdown is **non-blocking**: the PostgreSQL pool is closed through
   `asyncio.to_thread(repository.close)`, so a blocking `pool.close()` cannot stall the event loop,
   and the readiness executor is shut down **without waiting** on abandoned probes so a stuck probe
-  cannot hang shutdown. The pool is only closed when the application owns it (a caller-injected pool
-  remains the caller's responsibility).
+  cannot hang shutdown. Both the pool and the readiness executor are only released when this
+  application owns them (a caller-injected pool remains the caller's responsibility).
 
 ### Worker shutdown & expired-claim recovery
 
@@ -1027,10 +1048,28 @@ All runtime configuration is environment-driven and shared by the API and the wo
 documented there too. The previously documented `SENTINEL_ENV` variable was removed — it was never
 read by the runtime.
 
+### Mission 23: local stack validation & live pool coverage
+
+Mission 23 exercised this stack end to end on a workstation (Docker Desktop) rather than by
+inspection only:
+
+- The image was built and asserted to run as the non-root user (uid 10001) on runtime-only
+  dependencies; `docker compose config` validated, the full stack (`postgres` + `sentinel-api` +
+  `sentinel-worker`) came up healthy, `GET /health` and `GET /ready` both returned `200`, the worker
+  stayed running with **zero restarts**, and the worker-applied schema proved the API and worker share
+  the one PostgreSQL service. The stack and its named volumes were then torn down.
+- Live PostgreSQL connection-pool behaviour is now covered by `tests/test_pg_pool_live.py`: the
+  configured `SENTINEL_PG_POOL_*` sizing is applied and the maximum is never exceeded, connections are
+  reused, acquisition under saturation honours the configured timeout and recovers, concurrent
+  operations return every connection (including on the client/database-error paths), and shutdown
+  closes the underlying server sessions. These run only against a reachable database and skip
+  otherwise. Migrations were applied from scratch (`001`–`003`) and verified, and the full suite
+  against live PostgreSQL 16 is **1141 passed / 9 skipped / 1 warning**.
+
 ## 14. Documentation & Verification References
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Comprehensive architecture specification for Sentinel 1.0 (multi-agent verification engine) and Sentinel 2.0 (distributed state, OCC, outbox, leasing, ingestion, SSE, containerised deployment, and lifecycle hardening).
 - **[docs/CURRENT_STATE_AUDIT.md](docs/CURRENT_STATE_AUDIT.md)** — Exhaustive repository state audit, current test counts, verified capabilities, and unresolved items.
-- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 22.
+- **[CHANGELOG.md](CHANGELOG.md)** — Full chronological release history from initial skeleton through Sentinel 2.0 Mission 23.
 - **[REPRODUCE.md](REPRODUCE.md)** — Complete guide for setting up, running offline tests, launching the API server, querying endpoints, and executing benchmark evaluations.
-- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 22 engineering work.
+- **[TODO.md](TODO.md)** — Roadmap milestone tracker documenting all completed missions and upcoming post-Mission 23 engineering work.

@@ -449,6 +449,44 @@ def test_public_probe_paths_bypass_auth_for_safe_methods_only(incidents_root: Pa
     assert client.post("/ready").status_code == 401
 
 
+def test_ready_with_trailing_slash_is_as_public_as_ready(incidents_root: Path):
+    """`/ready/` must not be treated differently from `/ready` under read protection.
+
+    The router answers the slashed spelling with a redirect to the registered
+    route, so both name the same public probe resource. The guard has to let
+    that redirect through unauthenticated instead of turning it into a 401,
+    while everything else keeps its existing protection.
+    """
+    client = _enabled_client(incidents_root, protect_reads=True)
+
+    # Unauthenticated: the request reaches the router and is redirected.
+    redirect = client.get("/ready/", follow_redirects=False)
+    assert redirect.status_code == 307
+    assert redirect.headers["location"].endswith("/ready")
+
+    # Following the redirect works, and so does calling either spelling.
+    assert client.get("/ready/").status_code == 200
+    assert client.get("/ready").status_code == 200
+    assert client.head("/ready/").status_code == 200
+    assert client.head("/health/").status_code == 200
+
+    # A credential is neither required nor rejected on the slashed path.
+    assert client.get("/ready/", headers=_bearer(SECRET_KEY)).status_code == 200
+
+    # The exemption stays method- and path-scoped: a non-safe method on the
+    # slashed probe path is still denied, and no unrelated read became public.
+    assert client.post("/ready/").status_code == 401
+    assert client.get("/investigations/").status_code == 401
+    assert client.get("/healthz").status_code == 401
+
+
+def test_ready_with_trailing_slash_is_unchanged_when_auth_is_disabled(incidents_root: Path):
+    client = _client(incidents_root=incidents_root)
+
+    assert client.get("/ready/").status_code == 200
+    assert client.get("/ready").status_code == 200
+
+
 def test_read_protection_on_accepts_valid_credential(incidents_root: Path):
     client = _enabled_client(incidents_root, protect_reads=True)
     assert client.get("/investigations", headers=_bearer(SECRET_KEY)).status_code == 200
