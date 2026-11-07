@@ -1,0 +1,8 @@
+# Sentinel frontend — build output and local tooling state.
+node_modules/
+dist/
+.vite/
+*.local
+.env
+.env.*
+!.env.example

@@ -848,6 +848,52 @@ cannot honour, Sentinel refuses replacement. To re-ingest an incident, submit a 
 
 ---
 
+### Web UI (Mission 24)
+
+The first usable frontend lives in `frontend/`: a React + TypeScript + Vite single-page
+app with three connected experiences — an investigations dashboard, an incident
+submission form and a live investigation workspace.
+
+**Why this stack.** The repository is Python-only and had no frontend. React + Vite is a
+standard, dependency-light, actively maintained choice: it needs no paid service, ships an
+env-driven dev server, and its proxy keeps the browser same-origin with the backend so **no
+CORS configuration is required** on the API. `VITE_SENTINEL_API_BASE_URL` overrides the API
+base URL when the frontend is served from a different origin (CORS is then the backend's
+responsibility).
+
+**Run it.** The backend must be running first (see [Start the API Server](#start-the-api-server)):
+
+```bash
+# 1) Backend — the default filesystem backend works for the dashboard and form,
+#    but durable event history (SSE) requires the PostgreSQL backend:
+export SENTINEL_PERSISTENCE_BACKEND=postgres
+export SENTINEL_DATABASE_URL='postgresql://sentinel:sentinel_dev_password@127.0.0.1:5432/sentinel_db'
+python -m api --host 127.0.0.1 --port 8000
+
+# 2) Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev            # http://127.0.0.1:5173
+```
+
+The Vite dev server proxies `/health`, `/ready`, `/incidents` and `/investigations` to
+`http://127.0.0.1:8000` (override with `SENTINEL_API_URL`). Other commands:
+`npm run build` (type-check + production bundle), `npm test` (Vitest).
+
+**Endpoints used (all real, no mocks):** `GET /investigations` (dashboard list),
+`GET /investigations/{id}` (status/stages), `GET /investigations/{id}/result` (diagnosis),
+`GET /investigations/{id}/events` (JSON history **and** the SSE live stream), and
+`POST /investigations` with `Prefer: respond-async` (form submission, so the UI navigates
+straight to the workspace and follows progress over SSE).
+
+**Limitations.** A browser `EventSource` cannot send an `Authorization` header, so the live
+stream is unavailable when `SENTINEL_API_AUTH_PROTECT_READS=true`; the workspace then shows
+the connection error rather than stale data. Human approve/reject decisions are recorded with
+`POST /investigations/{id}/approval` and read back from the investigation's `approvals`; the
+workspace only records a decision — it never applies a patch, writes files, commits or deploys.
+
+---
+
 ## 11. Persistence Backend Comparison
 
 | Feature | Filesystem Backend (`filesystem`) | PostgreSQL Backend (`postgres`) |

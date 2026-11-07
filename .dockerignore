@@ -23,6 +23,9 @@ tests/
 Makefile
 pytest.ini
 
+# --- Frontend (own build pipeline; not part of the API image) --------------
+frontend/
+
 # --- Incident datasets + evaluation artefacts -----------------------------
 incidents/
 eval/
