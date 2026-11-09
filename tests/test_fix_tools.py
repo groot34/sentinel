@@ -20,6 +20,7 @@ from agents.fix_tools import (
     check_hypothesis_exists,
     check_patch_not_destructive,
     check_patch_targets_allowed_files,
+    check_proposal_evidence_linked_to_hypothesis,
     check_proposal_not_claiming_applied,
     check_referenced_files_exist,
     check_source_locations_valid,
@@ -427,3 +428,28 @@ def test_filter_returns_empty_when_none_confirmed():
     hyps = {"hypotheses": [{"hypothesis_id": "HYP-001", "claim": "A"}]}
     ver = {"results": [{"hypothesis_id": "HYP-001", "verdict": "REJECTED"}]}
     assert filter_confirmed_hypotheses(hyps, ver) == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: check_proposal_evidence_linked_to_hypothesis (Rule 11)
+# ---------------------------------------------------------------------------
+
+def test_evidence_linkage_accepts_hypothesis_own_evidence():
+    """A proposal citing exactly its named hypothesis' evidence passes."""
+    check_proposal_evidence_linked_to_hypothesis(_minimal_proposal(), _hypotheses_bundle("HYP-001"))
+
+
+def test_evidence_linkage_rejects_foreign_evidence():
+    """Regression (Mission 26.1, Issue 4). A proposal justified by evidence that
+    its named hypothesis does not cite is not traceably bound to it."""
+    proposal = _minimal_proposal({"evidence_ids": ["EV-LOG-002"]})
+    with pytest.raises(ProposalValidationError) as exc:
+        check_proposal_evidence_linked_to_hypothesis(proposal, _hypotheses_bundle("HYP-001"))
+    assert "not traceably bound" in str(exc.value)
+
+
+def test_evidence_linkage_rejects_unknown_hypothesis():
+    """A proposal naming a hypothesis that is absent from the bundle cannot be verified."""
+    proposal = _minimal_proposal({"hypothesis_id": "HYP-999"})
+    with pytest.raises(ProposalValidationError):
+        check_proposal_evidence_linked_to_hypothesis(proposal, _hypotheses_bundle("HYP-001"))

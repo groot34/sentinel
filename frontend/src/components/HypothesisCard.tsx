@@ -23,6 +23,14 @@ function CheckList({
           <div className="checks__row">
             {check.result && <StatusBadge status={check.result} />}
             <span>{check.description ?? check.check_id ?? "Check"}</span>
+            {check.discriminating === false && (
+              <span
+                className="badge badge--muted"
+                title="Confirms the referenced evidence exists; it does not test the mechanism the hypothesis asserts."
+              >
+                evidence grounding
+              </span>
+            )}
             {check.check_id && (
               <span className="mono checks__ref">{check.check_id}</span>
             )}

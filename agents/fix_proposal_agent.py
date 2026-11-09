@@ -195,7 +195,13 @@ def _normalise_proposal(
     incident_id: str,
     ev_ids: List[str],
 ) -> Dict[str, Any]:
-    """Force-set the immutable fields that the LLM must not override."""
+    """Force-set the immutable fields that the LLM must not override.
+
+    ``hypothesis_id`` and ``evidence_ids`` are pinned to the hypothesis this
+    proposal was generated for. The proposal's evidence provenance is thereby
+    locked to its hypothesis, so a proposal cannot be silently associated with
+    (or justified by) a different hypothesis' evidence.
+    """
     if not isinstance(raw, dict):
         raise LLMJSONParseError("Fix proposal LLM response is not a JSON object.")
     raw["proposal_id"] = proposal_id
@@ -204,10 +210,12 @@ def _normalise_proposal(
     raw["status"] = "PROPOSED"
     raw["human_approval_notice"] = HUMAN_APPROVAL_NOTICE
 
-    # Ensure evidence_ids are valid (only from the hypothesis)
+    # Evidence provenance is owned by the hypothesis, not the LLM. Keep only the
+    # IDs the hypothesis actually cites; fall back to the hypothesis' own set.
+    hyp_evidence = {eid for eid in ev_ids if isinstance(eid, str)}
     given_ev = raw.get("evidence_ids")
-    if not isinstance(given_ev, list) or not given_ev:
-        raw["evidence_ids"] = ev_ids
+    linked = [eid for eid in given_ev if isinstance(eid, str) and eid in hyp_evidence] if isinstance(given_ev, list) else []
+    raw["evidence_ids"] = linked or list(ev_ids)
 
     # changes must be a non-empty list
     changes = raw.get("changes")
@@ -330,9 +338,15 @@ class FixProposalAgent:
         proposals: List[Dict[str, Any]] = []
         validation_errors: Dict[str, List[str]] = {}
 
-        for idx, hyp in enumerate(confirmed, start=1):
-            proposal_id = _assign_fix_id(idx)
-            hyp_id = hyp.get("hypothesis_id", f"HYP-{idx:03d}")
+        for hyp in confirmed:
+            # The proposal is bound to the hypothesis by the hypothesis's own
+            # identity and evidence — never by list position or generation order.
+            hyp_id = hyp.get("hypothesis_id")
+            if not isinstance(hyp_id, str) or not hyp_id:
+                # Without an identity the association cannot be proven, so no
+                # proposal is produced for it.
+                continue
+            proposal_id = _assign_fix_id(len(proposals) + 1)
             ev_ids_for_hyp = list(hyp.get("evidence_ids") or [])
             ver_result = ver_by_hyp.get(hyp_id)
 

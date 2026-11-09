@@ -148,6 +148,114 @@ def test_inconclusive_verdict(tmp_path: Path):
     assert out["results"][0]["verdict"] == VERDICT_INCONCLUSIVE, out["results"][0]["reasoning"]
 
 
+# --- Mission 26.1 regressions: verdict consistency ---
+
+def test_duplicate_checks_collapsed(tmp_path: Path):
+    """Regression (Mission 26.1, Issue 2).
+
+    A hypothesis whose verification plan *and* falsification criteria all
+    resolve to the same deterministic checker must yield a single deduplicated
+    check. Previously one check was emitted per plan step and per falsification
+    criterion, producing several identical, indistinguishable results.
+    """
+    code = json.loads((REPO / "eval" / "sample_runs" / "code_agent_inc_01.json").read_text())
+    hypotheses = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "hypotheses": [
+            _hyp("DB query is called inside the order-item loop causing amplification.",
+                 ["EV-CODE-001"],
+                 ["Verify query inside loop (N+1) via AST.",
+                  "Check query inside loop on the serialization path."],
+                 fals=["If no query inside loop exists, reject the claim."],
+                 idx=1),
+        ],
+    }
+    va = VerificationAgent()
+    out = va.verify(INC_01, hypotheses, code_evidence=code)
+    checks = out["results"][0]["checks"]
+    descriptions = [c["description"] for c in checks]
+    # Every step routed to the same checker and produced the same description.
+    assert len(descriptions) == len(set(descriptions)), f"duplicate checks: {descriptions}"
+    assert len(checks) == 1, f"expected 1 deduplicated check, got {len(checks)}: {descriptions}"
+
+
+def test_grounding_only_check_is_inconclusive(tmp_path: Path):
+    """Regression (Mission 26.1, Issue 3).
+
+    A hypothesis whose only matched check is the evidence-grounding fallback
+    must NOT be CONFIRMED. Evidence merely existing in the bundle (a symptom or
+    correlated observation) is not a deterministic test of a root cause.
+    """
+    metrics = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "evidence": [{"evidence_id": "EV-MET-001", "source": "metrics",
+                      "reference": "metrics/metrics.csv", "excerpt": "spike", "type": "spike"}],
+    }
+    hypotheses = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "hypotheses": [
+            _hyp("Bulk order traffic surge overloaded the database.",
+                 ["EV-MET-001"],
+                 ["Review the general behaviour observed during the incident."],
+                 fals=["None of the observations are checkable."],
+                 idx=1),
+        ],
+    }
+    va = VerificationAgent()
+    out = va.verify(INC_01, hypotheses, metrics_evidence=metrics)
+    jsonschema.validate(instance=out, schema=VERIFICATION_OUTPUT_SCHEMA)
+    r = out["results"][0]
+    assert r["verdict"] == VERDICT_INCONCLUSIVE, r["reasoning"]
+    # The grounding check must be explicitly non-discriminating and typed.
+    grounding = [c for c in r["checks"] if c.get("discriminating") is False]
+    assert grounding, f"expected a non-discriminating grounding check: {r['checks']}"
+    assert all("check_type" in c for c in r["checks"])
+
+
+def test_incidental_mechanism_match_does_not_decide_verdict(tmp_path: Path):
+    """Regression (Mission 26.1).
+
+    Two hypotheses share the same verification step — "Measure DB query count,
+    connection usage and error rate with retries disabled" — which routes onto
+    the N+1 structural checker. That checker PASSes whenever the codebase
+    contains *some* DB call inside a loop, a global property of the code. Only
+    the hypothesis that actually asserts an N+1 mechanism may be confirmed by
+    it; the packet-loss hypothesis, which never asserts N+1, must not be
+    confirmed merely because its plan mentions measuring query count.
+    """
+    code = json.loads((REPO / "eval" / "sample_runs" / "code_agent_inc_01.json").read_text())
+    logs = json.loads((REPO / "eval" / "sample_runs" / "logs_agent_inc_01.json").read_text())
+    metrics = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "evidence": [{"evidence_id": "EV-MET-001", "source": "metrics",
+                      "reference": "metrics/metrics.csv", "excerpt": "spike", "type": "spike"}],
+    }
+    step = "Measure DB query count, connection usage and error rate with retries disabled."
+    hypotheses = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "hypotheses": [
+            _hyp("The bulk endpoint issues one DB query per item inside a loop (N+1).",
+                 ["EV-CODE-001", "EV-LOG-001"], [step], idx=1),
+            _hyp("Minor network packet loss caused client retries that increased DB load.",
+                 ["EV-LOG-001", "EV-MET-001"], [step], idx=2),
+        ],
+    }
+    va = VerificationAgent()
+    out = va.verify(INC_01, hypotheses, logs, metrics, code)
+    jsonschema.validate(instance=out, schema=VERIFICATION_OUTPUT_SCHEMA)
+    by_id = {r["hypothesis_id"]: r for r in out["results"]}
+
+    # HYP-001 asserts the N+1 mechanism, so the same check is discriminating.
+    assert by_id["HYP-001"]["verdict"] == VERDICT_CONFIRMED, by_id["HYP-001"]["reasoning"]
+
+    # HYP-002 does not assert N+1: the identical check must not decide it.
+    hyp2 = by_id["HYP-002"]
+    assert hyp2["verdict"] == VERDICT_INCONCLUSIVE, hyp2["reasoning"]
+    ast_checks = [c for c in hyp2["checks"] if c.get("check_type") == "code_invariant"]
+    assert ast_checks, f"expected the AST loop check to still run: {hyp2['checks']}"
+    assert all(c["discriminating"] is False for c in ast_checks), hyp2["checks"]
+
+
 def test_evidence_chain_preserved(tmp_path: Path):
     code = json.loads((REPO / "eval" / "sample_runs" / "code_agent_inc_01.json").read_text())
     logs = json.loads((REPO / "eval" / "sample_runs" / "logs_agent_inc_01.json").read_text())
@@ -270,3 +378,59 @@ def test_incident_files_unchanged(tmp_path: Path):
         va.verify(inc, hyps, logs, metrics, code)
         after = snap(inc)
         assert before == after, f"Incident files modified: {inc}"
+
+
+def test_output_schema_conforms_for_new_and_legacy_checks() -> None:
+    """Mission 26.1 schema conformance + back-compat.
+
+    New checks carry ``check_type`` and ``discriminating``; checks persisted
+    before Mission 26.1 carry neither. Both must validate against the current
+    output schema because neither field is required.
+    """
+    new_output = {
+        "incident_id": INC_01.name,
+        "results": [
+            {
+                "hypothesis_id": "HYP-001",
+                "verdict": VERDICT_CONFIRMED,
+                "checks": [
+                    {
+                        "check_id": "CHK-001",
+                        "description": "DB call inside loop.",
+                        "result": "PASS",
+                        "evidence": ["EV-CODE-001"],
+                        "reference": "app/orders.py:42",
+                        "detail": "loop-hosted DB call found",
+                        "check_type": "code_invariant",
+                        "discriminating": True,
+                    }
+                ],
+                "reasoning": "mechanism confirmed",
+                "confidence": 0.9,
+            }
+        ],
+    }
+    jsonschema.validate(instance=new_output, schema=VERIFICATION_OUTPUT_SCHEMA)
+
+    legacy_output = {
+        "incident_id": INC_01.name,
+        "results": [
+            {
+                "hypothesis_id": "HYP-001",
+                "verdict": VERDICT_INCONCLUSIVE,
+                "checks": [
+                    {
+                        "check_id": "CHK-001",
+                        "description": "Legacy grounding check.",
+                        "result": "PASS",
+                        "evidence": ["EV-LOG-001"],
+                        "reference": None,
+                        "detail": None,
+                    }
+                ],
+                "reasoning": "legacy",
+                "confidence": 0.25,
+            }
+        ],
+    }
+    jsonschema.validate(instance=legacy_output, schema=VERIFICATION_OUTPUT_SCHEMA)

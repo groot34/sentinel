@@ -97,4 +97,43 @@ describe("HypothesisCard", () => {
     expect(screen.getByText("Falsification criteria (1)")).toBeInTheDocument();
     expect(screen.getByText("Verification plan (1)")).toBeInTheDocument();
   });
+
+  it("labels a non-discriminating check as evidence grounding", () => {
+    render(
+      <HypothesisCard
+        outcome={makeOutcome({
+          verification: makeVerification({
+            checks: [
+              {
+                check_id: "CHK-001",
+                description: "AST scan detected database calls inside a for/while loop.",
+                result: "PASS",
+                reference: "service/app.py:41",
+                detail: null,
+                evidence_ids: ["EV-CODE-001"],
+                check_type: "code_invariant",
+                discriminating: true,
+              },
+              {
+                check_id: "CHK-002",
+                description: "Referenced evidence excerpts verified against source files.",
+                result: "PASS",
+                reference: "logs/application.log:9",
+                detail: null,
+                evidence_ids: ["EV-LOG-001"],
+                check_type: "code_invariant",
+                discriminating: false,
+              },
+            ],
+          }),
+        })}
+        onFocusEvidence={vi.fn()}
+      />,
+    );
+
+    // Only the non-discriminating (grounding) check is labelled; the
+    // mechanism-specific check is left unlabelled.
+    expect(screen.getAllByText("evidence grounding")).toHaveLength(1);
+    expect(screen.getAllByText("PASS")).toHaveLength(2);
+  });
 });

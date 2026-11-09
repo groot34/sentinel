@@ -269,6 +269,41 @@ def check_status_is_proposed(
         )
 
 
+def check_proposal_evidence_linked_to_hypothesis(
+    proposal: Dict[str, Any],
+    available_hypotheses: Dict[str, Any],
+) -> None:
+    """Rule 11: A proposal's evidence must come from the hypothesis it names.
+
+    This is a deterministic, content-based association: the proposal must be
+    justified by the same evidence as the hypothesis it claims to fix. It
+    prevents a proposal from being associated with a hypothesis purely by list
+    position or generation order.
+    """
+    hyp_id = proposal.get("hypothesis_id")
+    ev_ids = [eid for eid in (proposal.get("evidence_ids") or []) if isinstance(eid, str)]
+    if not ev_ids:
+        raise ProposalValidationError("Proposal must reference at least one evidence ID.")
+
+    target: Optional[Dict[str, Any]] = None
+    for h in available_hypotheses.get("hypotheses", []):
+        if isinstance(h, dict) and h.get("hypothesis_id") == hyp_id:
+            target = h
+            break
+    if target is None:
+        raise ProposalValidationError(
+            f"Cannot verify evidence linkage: hypothesis {hyp_id!r} was not found in the supplied bundle."
+        )
+
+    hyp_ev_ids = {eid for eid in (target.get("evidence_ids") or []) if isinstance(eid, str)}
+    foreign = [eid for eid in ev_ids if eid not in hyp_ev_ids]
+    if foreign:
+        raise ProposalValidationError(
+            f"Proposal references evidence {foreign} that is not cited by hypothesis {hyp_id!r} "
+            f"({sorted(hyp_ev_ids)}). The proposal is not traceably bound to the hypothesis it names."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------
@@ -315,6 +350,7 @@ def validate_proposal(
         lambda: check_hypothesis_exists(proposal, available_hypotheses),
         lambda: check_hypothesis_eligible(proposal, verification_results),
         lambda: check_evidence_ids_exist(proposal, all_evidence_ids),
+        lambda: check_proposal_evidence_linked_to_hypothesis(proposal, available_hypotheses),
         lambda: check_referenced_files_exist(proposal, incident_dir),
         lambda: check_source_locations_valid(proposal, incident_dir),
         lambda: check_patch_targets_allowed_files(proposal),

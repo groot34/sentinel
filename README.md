@@ -873,7 +873,7 @@ python -m api --host 127.0.0.1 --port 8000
 # 2) Frontend (separate terminal)
 cd frontend
 npm install
-npm run dev            # http://127.0.0.1:5173
+npm run dev            # http://localhost:5173
 ```
 
 The Vite dev server proxies `/health`, `/ready`, `/incidents` and `/investigations` to
@@ -891,6 +891,53 @@ stream is unavailable when `SENTINEL_API_AUTH_PROTECT_READS=true`; the workspace
 the connection error rather than stale data. Human approve/reject decisions are recorded with
 `POST /investigations/{id}/approval` and read back from the investigation's `approvals`; the
 workspace only records a decision — it never applies a patch, writes files, commits or deploys.
+
+### Running the Full Stack Locally
+
+Brings up the entire product — PostgreSQL, API, event worker and web UI — in four terminals.
+Prerequisites: Docker, Python 3.12+, Node 20+, and a `.env` with `GROQ_API_KEY` set.
+
+```bash
+# 1) Database (Docker) — publishes PostgreSQL on 127.0.0.1:5432
+docker compose up -d postgres
+
+# one-time schema bootstrap
+python -m core.persistence.schema apply \
+  --url 'postgresql://sentinel:sentinel_dev_password@127.0.0.1:5432/sentinel_db'
+
+# 2) API
+export SENTINEL_PERSISTENCE_BACKEND=postgres
+export SENTINEL_DATABASE_URL='postgresql://sentinel:sentinel_dev_password@127.0.0.1:5432/sentinel_db'
+python -m api --host 127.0.0.1 --port 8000
+
+# 3) Event worker — delivers the outbox (PostgreSQL backend only)
+export SENTINEL_PERSISTENCE_BACKEND=postgres
+export SENTINEL_DATABASE_URL='postgresql://sentinel:sentinel_dev_password@127.0.0.1:5432/sentinel_db'
+python -m api.event_worker
+
+# 4) Web UI
+cd frontend
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173` — use `localhost`, not `127.0.0.1`, because Vite binds
+IPv6 `::1` by default. Sanity-check `http://127.0.0.1:8000/health` and
+`http://127.0.0.1:8000/ready`. Because Sentinel occupies the standard port, `make db-up`,
+`make db-migrate` and `make test-postgres` all work with their defaults.
+
+**If port 5432 is already taken**, the Compose database will not start. A local PostgreSQL
+installation (for example the Windows service `postgresql-x64-15`) or another project's
+container may be holding it. Free the port from an **elevated** shell:
+
+```powershell
+Stop-Service postgresql-x64-15 -Force                # free 5432 now (admin required)
+Set-Service  postgresql-x64-15 -StartupType Manual   # optional: keep it off 5432 after a reboot
+```
+
+To restore it later, run `Start-Service postgresql-x64-15` from an elevated shell. Or, instead
+of stopping it, publish Sentinel on another port by setting `$env:POSTGRES_HOST_PORT="5433"`
+before `docker compose up -d postgres` and pointing `SENTINEL_DATABASE_URL` at the same port.
 
 ---
 

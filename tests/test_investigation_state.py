@@ -260,6 +260,49 @@ def test_add_verification_results_and_bundles() -> None:
     assert len(state.verification_results) == 2
 
 
+def test_verification_fold_preserves_check_type_and_conforms_to_schema() -> None:
+    """Mission 26.1: the persisted verification fold carries each check's
+    ``check_type`` verbatim — including the evidence-grounding fallback — and the
+    resulting record conforms to ``schemas/verification_schema.json``."""
+    from pathlib import Path
+    import jsonschema
+
+    state = InvestigationState(incident_id="inc_01")
+    state.add_verification_results({
+        "incident_id": "inc_01",
+        "results": [
+            {
+                "hypothesis_id": "HYP-001",
+                "verdict": "INCONCLUSIVE",
+                "checks": [
+                    {
+                        "check_id": "CHK-001",
+                        "description": "Referenced evidence excerpts verified against source files.",
+                        "result": "PASS",
+                        "evidence": ["EV-MET-001"],
+                        "reference": "metrics/metrics.csv",
+                        "detail": None,
+                        "check_type": "evidence_grounding",
+                        "discriminating": False,
+                    }
+                ],
+                "reasoning": "grounding only",
+                "confidence": 0.25,
+            }
+        ],
+    })
+    assert len(state.verification_results) == 1
+    record = state.verification_results[0]
+    assert record.check_type == "evidence_grounding"
+
+    schema = json.loads(
+        (Path(__file__).parent.parent / "schemas" / "verification_schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    jsonschema.validate(instance=record.to_dict(), schema=schema)
+
+
 def test_add_proposals_and_bundles() -> None:
     state = InvestigationState(incident_id="inc_01")
 

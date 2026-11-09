@@ -336,6 +336,13 @@ class VerificationCheckResponse(BaseModel):
     reference: Optional[str] = None       # e.g. "service/app.py:12"
     detail: Optional[str] = None
     evidence_ids: List[str] = Field(default_factory=list)
+    #: Deterministic check family (code_invariant | config_validation |
+    #: metric_correlation | log_sequence | evidence_grounding).
+    check_type: Optional[str] = None
+    #: Whether the check tests the mechanism the hypothesis asserts. ``False``
+    #: marks the evidence-grounding fallback: such a PASS only confirms the
+    #: referenced evidence exists and can never, alone, confirm a hypothesis.
+    discriminating: Optional[bool] = None
 
 
 class VerificationResultResponse(BaseModel):

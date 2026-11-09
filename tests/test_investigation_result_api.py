@@ -315,6 +315,34 @@ def test_result_exposes_hypotheses_evidence_verification_and_proposals():
     assert proposal["human_approval_notice"].startswith("AWAITING HUMAN APPROVAL")
 
 
+def test_result_projects_check_type_and_discriminating():
+    """Mission 26.1: the verification projection surfaces a check's family and
+    whether it is mechanism-discriminating, so a grounding-only PASS is
+    distinguishable from a mechanism-specific PASS through the API."""
+    state = _build_completed_state()
+    checks = state.stages["verification"].output["results"][0]["checks"]
+    checks[0]["check_type"] = "code_invariant"
+    checks[0]["discriminating"] = True
+    checks[1]["check_type"] = "code_invariant"
+    checks[1]["discriminating"] = False
+
+    client = _client(MockRepository({state.incident_id: state}))
+    body = client.get(f"/investigations/{state.incident_id}/result").json()
+
+    verification = {v["hypothesis_id"]: v for v in body["verification"]}
+    first, second = verification["HYP-001"]["checks"]
+    assert first["check_type"] == "code_invariant"
+    assert first["discriminating"] is True
+    assert second["check_type"] == "code_invariant"
+    assert second["discriminating"] is False
+
+    # A check persisted before this change omits the fields; the projection
+    # keeps them absent (None) rather than inventing a value.
+    other = verification["HYP-002"]["checks"][0]
+    assert other["check_type"] is None
+    assert other["discriminating"] is None
+
+
 # ---------------------------------------------------------------------------
 # 2. Proposal identifiers work with the existing approval flow
 # ---------------------------------------------------------------------------

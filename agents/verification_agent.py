@@ -10,7 +10,7 @@ import argparse
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import jsonschema
 
@@ -61,6 +61,12 @@ VERIFICATION_OUTPUT_SCHEMA = {
                                 "evidence": {"type": "array", "items": {"type": "string"}},
                                 "reference": {"type": ["string", "null"]},
                                 "detail": {"type": ["string", "null"]},
+                                # Optional for back-compat: records persisted before
+                                # Mission 26.1 carry neither field. New output always
+                                # sets both (check_type from CheckType; discriminating
+                                # false for the evidence-grounding fallback).
+                                "check_type": {"type": "string"},
+                                "discriminating": {"type": "boolean"},
                             },
                             "additionalProperties": True,
                         },
@@ -96,37 +102,57 @@ def _validate_evidence_ids_presence(evidence_ids: List[str], available: Set[str]
 
 
 def _checks_to_verdict(checks: List[CheckResult]) -> tuple[str, float, str]:
-    """Compute hypothesis verdict from checks.
+    """Compute a hypothesis verdict from its checks.
 
-    - REJECTED if any check FAILs
-    - CONFIRMED if all mapped checks PASS (≥1 PASS and 0 FAIL)
-    - INCONCLUSIVE otherwise (only INCONCLUSIVE checks, or a mix with no FAIL but also no PASS)
+    Only *discriminating* checks may decide a verdict. A check is discriminating
+    when it tests the mechanism the hypothesis actually asserts. The
+    evidence-grounding fallback, and any mechanism check whose mechanism the
+    hypothesis does not assert, are not discriminating: their result — PASS *or*
+    FAIL — can neither confirm nor reject the hypothesis. This keeps an
+    incidentally-matched checker (e.g. an N+1 structural scan selected by a plan
+    step that merely says "measure DB query count") from deciding a hypothesis
+    that never asserts that mechanism.
+
+    - REJECTED if any discriminating check FAILs.
+    - CONFIRMED if ≥1 discriminating check PASSes and none FAIL.
+    - INCONCLUSIVE otherwise.
     """
-    n_fail = sum(1 for c in checks if c.result == CHECK_FAIL)
-    n_pass = sum(1 for c in checks if c.result == CHECK_PASS)
-    n_inc = sum(1 for c in checks if c.result == CHECK_INCONCLUSIVE)
-    total = n_fail + n_pass + n_inc
+    total = len(checks)
     if total == 0:
         return VERDICT_INCONCLUSIVE, 0.0, "No checks could be mapped for this hypothesis."
-    if n_fail > 0:
-        conf = max(0.5, min(0.95, 0.5 + 0.45 * (n_fail / total)))
-        fail_refs = [c.reference for c in checks if c.result == CHECK_FAIL and c.reference]
+    fails_disc = [c for c in checks if c.result == CHECK_FAIL and c.discriminating]
+    passes_disc = [c for c in checks if c.result == CHECK_PASS and c.discriminating]
+    non_discriminating = [
+        c for c in checks if c.result in (CHECK_PASS, CHECK_FAIL) and not c.discriminating
+    ]
+    if fails_disc:
+        conf = max(0.5, min(0.95, 0.5 + 0.45 * (len(fails_disc) / total)))
+        fail_refs = [c.reference for c in fails_disc if c.reference]
         return (
             VERDICT_REJECTED,
             round(conf, 2),
             "Deterministic falsification check(s) failed: "
-            + "; ".join([c.description for c in checks if c.result == CHECK_FAIL][:2])
+            + "; ".join(c.description for c in fails_disc[:2])
             + (f" (at {', '.join(fail_refs[:2])})" if fail_refs else "."),
         )
-    if n_pass > 0 and n_fail == 0:
-        conf = max(0.5, min(0.95, 0.5 + 0.45 * (n_pass / total)))
-        pass_refs = [c.reference for c in checks if c.result == CHECK_PASS and c.reference]
+    if passes_disc:
+        conf = max(0.5, min(0.95, 0.5 + 0.45 * (len(passes_disc) / total)))
+        pass_refs = [c.reference for c in passes_disc if c.reference]
         return (
             VERDICT_CONFIRMED,
             round(conf, 2),
-            "All required checks passed: "
-            + "; ".join([c.description for c in checks if c.result == CHECK_PASS][:3])
+            "Mechanism-specific deterministic check(s) passed: "
+            + "; ".join(c.description for c in passes_disc[:3])
             + (f" (references: {', '.join(pass_refs[:3])})" if pass_refs else "."),
+        )
+    if non_discriminating:
+        return (
+            VERDICT_INCONCLUSIVE,
+            0.25,
+            "No deterministic check discriminating the claimed mechanism decided this "
+            "hypothesis. Checks that ran either only confirmed that the referenced "
+            "evidence exists, or tested a mechanism the claim does not assert; neither "
+            "confirms nor rejects a root cause.",
         )
     return (
         VERDICT_INCONCLUSIVE,
@@ -175,14 +201,16 @@ class VerificationAgent:
             falsification = hyp.get("falsification_criteria") or []
             all_steps = list(plan_steps) + [f"Falsification: {fc}" for fc in falsification]
 
-            checks_out: List[Dict[str, Any]] = []
+            # Dispatch every step, then collapse identical results. A verification
+            # plan and its falsification criteria frequently target the same
+            # checker (e.g. both describe the N+1 query test), and a step may
+            # itself be re-stated. Without this the same check would be emitted
+            # once per step, producing duplicate, indistinguishable results.
             raw_checks: List[CheckResult] = []
-            check_counter = 0
+            seen_signatures: Set[Tuple[str, Optional[str]]] = set()
             for step in all_steps:
-                check_counter += 1
-                check_id = f"CHK-{check_counter:03d}"
                 raw = run_dispatch_check(
-                    check_id=check_id,
+                    check_id="CHK-000",
                     incident_dir=incident_path,
                     hypothesis_claim=hyp.get("claim", ""),
                     plan_step=step,
@@ -193,17 +221,27 @@ class VerificationAgent:
                     },
                     referenced_evidence=referenced,
                 )
+                signature = (raw.description, raw.reference)
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
                 raw_checks.append(raw)
-                # also validate against existing verification_schema.json for *each* check
-                check_dict = {
-                    "check_id": raw.check_id,
-                    "description": raw.description,
-                    "result": raw.result,
-                    "evidence": list(raw.evidence) if raw.evidence else [],
-                    "reference": raw.reference,
-                    "detail": raw.detail,
-                }
-                checks_out.append(check_dict)
+
+            checks_out: List[Dict[str, Any]] = []
+            for counter, raw in enumerate(raw_checks, start=1):
+                raw.check_id = f"CHK-{counter:03d}"
+                checks_out.append(
+                    {
+                        "check_id": raw.check_id,
+                        "description": raw.description,
+                        "result": raw.result,
+                        "evidence": list(raw.evidence) if raw.evidence else [],
+                        "reference": raw.reference,
+                        "detail": raw.detail,
+                        "check_type": raw.check_type,
+                        "discriminating": raw.discriminating,
+                    }
+                )
 
             verdict, confidence, reasoning = _checks_to_verdict(raw_checks)
             results.append(

@@ -603,3 +603,62 @@ def test_multiple_confirmed_hypotheses_produce_multiple_proposals():
     )
     assert len(result["proposals"]) == 2
     assert client.generate_structured.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Test: proposal↔hypothesis association is content-based, not positional
+# ---------------------------------------------------------------------------
+
+def test_proposal_bound_to_named_hypothesis_by_content():
+    """Regression (Mission 26.1, Issue 4).
+
+    A proposal must be associated with the hypothesis it actually addresses.
+    Even when the LLM returns a proposal naming the *wrong* hypothesis and
+    citing *another* hypothesis' evidence, the association is pinned to the
+    hypothesis the proposal was generated for — never to list position or
+    generation order.
+    """
+    hyps = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "hypotheses": [
+            {"hypothesis_id": "HYP-001", "claim": "N+1 query pattern",
+             "evidence_ids": ["EV-LOG-001", "EV-CODE-001"],
+             "supporting_reasoning": "250 queries per request",
+             "falsification_criteria": ["x"], "verification_plan": ["check"]},
+            {"hypothesis_id": "HYP-002", "claim": "Traffic surge",
+             "evidence_ids": ["EV-LOG-002"],
+             "supporting_reasoning": "spike", "falsification_criteria": ["y"],
+             "verification_plan": ["check"]},
+        ],
+    }
+    ver = {
+        "incident_id": "inc_01_n_plus_one_query",
+        "results": [
+            {"hypothesis_id": "HYP-001", "verdict": "CONFIRMED", "checks": [], "reasoning": "", "confidence": 0.9},
+            {"hypothesis_id": "HYP-002", "verdict": "CONFIRMED", "checks": [], "reasoning": "", "confidence": 0.9},
+        ],
+    }
+
+    def fake_generate(*args, **kwargs) -> LLMResponse:
+        # Deliberately wrong: always names HYP-002 and cites HYP-002's evidence.
+        return _mock_llm_response(
+            _good_proposal_from_llm(hypothesis_id="HYP-002", ev_ids=["EV-LOG-002"])
+        )
+
+    client = MagicMock(spec=GroqLLMClient)
+    client.generate_structured.side_effect = fake_generate
+    agent = FixProposalAgent(llm_client=client)
+    result = agent.propose_fix(
+        incident_dir=INC_01,
+        hypotheses=hyps,
+        verification_results=ver,
+        logs_evidence=_logs(),
+        code_evidence=_code(),
+    )
+    by_hyp = {p["hypothesis_id"]: p for p in result["proposals"]}
+    assert set(by_hyp) == {"HYP-001", "HYP-002"}, by_hyp
+    # Each proposal carries the evidence of the hypothesis it is bound to.
+    assert set(by_hyp["HYP-001"]["evidence_ids"]) == {"EV-LOG-001", "EV-CODE-001"}
+    assert set(by_hyp["HYP-002"]["evidence_ids"]) == {"EV-LOG-002"}
+    # The association is traceable, so deterministic validation passes.
+    assert result["validation_errors"] == {}, result["validation_errors"]

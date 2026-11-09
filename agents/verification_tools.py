@@ -35,6 +35,14 @@ class CheckResult:
     evidence: List[str] = field(default_factory=list)
     reference: Optional[str] = None
     detail: Optional[str] = None
+    check_type: str = "code_invariant"
+    discriminating: bool = True
+    """True when the check tests the mechanism the hypothesis asserts.
+
+    False for the evidence-grounding fallback (and for unmapped steps), which
+    only confirms that referenced evidence exists in the bundle. Such a check
+    must never, on its own, promote a hypothesis to CONFIRMED.
+    """
 
 
 def _parse_source_path(incident_dir: Path, rel_ref: str) -> Optional[Tuple[Path, int, int]]:
@@ -420,9 +428,41 @@ def max_metric_value(rows: Sequence[Dict[str, Any]], metric: str) -> Optional[fl
 
 # ---------- plan-classification to check dispatch ----------
 
-KEYWORDS_QUERY_IN_LOOP = ("query inside loop", "loop.*query", "n+1", "query amplification", "for .* loop .* db", "serializer.*query")
+KEYWORDS_QUERY_IN_LOOP = (
+    "query inside loop",
+    "loop.*query",
+    r"n\+1",
+    "query amplification",
+    "for .* loop .* db",
+    "serializer.*query",
+    "quer(?:y|ies) per request",
+    "query count",
+    "count .*quer(?:y|ies)",
+    "batch .*quer(?:y|ies)",
+    # Structural phrasings of the same mechanism, e.g. "AST inspect DB call
+    # inside For/While loop." Routing is step-only since Mission 26.1, so these
+    # must be recognised without help from the hypothesis claim.
+    "db call inside",
+    "call inside .*loop",
+    "inside .*loop",
+)
 KEYWORDS_RETRY_CONFIG = ("retry configuration", "max_retries", "backoff", "retry loop", "retry policy")
-KEYWORDS_CONN_POOL = ("connection acquire", "release path", "acquire.*release", "connection pool", "connection leak")
+# Routing keywords for the acquire/release checker (Check 3). These describe the
+# *mechanism* the checker tests — acquire()/release() pairing and connection
+# leaks — and deliberately exclude the bare phrase "connection pool". A step
+# that merely observes the pool as a symptom (e.g. "confirm pool-exhaustion logs
+# cease after CPU reduction") must not be routed onto a leak checker, whose
+# "every acquire() has a release()" FAIL would otherwise reject an unrelated
+# hypothesis.
+KEYWORDS_CONN_POOL = (
+    "connection acquire",
+    "release path",
+    "acquire.*release",
+    "acquire without release",
+    "connection leak",
+    "leaked connection",
+    "leak.*connection",
+)
 KEYWORDS_INDEX_DROP = ("drop index", "index drop", "index presence", "sql index", "migration change")
 KEYWORDS_UNBOUNDED_COLLECTION = ("unbounded", "memory leak", "mutable collection", "class level dict", "cache grow", "memory growth", "audi[t_]_trace", "registry")
 KEYWORDS_CORRELATION = ("correlation", "before.*after", "precedes", "metric spike", "latency precedes", "error precedes", "order of spikes")
@@ -438,6 +478,40 @@ def _match_plan_tokens(plan: str, keywords: Sequence[str]) -> bool:
     return False
 
 
+# --- Mechanism relevance ---------------------------------------------------
+# Routing (the KEYWORDS_* tuples above) decides *which* checker runs; it reads
+# the wording of a single verification step. A step can name a mechanism's
+# vocabulary incidentally: a packet-loss hypothesis whose plan says "measure DB
+# query count … with retries disabled" routes onto the N+1 structural checker.
+# That checker then PASSes because the codebase contains *some* DB call in a
+# loop — a global property unrelated to what the hypothesis asserts — and would
+# wrongly confirm it. The same applies in reverse: such a check must not reject
+# the hypothesis either.
+#
+# Relevance is therefore a separate question, answered from the hypothesis
+# claim: a mechanism check only counts as *discriminating* when the hypothesis
+# itself asserts that mechanism. Relevance can only remove credit from an
+# incidental match; it never selects a checker (routing stays step-driven, so an
+# incidental phrase in a claim still cannot reject a hypothesis).
+CLAIM_QUERY_IN_LOOP = (
+    r"n\+1",
+    "query.*loop",
+    "loop.*quer",
+    r"quer(?:y|ies)\s+per\s+request",
+    r"per[\s\-]item",
+    "amplification",
+    "query count",
+    "batch.*quer",
+)
+CLAIM_RETRY_CONFIG = ("retry", "backoff", "max_retries", "max retries", "retry storm", "retry policy")
+CLAIM_CONN_POOL = ("connection leak", "leak", "acquire", "release", "connection pool", "pool exhaust", "pool empty")
+CLAIM_INDEX_DROP = ("index", "drop index", "migration", "sql change")
+CLAIM_UNBOUNDED_COLLECTION = ("unbounded", "memory leak", "mutable", "cache", "grow", "leak")
+CLAIM_CORRELATION = ("correlation", "correlate", "precede", "spike order", "order of spike", "before.*after", "temporal overlap")
+CLAIM_LOG_PATTERN = ("log", "error", "warning", "timeout", "retry")
+CLAIM_METRIC_VALUE = ("metric", "threshold", "cpu", "latency", "saturat", "error rate", "value of")
+
+
 def run_dispatch_check(
     check_id: str,
     incident_dir: Path,
@@ -446,13 +520,21 @@ def run_dispatch_check(
     evidence_bundles: Dict[str, Dict[str, Any]],
     referenced_evidence: List[Dict[str, Any]],
 ) -> CheckResult:
-    """Dispatch a plan step to deterministic checkers.
+    """Dispatch a single verification step to deterministic checkers.
+
+    Routing is derived from the *verification step's own wording only*: the
+    step states what is being tested, so it — not the hypothesis claim — selects
+    the checker. Previously the claim text was concatenated into the routing
+    input, which allowed an incidental phrase in a claim (e.g. "connection
+    pool") to route every step of the hypothesis onto an unrelated checker and
+    reject it. ``hypothesis_claim`` is retained for callers/back-compat and is
+    deliberately excluded from routing.
 
     Returns a CheckResult (PASS/FAIL/INCONCLUSIVE) with references to incident
     bundle evidence IDs when possible.
     """
     incident_dir = Path(incident_dir)
-    plan_text = f"{hypothesis_claim}\n{plan_step}"
+    plan_text = plan_step
 
     source_files = iter_service_py_files(incident_dir)
     source_by_rel: Dict[str, List[str]] = {}
@@ -473,6 +555,7 @@ def run_dispatch_check(
 
     # -------- Check 1: query inside loop / N+1 --------
     if _match_plan_tokens(plan_text, KEYWORDS_QUERY_IN_LOOP):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_QUERY_IN_LOOP)
         per_file_hits: List[str] = []
         for sf in source_files:
             src = "\n".join(_read_lines(sf))
@@ -491,6 +574,7 @@ def run_dispatch_check(
                 evidence=ref_ev or [e["evidence_id"] for e in referenced_evidence[:3]],
                 reference="; ".join(per_file_hits[:3]),
                 detail="; ".join(per_file_hits),
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
@@ -499,10 +583,12 @@ def run_dispatch_check(
             evidence=[e["evidence_id"] for e in referenced_evidence[:2]],
             reference=None,
             detail="No DB-style call inside For/While AST nodes in service/**/*.py.",
+            discriminating=relevant,
         )
 
     # -------- Check 2: retry configuration (high max, zero backoff, retry loop) --------
     if _match_plan_tokens(plan_text, KEYWORDS_RETRY_CONFIG):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_RETRY_CONFIG)
         retry_hits = find_retry_constants(all_source) or {"hits": []}
         backoff_hits = find_backoff_zero(all_source) or {"hits": []}
         retry_asts: List[str] = []
@@ -540,6 +626,8 @@ def run_dispatch_check(
                 evidence=[e["evidence_id"] for e in referenced_evidence],
                 reference=retry_asts[0] if retry_asts else (high_max[0]["lineno"] if high_max else (backoff_zero[0]["lineno"] if backoff_zero else None)),
                 detail=" | ".join(details),
+                check_type="config_validation",
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
@@ -547,10 +635,13 @@ def run_dispatch_check(
             result=CHECK_FAIL,
             evidence=[e["evidence_id"] for e in referenced_evidence],
             detail=str({"retry_hits": retry_hits, "backoff": backoff_hits}),
+            check_type="config_validation",
+            discriminating=relevant,
         )
 
     # -------- Check 3: acquire without release --------
     if _match_plan_tokens(plan_text, KEYWORDS_CONN_POOL):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_CONN_POOL)
         findings: List[Dict[str, Any]] = []
         for sf in source_files:
             src = "\n".join(_read_lines(sf))
@@ -566,16 +657,19 @@ def run_dispatch_check(
                 evidence=[e["evidence_id"] for e in referenced_evidence if e.get("evidence_id")],
                 reference="; ".join(refs),
                 detail=json.dumps(findings, default=str),
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
             description="Every acquire() in inspected files has a corresponding release().",
             result=CHECK_FAIL,
             evidence=[e["evidence_id"] for e in referenced_evidence],
+            discriminating=relevant,
         )
 
     # -------- Check 4: DROP INDEX actual SQL change --------
     if _match_plan_tokens(plan_text, KEYWORDS_INDEX_DROP):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_INDEX_DROP)
         r = find_drop_index_actual_change(incident_dir)
         if r is None:
             return CheckResult(check_id, "No git_diff.patch available; cannot evaluate index drop claim.", CHECK_INCONCLUSIVE, [e["evidence_id"] for e in referenced_evidence])
@@ -588,6 +682,7 @@ def run_dispatch_check(
                 evidence=[e["evidence_id"] for e in referenced_evidence],
                 reference="git_diff.patch",
                 detail=json.dumps(r),
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
@@ -596,10 +691,12 @@ def run_dispatch_check(
             evidence=[e["evidence_id"] for e in referenced_evidence],
             reference="git_diff.patch",
             detail=json.dumps(r),
+            discriminating=relevant,
         )
 
     # -------- Check 5: unbounded mutable collection --------
     if _match_plan_tokens(plan_text, KEYWORDS_UNBOUNDED_COLLECTION):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_UNBOUNDED_COLLECTION)
         findings: List[Dict[str, Any]] = []
         for sf in source_files:
             src = "\n".join(_read_lines(sf))
@@ -623,16 +720,19 @@ def run_dispatch_check(
                 evidence=[e["evidence_id"] for e in referenced_evidence],
                 reference="; ".join(refs),
                 detail=json.dumps(findings, default=str)[:400],
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
             description="No unbounded mutable collection found at class/module level in source files.",
             result=CHECK_FAIL,
             evidence=[e["evidence_id"] for e in referenced_evidence],
+            discriminating=relevant,
         )
 
     # -------- Check 6: metric spike order / correlation --------
     if _match_plan_tokens(plan_text, KEYWORDS_CORRELATION):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_CORRELATION)
         _, rows = read_metrics_rows(incident_dir)
         candidate_metrics = [
             "active_db_conns", "ledger_query_duration_ms", "order_query_duration_ms",
@@ -649,6 +749,8 @@ def run_dispatch_check(
                 evidence=[e["evidence_id"] for e in referenced_evidence if e.get("source") == "metrics"],
                 reference="metrics/metrics.csv",
                 detail=detail,
+                check_type="metric_correlation",
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
@@ -659,6 +761,7 @@ def run_dispatch_check(
 
     # -------- Check 7: log pattern count --------
     if _match_plan_tokens(plan_text, KEYWORDS_LOG_PATTERN):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_LOG_PATTERN)
         logs = read_application_log(incident_dir)
         pattern_extracted: List[str] = re.findall(r"[\"“]([^\"“”]{2,})[\"”]", plan_text)
         counts: Dict[str, int] = {}
@@ -672,16 +775,21 @@ def run_dispatch_check(
                 evidence=[e["evidence_id"] for e in referenced_evidence if e.get("source") == "logs"],
                 reference="logs/application.log",
                 detail=json.dumps(counts),
+                check_type="log_sequence",
+                discriminating=relevant,
             )
         return CheckResult(
             check_id=check_id,
             description="No matching log lines found for keywords.",
             result=CHECK_FAIL,
             evidence=[e["evidence_id"] for e in referenced_evidence],
+            check_type="log_sequence",
+            discriminating=relevant,
         )
 
     # -------- Check 8: metric value / threshold --------
     if _match_plan_tokens(plan_text, KEYWORDS_METRIC_VALUE):
+        relevant = _match_plan_tokens(hypothesis_claim or "", CLAIM_METRIC_VALUE)
         _, rows = read_metrics_rows(incident_dir)
         # extract metric name candidate from hypothesis or plan
         candidate = None
@@ -699,12 +807,15 @@ def run_dispatch_check(
                     evidence=[e["evidence_id"] for e in referenced_evidence if e.get("metric") == candidate or candidate in (e.get("excerpt") or "") + (e.get("interpretation") or "")],
                     reference="metrics/metrics.csv",
                     detail=json.dumps({"metric": candidate, "max": val}),
+                    check_type="metric_correlation",
+                    discriminating=relevant,
                 )
         return CheckResult(
             check_id=check_id,
             description="Could not extract a named metric from the plan step; metric value check not run.",
             result=CHECK_INCONCLUSIVE,
             evidence=[e["evidence_id"] for e in referenced_evidence],
+            check_type="metric_correlation",
         )
 
     # -------- Fallback: referenced-evidence snippet grounding against real source --------
@@ -750,10 +861,14 @@ def run_dispatch_check(
             evidence=[e["evidence_id"] for e in referenced_evidence if e.get("evidence_id")],
             reference="; ".join(grounded_refs) or None,
             detail=f"{grounded} of {len(referenced_evidence)} referenced evidence items grounded.",
+            check_type="evidence_grounding",
+            discriminating=False,
         )
     return CheckResult(
         check_id=check_id,
         description="Plan step could not be mapped to a deterministic check and referenced evidence was not groundable.",
         result=CHECK_INCONCLUSIVE,
         evidence=[e["evidence_id"] for e in referenced_evidence],
+        check_type="evidence_grounding",
+        discriminating=False,
     )

@@ -57,6 +57,10 @@ class CheckType(str, Enum):
     LOG_SEQUENCE = "log_sequence"
     STATE_TRANSITION = "state_transition"
     CONFIG_VALIDATION = "config_validation"
+    #: Evidence-grounding fallback: confirms referenced evidence exists in the
+    #: bundle without testing the mechanism the hypothesis asserts. Such a
+    #: check is non-discriminating and can never alone confirm a hypothesis.
+    EVIDENCE_GROUNDING = "evidence_grounding"
 
 
 class ProposalStatus(str, Enum):

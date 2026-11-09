@@ -187,6 +187,38 @@ def test_verification_schema_validation() -> None:
     jsonschema.validate(instance=valid_sample, schema=schema)
 
 
+def test_verification_schema_accepts_evidence_grounding() -> None:
+    """Mission 26.1 regression: the ``check_type`` enum must include every value
+    the pipeline can persist.
+
+    The evidence-grounding fallback emits ``evidence_grounding``, and the
+    persisted ``VerificationResult`` (whose docstring states it matches this
+    schema) carries it verbatim from the verification output.
+    """
+    from core.domain.models import CheckType
+
+    schema_path = SCHEMAS_DIR / "verification_schema.json"
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema = json.load(f)
+
+    enum = schema["properties"]["check_type"]["enum"]
+    # No domain CheckType value may be unrepresentable in the schema.
+    missing = sorted({ct.value for ct in CheckType} - set(enum))
+    assert not missing, f"check_type enum is missing domain values: {missing}"
+
+    grounding_sample = {
+        "verification_id": "VER-HYP001-CHK002",
+        "hypothesis_id": "HYP-001",
+        "status": "INCONCLUSIVE",
+        "check_type": "evidence_grounding",
+        "check_code_or_query": "Referenced evidence excerpts verified against source/logs/metrics files (grounding fallback).",
+        "execution_output": "Result: PASS",
+        "verified_evidence_ids": ["EV-MET-001"],
+        "reasoning": "Grounding only; does not test the asserted mechanism.",
+    }
+    jsonschema.validate(instance=grounding_sample, schema=schema)
+
+
 def test_report_schema_validation() -> None:
     schema_path = SCHEMAS_DIR / "report_schema.json"
     with open(schema_path, "r", encoding="utf-8") as f:

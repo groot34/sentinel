@@ -237,3 +237,25 @@ def test_acquire_without_release_inc_10(tmp_path: Path):
         if r and r.get("has_pattern"):
             return
     pytest.fail("Expected acquire without release in inc_10 service/app.py")
+
+
+# --- Mission 26.1 regression: routing must follow the verification step ---
+
+def test_routing_depends_on_step_not_on_hypothesis_claim(tmp_path: Path):
+    """Regression (Mission 26.1, Issue 1).
+
+    A hypothesis *claim* must not influence which checker a verification step is
+    routed to. Previously the claim text was concatenated into the routing input,
+    so a claim mentioning e.g. "connection pool" sent every step of that
+    hypothesis to the acquire/release checker, regardless of what the step said.
+    """
+    step = "Verify query inside loop (N+1) via AST."
+    claim_a = "DB query is called inside the order-item loop causing amplification."
+    claim_b = "The connection pool was exhausted by mismatched acquire/release calls."
+    bundles = {"logs": {}, "metrics": {}, "code": {}}
+    r_a = run_dispatch_check("CHK-001", INC_01, claim_a, step, bundles, [])
+    r_b = run_dispatch_check("CHK-001", INC_01, claim_b, step, bundles, [])
+    assert r_a.description == r_b.description
+    assert r_a.result == r_b.result
+    # The N+1 step must not be answered by the acquire/release checker.
+    assert "acquire()" not in r_a.description

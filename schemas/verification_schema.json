@@ -29,8 +29,8 @@
     },
     "check_type": {
       "type": "string",
-      "enum": ["code_invariant", "metric_correlation", "log_sequence", "state_transition", "config_validation"],
-      "description": "Type of verification check executed."
+      "enum": ["code_invariant", "metric_correlation", "log_sequence", "state_transition", "config_validation", "evidence_grounding"],
+      "description": "Type of verification check executed. 'evidence_grounding' is the non-discriminating fallback that confirms referenced evidence exists without testing the mechanism a hypothesis asserts."
     },
     "check_code_or_query": {
       "type": "string",

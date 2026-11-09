@@ -152,6 +152,14 @@ export interface VerificationCheck {
   reference?: string | null;
   detail?: string | null;
   evidence_ids: string[];
+  /** Deterministic check family, e.g. `code_invariant` | `metric_correlation`. */
+  check_type?: string | null;
+  /**
+   * Whether the check tests the mechanism the hypothesis asserts. `false`
+   * marks the evidence-grounding fallback — a PASS that only confirms the
+   * referenced evidence exists and cannot, alone, confirm a hypothesis.
+   */
+  discriminating?: boolean | null;
 }
 
 /** Verification outcome for one hypothesis (`VerificationResultResponse`). */

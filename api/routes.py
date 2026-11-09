@@ -477,6 +477,12 @@ def _project_verification(state: InvestigationState) -> List[Dict[str, Any]]:
                     # redacted for absolute filesystem paths like stage errors.
                     detail=sanitize_error_message(detail) if detail else None,
                     evidence_ids=_str_list(chk.get("evidence")),
+                    check_type=_opt_str(chk.get("check_type")),
+                    discriminating=(
+                        chk.get("discriminating")
+                        if isinstance(chk.get("discriminating"), bool)
+                        else None
+                    ),
                 ).model_dump()
             )
 
