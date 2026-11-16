@@ -72,6 +72,75 @@ export interface SubmitApprovalResponse {
   human_approval_notice: string;
 }
 
+/** Integrity metadata for a captured snapshot (`ApprovalSnapshotIntegrityResponse`). */
+export interface ApprovalSnapshotIntegrity {
+  algorithm: string;
+  /** Hex digest of the canonical snapshot, recorded at capture time. */
+  hash: string;
+  /** Always `true` when present — the snapshot is only returned after a match. */
+  verified: boolean;
+}
+
+/**
+ * One hypothesis as captured in a snapshot, with the verdict/confidence that
+ * were known when the decision was recorded (joined at capture time).
+ */
+export interface SnapshotHypothesis extends HypothesisResult {
+  verdict?: string | null;
+  confidence?: number | null;
+}
+
+/** Decision block captured in the snapshot document. */
+export interface SnapshotDecision {
+  proposal_id?: string | null;
+  decision?: string | null;
+  reviewer?: string | null;
+  timestamp?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * The canonical snapshot document (see `core/approval_snapshots.py`).
+ *
+ * Sections mirror the allowlisted result shapes, so the same renderers apply.
+ * Sections can be absent when the investigation had no such data at decision
+ * time; nothing is back-filled.
+ */
+export interface ApprovalSnapshotDocument {
+  snapshot_version: number;
+  investigation_id: string;
+  proposal_id?: string | null;
+  decision: SnapshotDecision;
+  proposal?: ProposalResult | null;
+  hypothesis?: SnapshotHypothesis | null;
+  evidence: EvidenceResult[];
+  verification: VerificationResult[];
+}
+
+/**
+ * `GET /investigations/{id}/approval/{proposalId}/snapshot`
+ * → `ApprovalSnapshotResponse`.
+ *
+ * `snapshot_available` is `false` for a *legacy* approval — one recorded before
+ * snapshot capture existed (or by the non-interactive pipeline gate), or on a
+ * backend that cannot store snapshots. Then `snapshot` is empty and `message`
+ * explains that the historical context was never captured; the current
+ * investigation evidence is deliberately never substituted for it.
+ */
+export interface ApprovalSnapshotResponse {
+  investigation_id: string;
+  proposal_id: string;
+  snapshot_available: boolean;
+  decision?: string | null;
+  reviewer?: string | null;
+  decided_at?: string | null;
+  notes?: string | null;
+  snapshot_version?: number | null;
+  integrity?: ApprovalSnapshotIntegrity | null;
+  message?: string | null;
+  snapshot: Partial<ApprovalSnapshotDocument>;
+}
+
 /** `GET /investigations/{id}` → `GetInvestigationResponse` */
 export interface InvestigationDetail {
   investigation_id: string;

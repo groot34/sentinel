@@ -122,6 +122,25 @@ EXPECTED_TABLES = {
         }
         | _OUTBOX_CLAIM_INDEXES,
     },
+    "approval_snapshots": {
+        "columns": {
+            "snapshot_id",
+            "investigation_id",
+            "proposal_id",
+            "decision",
+            "reviewer",
+            "decided_at",
+            "snapshot_version",
+            "integrity_hash",
+            "snapshot_payload",
+            "created_at",
+        },
+        "indexes": {
+            "idx_approval_snapshots_investigation_proposal",
+            "idx_approval_snapshots_investigation",
+            "idx_approval_snapshots_decided_at",
+        },
+    },
 }
 
 

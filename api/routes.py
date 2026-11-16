@@ -38,10 +38,13 @@ from agents.orchestrator import IncidentOrchestrator
 from api.errors import error_json_response, sanitize_error_message
 from api.models import (
     _SAFE_ID_REGEX,
+    _PROPOSAL_ID_REGEX,
     _format_sse_event,
     _project_event_payload,
     AcceptedInvestigationResponse,
     ApprovalRecordResponse,
+    ApprovalSnapshotIntegrityResponse,
+    ApprovalSnapshotResponse,
     CreateInvestigationRequest,
     CreateInvestigationResponse,
     EvidenceResultResponse,
@@ -67,6 +70,11 @@ from api.models import (
 )
 from core.domain.models import ApprovalRecord, IncidentStatus
 from core.domain.state import InvestigationState
+from core.approval_snapshots import (
+    INTEGRITY_ALGORITHM,
+    SnapshotIntegrityError,
+    create_snapshot,
+)
 from starlette.background import BackgroundTask
 from core.persistence import ConcurrencyError, PersistenceError, PersistenceRepository
 logger = logging.getLogger(__name__)
@@ -595,6 +603,87 @@ def _project_investigation_result_response(
         evidence=evidence_projected,
         verification=verification_projected,
         proposals=proposals_projected,
+    )
+
+
+def _build_approval_snapshot(
+    state: InvestigationState,
+    *,
+    proposal_id: str,
+    decision: str,
+    reviewer: str,
+    notes: Optional[str],
+    timestamp: str,
+) -> Any:
+    """Assemble the immutable decision-time snapshot for one approval decision.
+
+    Only context actually available at decision time is captured: the linked
+    proposal, its hypothesis with the verdict/confidence known at the time, the
+    evidence those sections reference, and the verification checks for that
+    hypothesis. Unrelated investigation data is deliberately excluded so a
+    snapshot stays a faithful, compact record of what the reviewer saw.
+
+    Returns an :class:`ApprovalSnapshot` carrying the canonical payload and its
+    integrity digest, ready for a single-transaction write alongside the state.
+    """
+    proposals = _project_proposals(state)
+    proposal_ctx = next((p for p in proposals if p.get("proposal_id") == proposal_id), None)
+    hypothesis_id = _opt_str(proposal_ctx.get("hypothesis_id")) if proposal_ctx else None
+
+    verification = _project_verification(state)
+    verdict_by_hypothesis = {
+        v["hypothesis_id"]: v["verdict"]
+        for v in verification
+        if v.get("hypothesis_id") and v.get("verdict")
+    }
+    hypothesis_ctx = next(
+        (
+            h
+            for h in _project_hypotheses(state, verdict_by_hypothesis)
+            if h.get("hypothesis_id") == hypothesis_id
+        ),
+        None,
+    )
+    hypothesis_verification = [
+        v for v in verification if v.get("hypothesis_id") == hypothesis_id
+    ]
+
+    if hypothesis_ctx is not None and hypothesis_verification:
+        # Join the decision-time verdict/confidence onto the hypothesis context
+        # so the snapshot records what the reviewer saw without a second lookup.
+        hypothesis_ctx = {
+            **hypothesis_ctx,
+            "verdict": hypothesis_verification[0].get("verdict"),
+            "confidence": hypothesis_verification[0].get("confidence"),
+        }
+
+    referenced: set = set()
+    if proposal_ctx:
+        referenced.update(proposal_ctx.get("evidence_ids") or [])
+    if hypothesis_ctx:
+        referenced.update(hypothesis_ctx.get("evidence_ids") or [])
+    for result in hypothesis_verification:
+        for check in result.get("checks") or []:
+            referenced.update(check.get("evidence_ids") or [])
+
+    evidence_ctx = [
+        e for e in _project_evidence(state) if e.get("evidence_id") in referenced
+    ]
+
+    decision_context = {
+        "proposal_id": proposal_id,
+        "decision": decision,
+        "reviewer": reviewer,
+        "timestamp": timestamp,
+        "notes": notes,
+    }
+    return create_snapshot(
+        investigation_id=state.incident_id,
+        decision_context=decision_context,
+        proposal_context=proposal_ctx,
+        hypothesis_context=hypothesis_ctx,
+        evidence_context=evidence_ctx,
+        verification_context=hypothesis_verification,
     )
 
 
@@ -1284,8 +1373,32 @@ def submit_approval(request: Request) -> JSONResponse:
             "rejected": rejected_count,
         }
 
-    # Persist updated state (OCC concurrency check)
-    repository.save(state)
+    # Capture the decision-time context as an immutable snapshot, but only on a
+    # backend that can persist it atomically with the state write. The snapshot
+    # is derived from the *same* state that is about to be saved, so it records
+    # exactly the proposal, hypothesis, evidence and verification the reviewer
+    # saw at the moment of the decision.
+    snapshots = None
+    if getattr(repository, "supports_approval_snapshots", False):
+        snapshots = [
+            _build_approval_snapshot(
+                state,
+                proposal_id=appr_model.proposal_id,
+                decision=decision_str,
+                reviewer=appr_model.approved_by,
+                notes=appr_model.notes,
+                timestamp=appr_model.timestamp,
+            )
+        ]
+
+    # Persist updated state and its snapshot atomically (OCC concurrency check).
+    # ``snapshots`` is only passed when a snapshot was actually captured, so a
+    # backend whose ``save`` predates snapshots (or any custom repository) keeps
+    # working with the original single-argument call.
+    if snapshots:
+        repository.save(state, snapshots=snapshots)
+    else:
+        repository.save(state)
 
     status_val = (
         state.status.value
@@ -1307,6 +1420,134 @@ def submit_approval(request: Request) -> JSONResponse:
         human_approval_notice="HUMAN REVIEW RECORDED — fix patch has not been applied.",
     )
     return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def get_approval_snapshot(request: Request) -> JSONResponse:
+    """GET /investigations/{investigation_id}/approval/{proposal_id}/snapshot
+
+    Return the immutable evidence snapshot captured when a human recorded the
+    approval or rejection decision for a fix proposal.
+
+    The snapshot is read from durable storage (never reconstructed from the
+    current investigation) and its integrity digest is verified before the data
+    is returned. A tampered or corrupted snapshot yields an explicit
+    ``snapshot_integrity_failed`` error; a *legacy* approval with no captured
+    snapshot returns ``snapshot_available=false`` with an explanatory message
+    rather than silently substituting current evidence.
+    """
+    raw_id = request.path_params.get("investigation_id", "")
+    try:
+        safe_id = _validate_id_param(raw_id)
+    except HTTPException as he:
+        return error_json_response(he.status_code, "invalid_investigation_id", str(he.detail))
+
+    raw_pid = str(request.path_params.get("proposal_id", "")).strip()
+    if not _PROPOSAL_ID_REGEX.match(raw_pid):
+        return error_json_response(
+            400,
+            "invalid_proposal_id",
+            f"Invalid proposal_id: {raw_pid!r}. Must match ^FIX-[0-9]{{3}}$",
+        )
+
+    repository = getattr(request.app.state, "repository", None)
+    if repository is None:
+        return error_json_response(503, "persistence_unavailable", "Persistence repository is not configured.")
+
+    state = repository.load(safe_id)
+    if state is None:
+        return error_json_response(404, "investigation_not_found", f"Investigation '{safe_id}' not found.")
+
+    approval_record = next(
+        (
+            a
+            for a in state.approvals
+            if hasattr(a, "proposal_id") and a.proposal_id == raw_pid
+        ),
+        None,
+    )
+    if approval_record is None:
+        return error_json_response(
+            404,
+            "approval_not_found",
+            f"No approval decision recorded for proposal '{raw_pid}' in investigation '{safe_id}'.",
+        )
+
+    # Decision metadata comes from the approval record itself; it is never
+    # derived from current investigation evidence.
+    decision_val = _opt_str(getattr(approval_record, "decision", None))
+    reviewer_val = _opt_str(getattr(approval_record, "approved_by", None))
+    decided_at_val = _opt_str(getattr(approval_record, "timestamp", None))
+    notes_val = _opt_str(getattr(approval_record, "notes", None))
+
+    legacy_message = (
+        "No historical evidence snapshot was captured for this approval decision. "
+        "The decision predates snapshot capture, so the investigation context "
+        "available at decision time was not recorded."
+    )
+
+    if not getattr(repository, "supports_approval_snapshots", False):
+        legacy_body = ApprovalSnapshotResponse(
+            investigation_id=safe_id,
+            proposal_id=raw_pid,
+            snapshot_available=False,
+            decision=decision_val,
+            reviewer=reviewer_val,
+            decided_at=decided_at_val,
+            notes=notes_val,
+            message=legacy_message,
+        )
+        return JSONResponse(status_code=200, content=legacy_body.model_dump())
+
+    try:
+        snapshot = repository.load_approval_snapshot(safe_id, raw_pid)
+    except SnapshotIntegrityError:
+        logger.error(
+            "Approval snapshot integrity verification failed for '%s/%s'.",
+            safe_id,
+            raw_pid,
+        )
+        return error_json_response(
+            500,
+            "snapshot_integrity_failed",
+            f"Stored approval snapshot for '{raw_pid}' failed integrity verification; "
+            "it may be corrupted or tampered with.",
+        )
+
+    if snapshot is None:
+        legacy_body = ApprovalSnapshotResponse(
+            investigation_id=safe_id,
+            proposal_id=raw_pid,
+            snapshot_available=False,
+            decision=decision_val,
+            reviewer=reviewer_val,
+            decided_at=decided_at_val,
+            notes=notes_val,
+            message=legacy_message,
+        )
+        return JSONResponse(status_code=200, content=legacy_body.model_dump())
+
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    decision_ctx = payload.get("decision")
+    if not isinstance(decision_ctx, dict):
+        decision_ctx = {}
+
+    body = ApprovalSnapshotResponse(
+        investigation_id=safe_id,
+        proposal_id=raw_pid,
+        snapshot_available=True,
+        decision=_opt_str(decision_ctx.get("decision")) or decision_val,
+        reviewer=_opt_str(decision_ctx.get("reviewer")) or reviewer_val,
+        decided_at=_opt_str(decision_ctx.get("timestamp")) or decided_at_val,
+        notes=_opt_str(decision_ctx.get("notes")),
+        snapshot_version=snapshot.snapshot_version,
+        integrity=ApprovalSnapshotIntegrityResponse(
+            algorithm=INTEGRITY_ALGORITHM,
+            hash=snapshot.integrity_hash,
+            verified=True,
+        ),
+        snapshot=payload,
+    )
+    return JSONResponse(status_code=200, content=body.model_dump())
 
 
 def get_investigation(request: Request) -> JSONResponse:

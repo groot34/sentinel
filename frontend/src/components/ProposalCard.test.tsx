@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../api/client";
-import type { ApprovalRecord, SubmitApprovalResponse } from "../api/types";
+import type {
+  ApprovalRecord,
+  ApprovalSnapshotResponse,
+  InvestigationResult,
+  SubmitApprovalResponse,
+} from "../api/types";
 import { makeProposal } from "../test/fixtures";
 import { proposalView } from "../lib/proposals";
 import { ProposalCard, DEFAULT_REVIEWER, type ProposalDecisionInput } from "./ProposalCard";
@@ -32,11 +37,15 @@ function renderCard({
   approvals = [] as ApprovalRecord[],
   proposal = makeProposal(),
   onDecide,
+  onLoadSnapshot,
+  currentResult,
   onFocusEvidence,
 }: {
   approvals?: ApprovalRecord[];
   proposal?: ReturnType<typeof makeProposal>;
   onDecide?: (input: ProposalDecisionInput) => Promise<SubmitApprovalResponse>;
+  onLoadSnapshot?: (proposalId: string) => Promise<ApprovalSnapshotResponse>;
+  currentResult?: InvestigationResult | null;
   onFocusEvidence?: (id: string) => void;
 } = {}) {
   return render(
@@ -44,6 +53,8 @@ function renderCard({
       <ProposalCard
         view={proposalView(proposal, approvals)}
         onDecide={onDecide}
+        onLoadSnapshot={onLoadSnapshot}
+        currentResult={currentResult}
         onFocusEvidence={onFocusEvidence}
       />
     </ul>,
@@ -305,6 +316,128 @@ describe("ProposalCard approval workflow", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(
       screen.getByText(/Recorded by the non-interactive pipeline gate/),
+    ).toBeInTheDocument();
+  });
+});
+
+const RECORDED_DECISION: ApprovalRecord = {
+  proposal_id: "FIX-001",
+  status: "APPROVED",
+  decision: "approved",
+  approved_by: "dana",
+  timestamp: "2026-08-28T15:00:00Z",
+  notes: null,
+};
+
+function snapshotResponse(
+  overrides: Partial<ApprovalSnapshotResponse> = {},
+): ApprovalSnapshotResponse {
+  return {
+    investigation_id: "inc_01",
+    proposal_id: "FIX-001",
+    snapshot_available: true,
+    decision: "APPROVED",
+    reviewer: "dana",
+    decided_at: "2026-08-28T15:00:00Z",
+    notes: null,
+    snapshot_version: 1,
+    integrity: { algorithm: "sha256", hash: "b".repeat(64), verified: true },
+    snapshot: {
+      snapshot_version: 1,
+      investigation_id: "inc_01",
+      proposal_id: "FIX-001",
+      decision: {
+        proposal_id: "FIX-001",
+        decision: "APPROVED",
+        reviewer: "dana",
+        timestamp: "2026-08-28T15:00:00Z",
+        notes: null,
+      },
+      proposal: null,
+      hypothesis: null,
+      evidence: [],
+      verification: [],
+    },
+    ...overrides,
+  };
+}
+
+describe("ProposalCard historical snapshot", () => {
+  it("offers no snapshot control when the view has no loader", () => {
+    renderCard({ approvals: [RECORDED_DECISION] });
+
+    expect(
+      screen.queryByRole("button", { name: /historical snapshot/ }),
+    ).toBeNull();
+  });
+
+  it("offers no snapshot control before any decision is recorded", () => {
+    renderCard({ onLoadSnapshot: vi.fn() });
+
+    expect(
+      screen.queryByRole("button", { name: /historical snapshot/ }),
+    ).toBeNull();
+  });
+
+  it("loads and shows the historical snapshot for a recorded decision", async () => {
+    const user = userEvent.setup();
+    const onLoadSnapshot = vi.fn().mockResolvedValue(snapshotResponse());
+    renderCard({ approvals: [RECORDED_DECISION], onLoadSnapshot });
+
+    await user.click(screen.getByRole("button", { name: "View historical snapshot" }));
+
+    expect(onLoadSnapshot).toHaveBeenCalledWith("FIX-001");
+    await waitFor(() =>
+      expect(screen.getByText(/immutable record and does not change/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/integrity verified/)).toBeInTheDocument();
+  });
+
+  it("surfaces an integrity failure from the snapshot endpoint", async () => {
+    const user = userEvent.setup();
+    const onLoadSnapshot = vi.fn().mockRejectedValue(
+      new ApiError(
+        500,
+        "snapshot_integrity_failed",
+        "Stored approval snapshot for 'FIX-001' failed integrity verification; it may be corrupted or tampered with.",
+      ),
+    );
+    renderCard({ approvals: [RECORDED_DECISION], onLoadSnapshot });
+
+    await user.click(screen.getByRole("button", { name: "View historical snapshot" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "failed integrity verification",
+      ),
+    );
+  });
+
+  it("shows an honest message for a legacy approval with no snapshot", async () => {
+    const user = userEvent.setup();
+    const onLoadSnapshot = vi.fn().mockResolvedValue(
+      snapshotResponse({
+        snapshot_available: false,
+        snapshot_version: null,
+        integrity: null,
+        snapshot: {},
+        message:
+          "No historical evidence snapshot was captured for this approval decision.",
+      }),
+    );
+    renderCard({ approvals: [RECORDED_DECISION], onLoadSnapshot });
+
+    await user.click(screen.getByRole("button", { name: "View historical snapshot" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "No historical evidence snapshot was captured for this approval decision.",
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText(/was never stored, so it cannot be reconstructed/),
     ).toBeInTheDocument();
   });
 });

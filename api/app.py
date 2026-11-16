@@ -25,6 +25,7 @@ from api.routes import (
     create_incident,
     create_investigation,
     create_readiness_runtime,
+    get_approval_snapshot,
     get_investigation,
     get_investigation_result,
     health,
@@ -139,6 +140,11 @@ def create_app(
         Route("/investigations/{investigation_id}/events", endpoint=list_investigation_events, methods=["GET"]),
         Route("/investigations/{investigation_id}/resume", endpoint=resume_investigation, methods=["POST"]),
         Route("/investigations/{investigation_id}/approval", endpoint=submit_approval, methods=["POST"]),
+        Route(
+            "/investigations/{investigation_id}/approval/{proposal_id}/snapshot",
+            endpoint=get_approval_snapshot,
+            methods=["GET"],
+        ),
     ]
 
     exception_handlers = {

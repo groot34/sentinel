@@ -10,7 +10,7 @@ import json
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -18,6 +18,11 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from core.approval_snapshots import (
+    ApprovalSnapshot,
+    SnapshotIntegrityError,
+    verify_integrity,
+)
 from core.domain.state import InvestigationState
 from core.events.base import DomainEvent
 from core.persistence.outbox import OutboxEvent, OutboxRepository
@@ -42,6 +47,24 @@ SCHEMA_FILE = Path(__file__).parent / "sql" / "001_initial_schema.sql"
 #: Caps how long the probe waits for a pooled connection, independently of the
 #: HTTP response deadline enforced by the API layer.
 _PROBE_ACQUISITION_TIMEOUT_SECONDS = 2.0
+
+
+def _parse_snapshot_timestamp(value: str) -> datetime:
+    """Parse the ISO-8601 decision timestamp into an aware ``datetime``.
+
+    The snapshot's canonical ``decided_at`` is stored as text (it is part of the
+    hashed payload), so the indexable ``decided_at`` column needs an explicit
+    conversion. A malformed value falls back to "now" rather than aborting the
+    approval, since the timestamp is audit metadata and never part of the
+    integrity digest.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return datetime.now(tz=timezone.utc)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +315,12 @@ class PostgresRepository(PersistenceRepository):
         report = verify_schema(self._pool, raise_on_error=raise_on_error)
         return report.to_dict()
 
-    def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
+    def save(
+        self,
+        state: InvestigationState,
+        events: Optional[List[DomainEvent]] = None,
+        snapshots: Optional[List[ApprovalSnapshot]] = None,
+    ) -> None:
         """Persist InvestigationState with bounded transient-failure retry.
 
         Retries the *entire* transaction on transient PostgreSQL contention
@@ -304,6 +332,9 @@ class PostgresRepository(PersistenceRepository):
         Args:
             state: Valid InvestigationState instance.
             events: Optional list of DomainEvents to persist atomically in the same transaction.
+            snapshots: Optional list of immutable approval snapshots to persist
+                in the same transaction as the state write, so a decision and its
+                historical evidence commit or roll back together.
 
         Raises:
             ConcurrencyError: If an optimistic concurrency conflict or concurrent insert occurs (never retried).
@@ -321,7 +352,13 @@ class PostgresRepository(PersistenceRepository):
             # Restore the entry version before every attempt so retries never
             # double-increment the OCC token or duplicate persisted state.
             state.version = entry_version
-            self._save_transaction(state, events, attempt)
+            # The snapshot argument is supplied only when there is something to
+            # capture, so the no-snapshot call keeps the original three-argument
+            # contract of the transaction body.
+            if snapshots:
+                self._save_transaction(state, events, attempt, snapshots)
+            else:
+                self._save_transaction(state, events, attempt)
 
         try:
             run_with_retry(_attempt, policy=self._retry_policy)
@@ -335,6 +372,7 @@ class PostgresRepository(PersistenceRepository):
         state: InvestigationState,
         events: Optional[List[DomainEvent]],
         attempt: int,
+        snapshots: Optional[List[ApprovalSnapshot]] = None,
     ) -> None:
         """Execute exactly one atomic transaction attempt (state + outbox).
 
@@ -491,6 +529,41 @@ class PostgresRepository(PersistenceRepository):
                                         outbox_event.retry_count,
                                     ),
                                 )
+
+                        # Persist immutable approval snapshots in the SAME
+                        # transaction as the state write, so a decision and its
+                        # historical evidence commit or roll back together. A
+                        # failed state write therefore leaves no orphaned
+                        # snapshot, and a duplicate decision is a no-op rather
+                        # than a rewrite: rows are write-once and the unique
+                        # (investigation_id, proposal_id) index makes ON CONFLICT
+                        # DO NOTHING preserve the original capture.
+                        if snapshots:
+                            for snapshot in snapshots:
+                                cur.execute(
+                                    """
+                                    INSERT INTO approval_snapshots (
+                                        investigation_id, proposal_id, decision, reviewer,
+                                        decided_at, snapshot_version, integrity_hash,
+                                        snapshot_payload, created_at
+                                    ) VALUES (
+                                        %s, %s, %s, %s,
+                                        %s, %s, %s,
+                                        %s, NOW()
+                                    )
+                                    ON CONFLICT (investigation_id, proposal_id) DO NOTHING;
+                                    """,
+                                    (
+                                        safe_id,
+                                        snapshot.proposal_id,
+                                        snapshot.decision,
+                                        snapshot.reviewer,
+                                        _parse_snapshot_timestamp(snapshot.decided_at),
+                                        snapshot.snapshot_version,
+                                        snapshot.integrity_hash,
+                                        Jsonb(snapshot.payload),
+                                    ),
+                                )
         except ConcurrencyError:
             raise
         except psycopg.Error as e:
@@ -638,6 +711,90 @@ class PostgresRepository(PersistenceRepository):
                     cur.fetchone()
         except psycopg.Error as e:
             raise PersistenceError("Database readiness probe failed") from e
+
+    # -----------------------------------------------------------------------
+    # Immutable approval snapshots (Mission 26.2)
+    # -----------------------------------------------------------------------
+
+    @property
+    def supports_approval_snapshots(self) -> bool:
+        """PostgreSQL durably stores immutable approval snapshots."""
+        return True
+
+    def load_approval_snapshot(
+        self, investigation_id: str, proposal_id: str
+    ) -> Optional[ApprovalSnapshot]:
+        """Load and integrity-verify the approval snapshot for one decision.
+
+        Reads the write-once row for ``(investigation_id, proposal_id)`` and
+        re-computes the SHA-256 digest of the stored payload. A mismatch raises
+        :class:`SnapshotIntegrityError` so callers never mistake a corrupted or
+        tampered snapshot for authentic captured evidence.
+
+        Args:
+            investigation_id: Identifier of the investigation.
+            proposal_id: Fix proposal identifier whose decision is being read.
+
+        Returns:
+            The stored :class:`ApprovalSnapshot`, or None when no snapshot exists.
+
+        Raises:
+            PersistenceError: If the identifier is invalid or a database error occurs.
+            SnapshotIntegrityError: If the stored snapshot fails verification.
+        """
+        safe_id = validate_investigation_id(investigation_id)
+        safe_pid = str(proposal_id or "").strip()
+
+        try:
+            with self._pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT investigation_id, proposal_id, decision, reviewer,
+                               decided_at, snapshot_version, integrity_hash, snapshot_payload
+                        FROM approval_snapshots
+                        WHERE investigation_id = %s AND proposal_id = %s;
+                        """,
+                        (safe_id, safe_pid),
+                    )
+                    row = cur.fetchone()
+        except psycopg.Error as e:
+            raise PersistenceError(
+                f"Database error loading approval snapshot for '{safe_id}/{safe_pid}': {e}"
+            ) from e
+
+        if row is None:
+            return None
+
+        payload = row[7]
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception as e:
+                raise SnapshotIntegrityError(
+                    f"Malformed snapshot payload for '{safe_id}/{safe_pid}'."
+                ) from e
+        if not isinstance(payload, dict):
+            raise SnapshotIntegrityError(
+                f"Malformed snapshot payload for '{safe_id}/{safe_pid}': root must be an object."
+            )
+
+        integrity_hash = row[6]
+        if not verify_integrity(payload, integrity_hash):
+            raise SnapshotIntegrityError(
+                f"Integrity verification failed for approval snapshot '{safe_id}/{safe_pid}'."
+            )
+
+        return ApprovalSnapshot(
+            investigation_id=row[0],
+            proposal_id=row[1],
+            decision=row[2],
+            reviewer=row[3],
+            decided_at=row[4].isoformat() if row[4] else "",
+            snapshot_version=row[5],
+            integrity_hash=integrity_hash,
+            payload=payload,
+        )
 
     # -----------------------------------------------------------------------
     # Outbox Event Persistence Methods

@@ -1,13 +1,18 @@
 import { useState } from "react";
 
 import { ApiError } from "../api/client";
-import type { SubmitApprovalResponse } from "../api/types";
+import type {
+  ApprovalSnapshotResponse,
+  InvestigationResult,
+  SubmitApprovalResponse,
+} from "../api/types";
 import { formatTimestamp } from "../lib/format";
 import {
   hasRenderablePatch,
   parseUnifiedDiff,
   type ProposalView,
 } from "../lib/proposals";
+import { ApprovalSnapshotView } from "./ApprovalSnapshotView";
 import { StatusBadge } from "./StatusBadge";
 
 /**
@@ -32,6 +37,17 @@ interface ProposalCardProps {
   view: ProposalView;
   /** Submits the decision through the real API. Absent in read-only contexts. */
   onDecide?: (input: ProposalDecisionInput) => Promise<SubmitApprovalResponse>;
+  /**
+   * Loads the immutable snapshot captured for a recorded decision. Absent when
+   * the surrounding view has no access to the snapshot endpoint.
+   */
+  onLoadSnapshot?: (proposalId: string) => Promise<ApprovalSnapshotResponse>;
+  /**
+   * The investigation's current result, used only to contrast the snapshot with
+   * what the investigation looks like now. Never presented as decision-time
+   * context.
+   */
+  currentResult?: InvestigationResult | null;
   onFocusEvidence?: (evidenceId: string) => void;
 }
 
@@ -52,6 +68,8 @@ function lineRange(start?: number | null, end?: number | null): string {
 export function ProposalCard({
   view,
   onDecide,
+  onLoadSnapshot,
+  currentResult,
   onFocusEvidence,
 }: ProposalCardProps) {
   const { proposal } = view;
@@ -62,8 +80,41 @@ export function ProposalCard({
   const [validation, setValidation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<SubmitApprovalResponse | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [history, setHistory] = useState<ApprovalSnapshotResponse | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const canDecide = Boolean(onDecide) && !view.terminal;
+  const canViewHistory = Boolean(onLoadSnapshot) && view.approval !== null;
+
+  /**
+   * Load the decision's immutable snapshot on demand. Always re-fetched on
+   * open (never cached) so a record that gains a snapshot after an override is
+   * never shown as stale.
+   */
+  async function toggleHistory() {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+    setHistoryOpen(true);
+    if (!onLoadSnapshot || !view.approval || historyLoading) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      setHistory(await onLoadSnapshot(view.approval.proposal_id));
+    } catch (caught) {
+      setHistory(null);
+      setHistoryError(
+        caught instanceof ApiError || caught instanceof Error
+          ? caught.message
+          : "The historical snapshot could not be loaded.",
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   function openConfirmation(decision: "approved" | "rejected") {
     if (submitting) return;
@@ -283,6 +334,49 @@ export function ProposalCard({
             This proposal has already been reviewed. The backend rejects a
             second decision.
           </p>
+        )}
+
+        {canViewHistory && (
+          <div className="approval__actions">
+            <button
+              type="button"
+              className="button"
+              aria-expanded={historyOpen}
+              onClick={() => void toggleHistory()}
+            >
+              {historyOpen
+                ? "Hide historical snapshot"
+                : "View historical snapshot"}
+            </button>
+          </div>
+        )}
+
+        {historyOpen && historyLoading && (
+          <p className="muted">Loading the captured snapshot…</p>
+        )}
+
+        {historyOpen && historyError && (
+          <p className="alert alert--error" role="alert">
+            {historyError}
+          </p>
+        )}
+
+        {historyOpen && history && (
+          <ApprovalSnapshotView
+            snapshot={history}
+            currentEvidence={currentResult?.evidence}
+            currentHypothesis={
+              currentResult?.hypotheses.find(
+                (item) => item.hypothesis_id === proposal.hypothesis_id,
+              ) ?? null
+            }
+            currentVerification={
+              currentResult?.verification.find(
+                (item) => item.hypothesis_id === proposal.hypothesis_id,
+              ) ?? null
+            }
+            onFocusEvidence={onFocusEvidence}
+          />
         )}
 
         {canDecide && !mode && (

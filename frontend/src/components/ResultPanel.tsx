@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type {
   ApprovalRecord,
+  ApprovalSnapshotResponse,
   InvestigationResult,
   SubmitApprovalResponse,
 } from "../api/types";
@@ -21,6 +22,8 @@ interface ResultPanelProps {
   approvals?: ApprovalRecord[];
   /** Records a decision through the real API. Omit for a read-only view. */
   onDecide?: (input: ProposalDecisionInput) => Promise<SubmitApprovalResponse>;
+  /** Loads the immutable snapshot captured for a recorded decision. */
+  onLoadSnapshot?: (proposalId: string) => Promise<ApprovalSnapshotResponse>;
 }
 
 /** Headline counters derived entirely from the persisted result projection. */
@@ -79,6 +82,7 @@ export function ResultPanel({
   result,
   approvals = [],
   onDecide,
+  onLoadSnapshot,
 }: ResultPanelProps) {
   const [focusedEvidenceId, setFocusedEvidenceId] = useState<string | null>(
     null,
@@ -161,6 +165,8 @@ export function ResultPanel({
                 key={view.proposal.proposal_id}
                 view={view}
                 onDecide={onDecide}
+                onLoadSnapshot={onLoadSnapshot}
+                currentResult={result}
                 onFocusEvidence={setFocusedEvidenceId}
               />
             ))}

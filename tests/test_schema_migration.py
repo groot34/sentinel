@@ -310,7 +310,12 @@ class TestSchemaVerificationUnit:
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
 
         # 1. get_existing_tables
-        tables = [("schema_migrations",), ("investigations",), ("event_outbox",)]
+        tables = [
+            ("schema_migrations",),
+            ("investigations",),
+            ("event_outbox",),
+            ("approval_snapshots",),
+        ]
         # 2. get_applied_versions
         applied = [("001_initial_schema",), ("002_outbox_schema",)]
 
@@ -327,6 +332,11 @@ class TestSchemaVerificationUnit:
         # 7. schema_migrations columns
         mig_cols = [(col,) for col in EXPECTED_TABLES["schema_migrations"]["columns"]]
 
+        # 8. approval_snapshots columns
+        snap_cols = [(col,) for col in EXPECTED_TABLES["approval_snapshots"]["columns"]]
+        # 9. approval_snapshots indexes
+        snap_idxs = [(idx,) for idx in EXPECTED_TABLES["approval_snapshots"]["indexes"]]
+
         mock_cur.fetchall.side_effect = [
             tables,
             applied,
@@ -335,6 +345,8 @@ class TestSchemaVerificationUnit:
             inv_idxs,
             outbox_cols,
             outbox_idxs,
+            snap_cols,
+            snap_idxs,
         ]
 
         report = verify_schema(mock_conn, raise_on_error=True)

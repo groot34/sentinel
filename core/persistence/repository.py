@@ -8,6 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
+from core.approval_snapshots import ApprovalSnapshot
 from core.domain.state import InvestigationState
 from core.events.base import DomainEvent
 
@@ -96,12 +97,22 @@ class PersistenceRepository(ABC):
     """Abstract repository for persisting and loading InvestigationState."""
 
     @abstractmethod
-    def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
+    def save(
+        self,
+        state: InvestigationState,
+        events: Optional[List[DomainEvent]] = None,
+        snapshots: Optional[List[ApprovalSnapshot]] = None,
+    ) -> None:
         """Persist investigation state idempotently.
 
         Args:
             state: Valid InvestigationState instance.
             events: Optional list of DomainEvents to persist atomically (outbox pattern).
+            snapshots: Optional list of immutable approval snapshots to persist in
+                the **same transaction** as the state write, so a decision and its
+                historical context commit or roll back together. Backends that do
+                not support snapshots ignore this argument and must leave
+                :attr:`supports_approval_snapshots` False so callers never rely on it.
 
         Raises:
             PersistenceError: If serialization, validation, or writing fails.
@@ -168,6 +179,44 @@ class PersistenceRepository(ABC):
             PersistenceError: If the backend is unreachable or the probe fails.
         """
         self.list()
+
+    @property
+    def supports_approval_snapshots(self) -> bool:
+        """Whether this backend durably stores immutable approval snapshots.
+
+        Defaults to False. Backends that override this to True must persist the
+        snapshots passed to :meth:`save` atomically with the state write and
+        implement :meth:`load_approval_snapshot`.
+        """
+        return False
+
+    def load_approval_snapshot(
+        self, investigation_id: str, proposal_id: str
+    ) -> Optional[ApprovalSnapshot]:
+        """Load the immutable approval snapshot for one decision, if any.
+
+        The default implementation signals that the backend has no snapshot
+        store. A backend that returns True from :attr:`supports_approval_snapshots`
+        must override this to return the stored snapshot, verifying its integrity
+        digest on the way out and raising
+        :class:`core.approval_snapshots.SnapshotIntegrityError` when the stored
+        payload no longer matches the recorded digest.
+
+        Args:
+            investigation_id: Identifier of the investigation.
+            proposal_id: Fix proposal identifier whose decision is being read.
+
+        Returns:
+            The stored :class:`ApprovalSnapshot`, or None when no snapshot exists.
+
+        Raises:
+            PersistenceError: If this backend does not support snapshots or a
+                database error occurs.
+            SnapshotIntegrityError: If the stored snapshot fails verification.
+        """
+        raise PersistenceError(
+            "Approval snapshot retrieval is not supported by this persistence backend."
+        )
 
     def close(self) -> None:
         """Release any resources owned by this repository.

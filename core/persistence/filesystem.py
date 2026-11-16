@@ -109,12 +109,20 @@ class FilesystemRepository(PersistenceRepository):
                     f"Safety check failed: forbidden secret key detected in state: '{secret_name}'"
                 )
 
-    def save(self, state: InvestigationState, events: Optional[List[DomainEvent]] = None) -> None:
+    def save(
+        self,
+        state: InvestigationState,
+        events: Optional[List[DomainEvent]] = None,
+        snapshots: Optional[List[Any]] = None,
+    ) -> None:
         """Persist InvestigationState atomically to state.json.
 
         Args:
             state: InvestigationState instance to save.
             events: Optional list of DomainEvents (ignored for filesystem backend).
+            snapshots: Ignored. The filesystem backend does not provide durable
+                approval snapshots (see ``supports_approval_snapshots``); callers
+                must not pass snapshots here.
 
         Raises:
             PersistenceError: If validation, serialization, or write fails.

@@ -9,6 +9,7 @@
 
 import type {
   AcceptedInvestigation,
+  ApprovalSnapshotResponse,
   EventHistoryResponse,
   InvestigationDetail,
   InvestigationResult,
@@ -156,5 +157,24 @@ export function submitApproval(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
+  );
+}
+
+/**
+ * `GET /investigations/{id}/approval/{proposalId}/snapshot` — the immutable
+ * evidence snapshot captured when the decision was recorded.
+ *
+ * The backend verifies the snapshot's integrity digest before returning it, so
+ * a `snapshot_integrity_failed` error (HTTP 500) means the stored snapshot was
+ * corrupted or tampered with. A legacy approval with no snapshot returns
+ * `snapshot_available: false` plus an explanatory `message`; current
+ * investigation evidence is never substituted for it.
+ */
+export function getApprovalSnapshot(
+  id: string,
+  proposalId: string,
+): Promise<ApprovalSnapshotResponse> {
+  return request<ApprovalSnapshotResponse>(
+    `/investigations/${encodeURIComponent(id)}/approval/${encodeURIComponent(proposalId)}/snapshot`,
   );
 }

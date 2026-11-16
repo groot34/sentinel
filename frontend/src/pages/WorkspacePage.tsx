@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 
 import {
   ApiError,
+  getApprovalSnapshot,
   getEventHistory,
   getInvestigation,
   getInvestigationResult,
@@ -173,6 +174,16 @@ export function WorkspacePage() {
     [investigationId],
   );
 
+  /**
+   * Load the immutable snapshot captured when a decision was recorded. It is
+   * read straight from the API (which verifies its integrity) and is never
+   * derived from the current investigation state.
+   */
+  const handleLoadSnapshot = useCallback(
+    (proposalId: string) => getApprovalSnapshot(investigationId, proposalId),
+    [investigationId],
+  );
+
   if (loading) {
     return <LoadingState message="Loading investigation…" />;
   }
@@ -287,6 +298,7 @@ export function WorkspacePage() {
           result={result}
           approvals={detail.approvals}
           onDecide={handleDecide}
+          onLoadSnapshot={handleLoadSnapshot}
         />
       )}
     </section>

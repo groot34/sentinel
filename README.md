@@ -679,6 +679,45 @@ The request body is strictly `{proposal_id, decision, reviewer, notes?}`; unknow
 (`400`). `decision` accepts `approved` / `rejected` and `proposal_id` values come from
 `GET /investigations/{id}/result`.
 
+##### Retrieve the Approval Evidence Snapshot (Mission 26.2)
+
+```bash
+curl -s http://127.0.0.1:8000/investigations/<investigation_id>/approval/FIX-001/snapshot
+```
+
+When a human records an approval or rejection on a PostgreSQL backend, Sentinel captures an
+**immutable snapshot** of the investigation context that was available at that moment and stores it
+in the same transaction as the decision. This endpoint returns that captured context; it is
+authenticated like every other route (`SENTINEL_API_AUTH_PROTECT_READS` / API key apply).
+
+`200 OK` with `ApprovalSnapshotResponse`:
+
+- `decision`, `reviewer`, `decided_at`, `notes` — the recorded decision, taken from the stored
+  snapshot (never derived from current evidence).
+- `snapshot_version` — schema version of the captured document (currently `1`).
+- `integrity` — `{algorithm: "sha256", hash, verified: true}`. The digest is recomputed over the
+  canonical snapshot before the response is built; it is an audit aid, **not** an access-control
+  mechanism.
+- `snapshot` — the captured document, with `decision`, `proposal` (summary, rationale, expected
+  effect, patch, risks, validation plan, rollback plan, file changes), `hypothesis` (claim,
+  reasoning, verdict and confidence as known at decision time) and the `evidence` / `verification`
+  records those sections reference. Unrelated investigation data is deliberately excluded.
+
+Errors and edge cases:
+
+| Status | `error` | Meaning |
+| --- | --- | --- |
+| `400` | `invalid_investigation_id` / `invalid_proposal_id` | Malformed path parameter (`proposal_id` must match `^FIX-[0-9]{3}$`) |
+| `404` | `investigation_not_found` | No such investigation |
+| `404` | `approval_not_found` | No decision recorded for that proposal |
+| `500` | `snapshot_integrity_failed` | The stored snapshot no longer matches its recorded digest (corrupted or tampered with) |
+
+A **legacy** approval — one recorded before snapshot capture existed, or by the non-interactive
+pipeline gate that writes an automated default decision — returns `200 OK` with
+`snapshot_available: false`, an empty `snapshot`, and a `message` explaining that the historical
+context was never captured. Current investigation evidence is **never** substituted for a missing
+snapshot.
+
 #### 7. Investigation Event History & Live SSE Streaming
 
 The `GET /investigations/{id}/events` endpoint provides dual-mode event access via HTTP content negotiation:

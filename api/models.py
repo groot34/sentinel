@@ -262,6 +262,50 @@ class SubmitApprovalResponse(BaseModel):
     human_approval_notice: str
 
 
+class ApprovalSnapshotIntegrityResponse(BaseModel):
+    """Integrity metadata for a captured approval snapshot.
+
+    ``verified`` is always True when this object is present: the snapshot is
+    only returned after its recomputed digest matched the one recorded at
+    capture time. A snapshot that fails verification is reported as an explicit
+    error instead of being returned.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    algorithm: str = "sha256"
+    hash: str
+    verified: bool = True
+
+
+class ApprovalSnapshotResponse(BaseModel):
+    """Response for GET /investigations/{id}/approval/{proposal_id}/snapshot.
+
+    Returns the exact investigation context that was available to the reviewer
+    when the decision was recorded, under ``snapshot``.
+
+    ``snapshot_available`` is False for a *legacy* approval — one recorded
+    before snapshot capture existed, or on a persistence backend that does not
+    store snapshots. In that case ``snapshot`` stays empty and ``message``
+    explains that the historical context was never captured; current
+    investigation evidence is deliberately never substituted for it.
+
+    ``integrity`` is present only when a snapshot was returned and verified.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str
+    proposal_id: str
+    snapshot_available: bool
+    decision: Optional[str] = None
+    reviewer: Optional[str] = None
+    decided_at: Optional[str] = None
+    notes: Optional[str] = None
+    snapshot_version: Optional[int] = None
+    integrity: Optional[ApprovalSnapshotIntegrityResponse] = None
+    message: Optional[str] = None
+    snapshot: Dict[str, Any] = Field(default_factory=dict)
+
+
 class GetInvestigationResponse(BaseModel):
     """Allowlisted response for GET /investigations/{id}."""
     model_config = ConfigDict(extra="forbid")
