@@ -71,6 +71,11 @@ class TestSchemaDiscoveryUnit:
         versions = [m.version for m in migrations]
         assert versions[0] == "001_initial_schema"
         assert versions[1] == "002_outbox_schema"
+        assert "005_github_integrations" in versions
+        assert "006_github_integrations_case_insensitive_unique" in versions
+        assert versions.index("005_github_integrations") < versions.index(
+            "006_github_integrations_case_insensitive_unique"
+        )
 
         for m in migrations:
             assert m.filename.endswith(".sql")
@@ -315,6 +320,7 @@ class TestSchemaVerificationUnit:
             ("investigations",),
             ("event_outbox",),
             ("approval_snapshots",),
+            ("github_integrations",),
         ]
         # 2. get_applied_versions
         applied = [("001_initial_schema",), ("002_outbox_schema",)]
@@ -337,6 +343,11 @@ class TestSchemaVerificationUnit:
         # 9. approval_snapshots indexes
         snap_idxs = [(idx,) for idx in EXPECTED_TABLES["approval_snapshots"]["indexes"]]
 
+        # 10. github_integrations columns
+        gh_cols = [(col,) for col in EXPECTED_TABLES["github_integrations"]["columns"]]
+        # 11. github_integrations indexes
+        gh_idxs = [(idx,) for idx in EXPECTED_TABLES["github_integrations"]["indexes"]]
+
         mock_cur.fetchall.side_effect = [
             tables,
             applied,
@@ -347,6 +358,8 @@ class TestSchemaVerificationUnit:
             outbox_idxs,
             snap_cols,
             snap_idxs,
+            gh_cols,
+            gh_idxs,
         ]
 
         report = verify_schema(mock_conn, raise_on_error=True)
@@ -464,6 +477,7 @@ class TestSchemaMigrationLive:
             assert "investigations" in report["present_tables"]
             assert "event_outbox" in report["present_tables"]
             assert "schema_migrations" in report["present_tables"]
+            assert "github_integrations" in report["present_tables"]
 
     def test_live_repeat_execution_idempotent(self):
         """Live test confirming repeated initialize_schema calls are safe and no-op."""

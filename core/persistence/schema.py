@@ -141,6 +141,27 @@ EXPECTED_TABLES = {
             "idx_approval_snapshots_decided_at",
         },
     },
+    "github_integrations": {
+        "columns": {
+            "connection_id",
+            "provider",
+            "label",
+            "owner",
+            "repo",
+            "default_branch",
+            "visibility",
+            "status",
+            "credential_ref",
+            "scopes",
+            "last_verified_at",
+            "created_at",
+            "updated_at",
+        },
+        "indexes": {
+            "idx_github_integrations_owner_repo",
+            "idx_github_integrations_status",
+        },
+    },
 }
 
 
