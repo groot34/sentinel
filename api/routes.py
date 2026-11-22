@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import logging
 import math
@@ -11,6 +12,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -45,20 +47,34 @@ from api.models import (
     ApprovalRecordResponse,
     ApprovalSnapshotIntegrityResponse,
     ApprovalSnapshotResponse,
+    ConnectRepositoryRequest,
     CreateInvestigationRequest,
     CreateInvestigationResponse,
+    DisconnectConnectionResponse,
     EvidenceResultResponse,
     EventHistoryItemResponse,
     EventHistoryResponse,
     FileChangeResponse,
     GetInvestigationResponse,
+    GITHUB_DEFAULT_MAX_ITEMS,
+    GITHUB_DEFAULT_PER_PAGE,
+    GITHUB_MAX_MAX_ITEMS,
+    GITHUB_MAX_PER_PAGE,
+    GITHUB_PR_STATES,
+    GitHubBranchResponse,
+    GitHubCommitResponse,
+    GitHubConnectionResponse,
+    GitHubPullRequestResponse,
     HealthResponse,
     HypothesisResultResponse,
     IncidentBundleIngestRequest,
     IncidentBundleIngestResponse,
     InvestigationResultResponse,
     InvestigationSummaryResponse,
+    ListBranchesResponse,
+    ListConnectionsResponse,
     ListInvestigationsResponse,
+    ListPullRequestsResponse,
     PREFER_ASYNC_HEADER_VALUE,
     ProposalResultResponse,
     ReadinessResponse,
@@ -67,6 +83,7 @@ from api.models import (
     SubmitApprovalResponse,
     VerificationCheckResponse,
     VerificationResultResponse,
+    VerifyConnectionResponse,
 )
 from core.domain.models import ApprovalRecord, IncidentStatus
 from core.domain.state import InvestigationState
@@ -76,6 +93,26 @@ from core.approval_snapshots import (
     create_snapshot,
 )
 from starlette.background import BackgroundTask
+from core.integrations.github_client import (
+    GitHubAuthenticationError,
+    GitHubClient,
+    GitHubConfigurationError,
+    GitHubError,
+    GitHubInvalidResponseError,
+    GitHubNotFoundError,
+    GitHubPermissionError,
+    GitHubRateLimitError,
+    GitHubUnavailableError,
+    GitHubValidationError,
+)
+from core.integrations.repository_store import (
+    STATUS_CONNECTED,
+    STATUS_ERROR,
+    DuplicateConnectionError,
+    GitHubConnection,
+    IntegrationStore,
+    IntegrationStoreError,
+)
 from core.persistence import ConcurrencyError, PersistenceError, PersistenceRepository
 logger = logging.getLogger(__name__)
 
@@ -1941,5 +1978,549 @@ def list_investigation_events(request: Request) -> Union[JSONResponse, Streaming
         total=len(projected),
         events=projected,
         backend_supports_event_history=bool(backend_supports),
+    )
+    return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+# ===========================================================================
+# GitHub integration (Mission 27.3.2) — read-only repository connections
+#
+# These routes expose Sentinel's read-only GitHub integration. The GitHub
+# credential is resolved server-side from SENTINEL_GITHUB_TOKEN by the shared
+# GitHubClient; a token is never accepted from a client, persisted, logged or
+# returned. Every GitHub operation is a read-only GET, and every failure is
+# mapped to a stable, sanitized error code.
+# ===========================================================================
+
+#: Mapping of GitHub client errors to (HTTP status, stable error code).
+#: The exceptions carry only fixed, already-sanitized messages, so no raw
+#: GitHub response body, request header or credential is ever surfaced.
+_GITHUB_ERROR_MAP: Tuple[Tuple[type, int, str], ...] = (
+    (GitHubConfigurationError, 503, "github_not_configured"),
+    (GitHubRateLimitError, 429, "github_rate_limited"),
+    (GitHubAuthenticationError, 502, "github_authentication_failed"),
+    (GitHubPermissionError, 403, "github_permission_denied"),
+    (GitHubNotFoundError, 404, "github_not_found"),
+    (GitHubValidationError, 400, "invalid_github_request"),
+    (GitHubUnavailableError, 503, "github_unavailable"),
+    (GitHubInvalidResponseError, 502, "github_invalid_response"),
+)
+
+#: Characters permitted in a generated connection ID.
+_CONNECTION_ID_SAFE_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+
+#: GitHub errors that prove the connection is unusable and so justify marking a
+#: stored connection as ``error``. Every other error is transient or
+#: inconclusive — a rate limit, a GitHub outage, a malformed response or a
+#: missing server credential — and must leave the stored record untouched.
+_DEFINITIVE_VERIFICATION_FAILURES: Tuple[type, ...] = (
+    GitHubAuthenticationError,
+    GitHubPermissionError,
+    GitHubNotFoundError,
+)
+
+
+def _github_error_response(exc: GitHubError) -> JSONResponse:
+    """Map a GitHub client error onto a sanitized HTTP response."""
+    status_code, error_code = 502, "github_error"
+    for exc_type, candidate_status, candidate_code in _GITHUB_ERROR_MAP:
+        if isinstance(exc, exc_type):
+            status_code, error_code = candidate_status, candidate_code
+            break
+
+    response = error_json_response(status_code, error_code, str(exc))
+    if isinstance(exc, GitHubRateLimitError) and exc.retry_after:
+        response.headers["Retry-After"] = str(exc.retry_after)
+    return response
+
+
+def _integration_unavailable_response() -> JSONResponse:
+    """503 returned when the GitHub integration is not wired onto the app."""
+    return error_json_response(
+        503,
+        "github_integration_unavailable",
+        "The GitHub integration is not configured on this server.",
+    )
+
+
+def _github_client(request: Request) -> Optional[GitHubClient]:
+    return getattr(request.app.state, "github_client", None)
+
+
+def _integration_store(request: Request) -> Optional[IntegrationStore]:
+    return getattr(request.app.state, "integration_store", None)
+
+
+def _read_json_object_body(
+    request: Request,
+) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
+    """Read and parse a JSON object request body.
+
+    Returns ``(body, None)`` on success, or ``(None, error_response)`` when the
+    body is not valid JSON or is not a JSON object — the same error shape used
+    by the other mutating endpoints of this API.
+    """
+    try:
+        raw_body = getattr(request, "_body", None)
+        if raw_body is None:
+            import anyio
+            raw_body = anyio.from_thread.run(request.body)
+        body = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        return None, error_json_response(400, "invalid_json", "Malformed JSON request body.")
+    if not isinstance(body, dict):
+        return None, error_json_response(400, "invalid_json", "Request body must be a JSON object.")
+    return body, None
+
+
+def _validate_connection_id_param(raw_id: Any) -> str:
+    """Validate a GitHub connection ID path parameter."""
+    if not isinstance(raw_id, str):
+        raise HTTPException(status_code=400, detail="Connection ID must be a string.")
+    stripped = raw_id.strip()
+    if not stripped:
+        raise HTTPException(status_code=400, detail="Connection ID cannot be empty.")
+    if "/" in stripped or "\\" in stripped or ".." in stripped or ":" in stripped:
+        raise HTTPException(status_code=400, detail="Path traversal characters detected in connection ID.")
+    if not _SAFE_ID_REGEX.match(stripped):
+        raise HTTPException(status_code=400, detail="Invalid connection ID format.")
+    return stripped
+
+
+def _connection_id_or_error(request: Request) -> Tuple[Optional[str], Optional[JSONResponse]]:
+    """Extract and validate the connection ID path parameter."""
+    raw_id = request.path_params.get("connection_id", "")
+    try:
+        return _validate_connection_id_param(raw_id), None
+    except HTTPException as he:
+        return None, error_json_response(he.status_code, "invalid_connection_id", str(he.detail))
+
+
+def _parse_bounded_query_int(
+    request: Request, name: str, default: int, minimum: int, maximum: int
+) -> Tuple[Optional[int], Optional[JSONResponse]]:
+    """Parse a bounded integer query parameter.
+
+    Returns ``(value, None)`` on success, or ``(None, error_response)`` when the
+    parameter is present but not an integer within ``[minimum, maximum]``.
+    """
+    raw = request.query_params.get(name)
+    if raw is None or raw == "":
+        return default, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None, error_json_response(
+            400, "invalid_request", f"Query parameter '{name}' must be an integer."
+        )
+    if value < minimum or value > maximum:
+        return None, error_json_response(
+            400,
+            "invalid_request",
+            f"Query parameter '{name}' must be between {minimum} and {maximum}.",
+        )
+    return value, None
+
+
+def _now_iso() -> str:
+    """Current UTC time as an ISO-8601 string."""
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _build_connection_id(owner: str, repo: str) -> str:
+    """Derive a deterministic, collision-resistant connection ID.
+
+    The identifier keeps a readable, lowercased ``owner-repo`` prefix but adds
+    a short digest of the normalised ``owner``/``repo`` pair. The digest makes
+    distinct coordinates that would otherwise collapse to the same
+    hyphen-joined string (e.g. ``a-b``/``c`` vs ``a``/``b-c``) yield different
+    IDs, while case variants of the *same* repository still map to the same
+    identifier. Any character outside the safe ID alphabet is replaced with
+    ``-``.
+    """
+    normalised = f"{owner.lower()}\x00{repo.lower()}"
+    digest = hashlib.sha256(normalised.encode("utf-8")).hexdigest()[:10]
+    base = f"{owner}-{repo}".lower()
+    cleaned = "".join(
+        ch if ch in _CONNECTION_ID_SAFE_CHARS else "-" for ch in base
+    ).strip("-")
+    # Keep the readable portion bounded so prefix + digest always fits the
+    # connection-ID limit (128 characters).
+    return f"gh-{cleaned[:100]}-{digest}"[:128]
+
+
+def _connection_to_response(connection: GitHubConnection) -> Dict[str, Any]:
+    """Project a stored connection onto the credential-free response allowlist."""
+    return GitHubConnectionResponse(
+        connection_id=connection.connection_id,
+        provider=connection.provider,
+        label=connection.label,
+        owner=connection.owner,
+        repo=connection.repo,
+        default_branch=connection.default_branch,
+        visibility=connection.visibility,
+        status=connection.status,
+        scopes=list(connection.scopes),
+        last_verified_at=connection.last_verified_at,
+        created_at=connection.created_at,
+        updated_at=connection.updated_at,
+    ).model_dump()
+
+
+def _get_stored_connection(
+    request: Request, connection_id: str
+) -> Tuple[Optional[GitHubConnection], Optional[JSONResponse]]:
+    """Load a persisted connection, or return the mapped error response."""
+    store = _integration_store(request)
+    if store is None:
+        return None, _integration_unavailable_response()
+
+    try:
+        connection = store.get(connection_id)
+    except IntegrationStoreError as exc:
+        return None, error_json_response(503, "integration_store_unavailable", str(exc))
+
+    if connection is None:
+        return None, error_json_response(
+            404,
+            "connection_not_found",
+            f"GitHub connection '{connection_id}' not found.",
+        )
+    return connection, None
+
+
+def connect_repository(request: Request) -> JSONResponse:
+    """POST /integrations/github/connections — connect a GitHub repository.
+
+    The repository is validated against GitHub before anything is persisted, so
+    a connection is only created when the credential can actually read the
+    repository. The response never contains a credential.
+    """
+    body, error = _read_json_object_body(request)
+    if error is not None:
+        return error
+
+    try:
+        req_model = ConnectRepositoryRequest.model_validate(body)
+    except Exception as exc:
+        return error_json_response(400, "invalid_request", str(exc))
+
+    store = _integration_store(request)
+    client = _github_client(request)
+    if store is None or client is None:
+        return _integration_unavailable_response()
+
+    try:
+        repo_info = client.validate_repository(req_model.owner, req_model.repo)
+    except GitHubError as exc:
+        return _github_error_response(exc)
+
+    connection = GitHubConnection(
+        connection_id=_build_connection_id(repo_info.owner, repo_info.name),
+        label=req_model.label or f"{repo_info.owner}/{repo_info.name}",
+        owner=repo_info.owner,
+        repo=repo_info.name,
+        default_branch=req_model.default_branch or repo_info.default_branch or "main",
+        visibility=repo_info.visibility,
+        status=STATUS_CONNECTED,
+        scopes=[],
+        last_verified_at=_now_iso(),
+    )
+
+    try:
+        store.create(connection)
+    except DuplicateConnectionError as exc:
+        return error_json_response(409, "duplicate_connection", str(exc))
+    except IntegrationStoreError as exc:
+        return error_json_response(503, "integration_store_unavailable", str(exc))
+
+    return JSONResponse(
+        status_code=201,
+        content=_connection_to_response(connection),
+        headers={"Location": f"/integrations/github/connections/{connection.connection_id}"},
+    )
+
+
+def list_connections(request: Request) -> JSONResponse:
+    """GET /integrations/github/connections — list connected repositories."""
+    store = _integration_store(request)
+    if store is None:
+        return _integration_unavailable_response()
+
+    try:
+        connections = store.list()
+    except IntegrationStoreError as exc:
+        return error_json_response(503, "integration_store_unavailable", str(exc))
+
+    resp = ListConnectionsResponse(
+        connections=[GitHubConnectionResponse(**_connection_to_response(c)) for c in connections]
+    )
+    return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def get_connection(request: Request) -> JSONResponse:
+    """GET /integrations/github/connections/{connection_id} — retrieve one connection."""
+    connection_id, error = _connection_id_or_error(request)
+    if error is not None:
+        return error
+
+    connection, error = _get_stored_connection(request, connection_id)  # type: ignore[arg-type]
+    if error is not None:
+        return error
+
+    return JSONResponse(status_code=200, content=_connection_to_response(connection))  # type: ignore[arg-type]
+
+
+def verify_connection(request: Request) -> JSONResponse:
+    """POST /integrations/github/connections/{connection_id}/verify.
+
+    Re-validates repository access using the shared GitHub client and records
+    the outcome on the connection: ``connected`` with a fresh verification
+    timestamp on success. A *definitive* access failure — revoked credential,
+    missing permission, or a repository that is no longer accessible — marks
+    the connection ``error``; a *transient* or inconclusive failure (rate
+    limit, GitHub outage, malformed response, missing server credential) leaves
+    the stored record untouched, so a temporary condition never downgrades a
+    healthy connection. Revoked credentials, missing permissions and an
+    unavailable GitHub service are reported as distinct error codes.
+    """
+    connection_id, error = _connection_id_or_error(request)
+    if error is not None:
+        return error
+
+    store = _integration_store(request)
+    client = _github_client(request)
+    if store is None or client is None:
+        return _integration_unavailable_response()
+
+    connection, error = _get_stored_connection(request, connection_id)  # type: ignore[arg-type]
+    if error is not None:
+        return error
+
+    try:
+        client.validate_repository(connection.owner, connection.repo)  # type: ignore[union-attr]
+    except GitHubError as exc:
+        # Only definitive access failures mark the stored connection broken.
+        # Transient or inconclusive failures (rate limit, GitHub outage,
+        # malformed response, missing server credential) leave the record
+        # untouched, so a healthy connection is never downgraded by a temporary
+        # condition. The GitHub error is always returned unchanged; a failed
+        # status write is logged (sanitised) and must never mask it.
+        if isinstance(exc, _DEFINITIVE_VERIFICATION_FAILURES):
+            try:
+                store.update(connection_id, status=STATUS_ERROR)  # type: ignore[arg-type]
+            except IntegrationStoreError:
+                logger.warning(
+                    "Failed to record verification failure for connection '%s'.",
+                    connection_id,
+                )
+        return _github_error_response(exc)
+
+    verified_at = _now_iso()
+    try:
+        updated = store.update(
+            connection_id,  # type: ignore[arg-type]
+            status=STATUS_CONNECTED,
+            last_verified_at=verified_at,
+        )
+    except IntegrationStoreError as exc:
+        return error_json_response(503, "integration_store_unavailable", str(exc))
+
+    resp = VerifyConnectionResponse(
+        connection=GitHubConnectionResponse(**_connection_to_response(updated)),
+        verified=True,
+        message="GitHub repository access verified.",
+        verified_at=updated.last_verified_at,
+    )
+    return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def disconnect_repository(request: Request) -> JSONResponse:
+    """DELETE /integrations/github/connections/{connection_id} — disconnect a repository.
+
+    Idempotent, matching the store's delete semantics: a repeated disconnect
+    succeeds and reports ``deleted: false`` because no record remained.
+    """
+    connection_id, error = _connection_id_or_error(request)
+    if error is not None:
+        return error
+
+    store = _integration_store(request)
+    if store is None:
+        return _integration_unavailable_response()
+
+    try:
+        existed = store.exists(connection_id)  # type: ignore[arg-type]
+        store.delete(connection_id)  # type: ignore[arg-type]
+    except IntegrationStoreError as exc:
+        return error_json_response(503, "integration_store_unavailable", str(exc))
+
+    resp = DisconnectConnectionResponse(connection_id=connection_id, deleted=bool(existed))  # type: ignore[arg-type]
+    return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def list_repository_branches(request: Request) -> JSONResponse:
+    """GET /integrations/github/connections/{connection_id}/branches."""
+    connection_id, error = _connection_id_or_error(request)
+    if error is not None:
+        return error
+
+    per_page, error = _parse_bounded_query_int(
+        request, "per_page", GITHUB_DEFAULT_PER_PAGE, 1, GITHUB_MAX_PER_PAGE
+    )
+    if error is not None:
+        return error
+    max_items, error = _parse_bounded_query_int(
+        request, "max_items", GITHUB_DEFAULT_MAX_ITEMS, 1, GITHUB_MAX_MAX_ITEMS
+    )
+    if error is not None:
+        return error
+
+    client = _github_client(request)
+    connection, error = _get_stored_connection(request, connection_id)  # type: ignore[arg-type]
+    if error is not None:
+        return error
+    if client is None:
+        return _integration_unavailable_response()
+
+    try:
+        branches = client.list_branches(
+            connection.owner,  # type: ignore[union-attr]
+            connection.repo,  # type: ignore[union-attr]
+            per_page=per_page,
+            max_items=max_items,
+        )
+    except GitHubError as exc:
+        return _github_error_response(exc)
+
+    resp = ListBranchesResponse(
+        connection_id=connection_id,  # type: ignore[arg-type]
+        owner=connection.owner,  # type: ignore[union-attr]
+        repo=connection.repo,  # type: ignore[union-attr]
+        branches=[
+            GitHubBranchResponse(
+                name=b.name,
+                protected=b.protected,
+                commit_sha=b.commit_sha,
+            )
+            for b in branches
+        ],
+    )
+    return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def get_repository_commit(request: Request) -> JSONResponse:
+    """GET /integrations/github/connections/{connection_id}/commits[/{ref}].
+
+    The ref may be supplied either as the trailing path segment (single-segment
+    refs such as a SHA, for backwards compatibility) or as a ``?ref=`` query
+    parameter. The query form is required for refs containing ``/`` (e.g.
+    ``feature/add-auth``), because Starlette matches on the decoded path and a
+    ``%2F`` in the path is indistinguishable from a real separator. The ref is
+    passed to the GitHub client unchanged; the client remains the single source
+    of ref validation (and percent-encodes it for the request).
+    """
+    connection_id, error = _connection_id_or_error(request)
+    if error is not None:
+        return error
+
+    client = _github_client(request)
+    connection, error = _get_stored_connection(request, connection_id)  # type: ignore[arg-type]
+    if error is not None:
+        return error
+    if client is None:
+        return _integration_unavailable_response()
+
+    raw_ref = request.query_params.get("ref")
+    if raw_ref is None:
+        raw_ref = request.path_params.get("ref", "")
+    ref = raw_ref.strip() if isinstance(raw_ref, str) else ""
+    if not ref:
+        return error_json_response(
+            400,
+            "invalid_request",
+            "A commit ref is required (path segment or 'ref' query parameter).",
+        )
+
+    try:
+        commit = client.get_commit(connection.owner, connection.repo, ref)  # type: ignore[union-attr]
+    except GitHubValidationError as exc:
+        # An invalid ref is a client error, not a GitHub-service failure.
+        return error_json_response(400, "invalid_request", str(exc))
+    except GitHubError as exc:
+        return _github_error_response(exc)
+
+    resp = GitHubCommitResponse(
+        sha=commit.sha,
+        message=commit.message,
+        author_login=commit.author_login,
+        author_name=commit.author_name,
+        committed_at=commit.committed_at,
+        html_url=commit.html_url,
+    )
+    return JSONResponse(status_code=200, content=resp.model_dump())
+
+
+def list_repository_pull_requests(request: Request) -> JSONResponse:
+    """GET /integrations/github/connections/{connection_id}/pull-requests."""
+    connection_id, error = _connection_id_or_error(request)
+    if error is not None:
+        return error
+
+    state = request.query_params.get("state", "open")
+    if state not in GITHUB_PR_STATES:
+        return error_json_response(
+            400,
+            "invalid_request",
+            f"Query parameter 'state' must be one of {list(GITHUB_PR_STATES)}.",
+        )
+
+    per_page, error = _parse_bounded_query_int(
+        request, "per_page", GITHUB_DEFAULT_PER_PAGE, 1, GITHUB_MAX_PER_PAGE
+    )
+    if error is not None:
+        return error
+    max_items, error = _parse_bounded_query_int(
+        request, "max_items", GITHUB_DEFAULT_MAX_ITEMS, 1, GITHUB_MAX_MAX_ITEMS
+    )
+    if error is not None:
+        return error
+
+    client = _github_client(request)
+    connection, error = _get_stored_connection(request, connection_id)  # type: ignore[arg-type]
+    if error is not None:
+        return error
+    if client is None:
+        return _integration_unavailable_response()
+
+    try:
+        pull_requests = client.list_pull_requests(
+            connection.owner,  # type: ignore[union-attr]
+            connection.repo,  # type: ignore[union-attr]
+            state=state,
+            per_page=per_page,
+            max_items=max_items,
+        )
+    except GitHubError as exc:
+        return _github_error_response(exc)
+
+    resp = ListPullRequestsResponse(
+        connection_id=connection_id,  # type: ignore[arg-type]
+        owner=connection.owner,  # type: ignore[union-attr]
+        repo=connection.repo,  # type: ignore[union-attr]
+        pull_requests=[
+            GitHubPullRequestResponse(
+                number=pr.number,
+                title=pr.title,
+                state=pr.state,
+                author_login=pr.author_login,
+                head_sha=pr.head_sha,
+                base_branch=pr.base_branch,
+                draft=pr.draft,
+                html_url=pr.html_url,
+                updated_at=pr.updated_at,
+            )
+            for pr in pull_requests
+        ],
     )
     return JSONResponse(status_code=200, content=resp.model_dump())

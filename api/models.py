@@ -577,6 +577,208 @@ class EventHistoryResponse(BaseModel):
     backend_supports_event_history: bool = True
 
 
+# ---------------------------------------------------------------------------
+# GitHub integration (Mission 27.3.2) — read-only repository connections
+#
+# The API deliberately never accepts or returns a GitHub credential: the token
+# is resolved server-side from SENTINEL_GITHUB_TOKEN by the GitHub client. These
+# schemas therefore describe only non-secret connection metadata and read-only
+# repository information.
+# ---------------------------------------------------------------------------
+
+#: GitHub owner (user/organisation) shape — mirrors the client's validation.
+_GITHUB_OWNER_REGEX = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$")
+
+#: GitHub repository name shape — mirrors the client's validation.
+_GITHUB_REPO_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+#: Accepted pull-request state filters.
+GITHUB_PR_STATES = ("open", "closed", "all")
+
+#: Pagination bounds applied to repository-information endpoints.
+GITHUB_DEFAULT_PER_PAGE = 30
+GITHUB_MAX_PER_PAGE = 100
+GITHUB_DEFAULT_MAX_ITEMS = 100
+GITHUB_MAX_MAX_ITEMS = 1000
+
+
+def _validate_github_owner(v: str) -> str:
+    """Validate a GitHub repository owner (user or organisation)."""
+    if not isinstance(v, str):
+        raise ValueError("owner must be a string")
+    stripped = v.strip()
+    if not stripped or not _GITHUB_OWNER_REGEX.match(stripped):
+        raise ValueError(f"Invalid GitHub repository owner: {v!r}")
+    return stripped
+
+
+def _validate_github_repo(v: str) -> str:
+    """Validate a GitHub repository name."""
+    if not isinstance(v, str):
+        raise ValueError("repo must be a string")
+    stripped = v.strip()
+    if not stripped or not _GITHUB_REPO_REGEX.match(stripped):
+        raise ValueError(f"Invalid GitHub repository name: {v!r}")
+    return stripped
+
+
+class ConnectRepositoryRequest(BaseModel):
+    """Request schema for POST /integrations/github/connections.
+
+    Carries only the repository coordinates. No credential field exists — a
+    GitHub token supplied here is rejected (``extra="forbid"``) and the
+    server-side ``SENTINEL_GITHUB_TOKEN`` is always used instead.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str = Field(..., description="GitHub repository owner (user or organisation)")
+    repo: str = Field(..., description="GitHub repository name")
+    label: Optional[str] = Field(
+        default=None, max_length=200, description="Optional human-readable label"
+    )
+    default_branch: Optional[str] = Field(
+        default=None, max_length=255, description="Optional default branch override"
+    )
+
+    @field_validator("owner")
+    @classmethod
+    def validate_owner(cls, v: str) -> str:
+        return _validate_github_owner(v)
+
+    @field_validator("repo")
+    @classmethod
+    def validate_repo(cls, v: str) -> str:
+        return _validate_github_repo(v)
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("label cannot be empty or whitespace")
+        return v.strip()
+
+    @field_validator("default_branch")
+    @classmethod
+    def validate_default_branch(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("default_branch cannot be empty or whitespace")
+        stripped = v.strip()
+        if ".." in stripped or any(c in stripped for c in "\r\n\t"):
+            raise ValueError(f"Invalid default_branch: {v!r}")
+        return stripped
+
+
+class GitHubConnectionResponse(BaseModel):
+    """Allowlisted projection of a persisted GitHub connection.
+
+    Explicitly excludes ``credential_ref`` and every other internal field, so
+    no credential or credential reference is ever serialized to a client.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    connection_id: str
+    provider: str
+    label: str
+    owner: str
+    repo: str
+    default_branch: str
+    visibility: str
+    status: str
+    scopes: List[str] = Field(default_factory=list)
+    last_verified_at: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class ListConnectionsResponse(BaseModel):
+    """Response for GET /integrations/github/connections."""
+    model_config = ConfigDict(extra="forbid")
+
+    connections: List[GitHubConnectionResponse] = Field(default_factory=list)
+
+
+class VerifyConnectionResponse(BaseModel):
+    """Response for POST /integrations/github/connections/{id}/verify."""
+    model_config = ConfigDict(extra="forbid")
+
+    connection: GitHubConnectionResponse
+    verified: bool
+    message: str
+    verified_at: Optional[str] = None
+
+
+class DisconnectConnectionResponse(BaseModel):
+    """Response for DELETE /integrations/github/connections/{id}.
+
+    Disconnect is idempotent: ``deleted`` reports whether a stored connection
+    was actually removed, and the request succeeds either way.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    connection_id: str
+    deleted: bool
+
+
+class GitHubBranchResponse(BaseModel):
+    """Allowlisted projection of a repository branch."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    protected: bool = False
+    commit_sha: str = ""
+
+
+class ListBranchesResponse(BaseModel):
+    """Response for GET /integrations/github/connections/{id}/branches."""
+    model_config = ConfigDict(extra="forbid")
+
+    connection_id: str
+    owner: str
+    repo: str
+    branches: List[GitHubBranchResponse] = Field(default_factory=list)
+
+
+class GitHubCommitResponse(BaseModel):
+    """Allowlisted projection of a resolved commit."""
+    model_config = ConfigDict(extra="forbid")
+
+    sha: str
+    message: str = ""
+    author_login: Optional[str] = None
+    author_name: Optional[str] = None
+    committed_at: Optional[str] = None
+    html_url: str = ""
+
+
+class GitHubPullRequestResponse(BaseModel):
+    """Allowlisted projection of a repository pull request."""
+    model_config = ConfigDict(extra="forbid")
+
+    number: int
+    title: str = ""
+    state: str = ""
+    author_login: Optional[str] = None
+    head_sha: str = ""
+    base_branch: str = ""
+    draft: bool = False
+    html_url: str = ""
+    updated_at: Optional[str] = None
+
+
+class ListPullRequestsResponse(BaseModel):
+    """Response for GET /integrations/github/connections/{id}/pull-requests."""
+    model_config = ConfigDict(extra="forbid")
+
+    connection_id: str
+    owner: str
+    repo: str
+    pull_requests: List[GitHubPullRequestResponse] = Field(default_factory=list)
+
+
 def _format_sse_event(
     event_type: str,
     data: Dict[str, Any],

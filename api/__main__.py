@@ -19,6 +19,8 @@ Environment variables (read after loading .env):
     SENTINEL_DATABASE_URL          PostgreSQL connection URL (postgres backend only)
     GROQ_API_KEY                   Required when investigations are submitted
     GROQ_MODEL                     LLM model override (default: openai/gpt-oss-120b)
+    SENTINEL_GITHUB_TOKEN          Read-only GitHub token used by the GitHub
+                                   integration routes (never accepted from clients)
 
 Incident-bundle ingestion is DISABLED unless explicitly enabled:
     SENTINEL_ALLOW_INCIDENT_INGESTION   '1'/'true'/'yes'/'on' enables POST /incidents
@@ -114,6 +116,19 @@ def main() -> None:
         print(f"ERROR: Failed to initialise persistence backend: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    # Integration store for GitHub connections. Selected through the same
+    # persistence configuration as the repository (filesystem by default,
+    # PostgreSQL when configured). IntegrationStoreError subclasses
+    # PersistenceError, so a misconfigured backend fails closed at startup
+    # exactly like the repository does.
+    from core.integrations.factory import get_integration_store
+
+    try:
+        integration_store = get_integration_store()
+    except PersistenceError as exc:
+        print(f"ERROR: Failed to initialise integration store: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     # Resolve incidents root. Precedence: --incidents-root, then INCIDENTS_DIR,
     # then None so create_app() keeps its own Path("incidents") default. That
     # default matches the Compose volume mounted at /app/incidents.
@@ -131,9 +146,18 @@ def main() -> None:
     # lazily via get_llm_client() when an investigation is submitted.
     from api.app import create_app
     from api.auth import AuthConfigurationError
+    from core.integrations.github_client import GitHubClient
 
+    # The read-only GitHub client resolves SENTINEL_GITHUB_TOKEN lazily, so an
+    # unconfigured deployment still starts; only a GitHub request reports the
+    # missing credential. The token is never read from the request or logged.
     try:
-        app = create_app(repository=repository, incidents_root=incidents_root)
+        app = create_app(
+            repository=repository,
+            incidents_root=incidents_root,
+            integration_store=integration_store,
+            github_client=GitHubClient(),
+        )
     except AuthConfigurationError as exc:
         # Fail closed: never start with authentication enabled but unusable.
         # The message is authored by the auth config loader and never contains
