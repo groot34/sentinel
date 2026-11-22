@@ -36,8 +36,17 @@ from agents.bundle_ingest import (
     parse_json_object_strict,
 )
 from agents.bundle_validator import InvalidIncidentBundleError, require_valid_incident_bundle
-from agents.orchestrator import IncidentOrchestrator
-from api.errors import error_json_response, sanitize_error_message
+from agents.orchestrator import (
+    GITHUB_ASSOCIATION_METADATA_KEY,
+    GITHUB_CONTEXT_METADATA_KEY,
+    GitHubContextSource,
+    IncidentOrchestrator,
+)
+from api.errors import (
+    error_json_response,
+    sanitize_error_message,
+    sanitize_validation_error,
+)
 from api.models import (
     _SAFE_ID_REGEX,
     _PROPOSAL_ID_REGEX,
@@ -235,6 +244,7 @@ def _run_investigation_background(
     repository: Optional[PersistenceRepository],
     llm_client: Optional[Any],
     worker_id: Optional[str] = None,
+    github_context: Optional[GitHubContextSource] = None,
 ) -> None:
     """Background task: run the investigation pipeline and persist final state.
 
@@ -257,6 +267,7 @@ def _run_investigation_background(
             non_interactive=True,
             repository=repository,
             worker_id=worker_id,
+            github_context=github_context,
         )
         orchestrator.investigate(candidate_path)
     except Exception as exc:
@@ -294,6 +305,7 @@ def _run_resume_background(
     repository: Optional[PersistenceRepository],
     llm_client: Optional[Any],
     worker_id: Optional[str] = None,
+    github_context: Optional[GitHubContextSource] = None,
 ) -> None:
     """Background task: resume an investigation pipeline and persist final state.
 
@@ -306,6 +318,7 @@ def _run_resume_background(
             non_interactive=True,
             repository=repository,
             worker_id=worker_id,
+            github_context=github_context,
         )
         orchestrator.resume(investigation_id=incident_id, incident_dir=candidate_path)
     except Exception as exc:
@@ -1080,7 +1093,10 @@ def create_investigation(request: Request) -> JSONResponse:
         req_model = CreateInvestigationRequest.model_validate(body)
         incident_id = req_model.incident_id
     except Exception as e:
-        return error_json_response(400, "invalid_incident_id", str(e))
+        # Never echo the raw validation error: Pydantic embeds the offending
+        # input value (possibly a token) and any unexpected field name (such as
+        # ``credential_ref``). sanitize_validation_error strips both.
+        return error_json_response(400, "invalid_incident_id", sanitize_validation_error(e))
 
     incidents_root = Path(getattr(request.app.state, "incidents_root", Path("incidents")))
     candidate_path = incidents_root / incident_id
@@ -1105,6 +1121,19 @@ def create_investigation(request: Request) -> JSONResponse:
     # exception handler registered in api/app.py.
     require_valid_incident_bundle(candidate_path, expected_id=incident_id)
 
+    # Optional GitHub association: resolve before any state is created or any
+    # slot is claimed, so an unknown/unusable connection fails fast and can
+    # never silently degrade to bundle-only mode. The owner/repository are
+    # taken from the stored connection, and the read-only client is the
+    # server-configured one.
+    github_source: Optional[GitHubContextSource] = None
+    if req_model.github_connection_id is not None:
+        github_source, github_error = _resolve_github_context(
+            request, req_model.github_connection_id, req_model.github_ref
+        )
+        if github_error is not None:
+            return github_error
+
     repository = getattr(request.app.state, "repository", None)
     llm_client = getattr(request.app.state, "llm_client", None)
 
@@ -1122,6 +1151,12 @@ def create_investigation(request: Request) -> JSONResponse:
         worker_id = f"worker-{_uuid.uuid4().hex[:8]}"
         try:
             initial_state = InvestigationState(incident_id=incident_id)
+            if github_source is not None:
+                # Persist the requested association before dispatch so a later
+                # resume re-attaches to the same connection and ref.
+                initial_state.metadata[GITHUB_ASSOCIATION_METADATA_KEY] = (
+                    _github_association_record(github_source)
+                )
             initial_state.acquire_lease(owner_id=worker_id, ttl_seconds=300)
             if repository is not None:
                 repository.save(initial_state)
@@ -1150,6 +1185,7 @@ def create_investigation(request: Request) -> JSONResponse:
             repository,
             llm_client,
             worker_id,
+            github_source,
         )
         return _build_accepted_response(incident_id, request, background=bg)
 
@@ -1161,6 +1197,7 @@ def create_investigation(request: Request) -> JSONResponse:
             llm_client=llm_client,
             non_interactive=True,
             repository=repository,
+            github_context=github_source,
         )
         result = orchestrator.investigate(candidate_path)
     finally:
@@ -1216,6 +1253,13 @@ def resume_investigation(request: Request) -> JSONResponse:
         # Validate resumability (404, 409 for completed/active lease) before
         # returning 202 — this ensures error semantics are identical to sync.
         _claim_investigation(safe_id, repository, allow_resume=True)
+        # Re-attach to the original GitHub association, if any. An association
+        # that can no longer be resolved is an explicit client error rather than
+        # a silent fall back to bundle-only mode.
+        github_source, github_error = _resume_github_context(request, repository, safe_id)
+        if github_error is not None:
+            _release_investigation(safe_id)
+            return github_error
         # Acquire durable execution ownership in repository BEFORE returning 202
         import uuid as _uuid
         worker_id = f"worker-{_uuid.uuid4().hex[:8]}"
@@ -1268,17 +1312,25 @@ def resume_investigation(request: Request) -> JSONResponse:
             repository,
             llm_client,
             worker_id,
+            github_source,
         )
         return _build_accepted_response(safe_id, request, background=bg)
 
     # --- Default: synchronous execution ---
     _claim_investigation(safe_id, repository, allow_resume=True)
 
+    # Re-attach to the original GitHub association, if any (see async branch).
+    github_source, github_error = _resume_github_context(request, repository, safe_id)
+    if github_error is not None:
+        _release_investigation(safe_id)
+        return github_error
+
     try:
         orchestrator = IncidentOrchestrator(
             llm_client=llm_client,
             non_interactive=True,
             repository=repository,
+            github_context=github_source,
         )
         result = orchestrator.resume(investigation_id=safe_id, incident_dir=candidate_path)
     finally:
@@ -2187,6 +2239,112 @@ def _get_stored_connection(
             f"GitHub connection '{connection_id}' not found.",
         )
     return connection, None
+
+
+def _github_association_record(source: GitHubContextSource) -> Dict[str, Any]:
+    """Build the non-secret association persisted with an investigation.
+
+    Records only the connection identifier and the requested ref (both
+    non-secret). No credential or ``credential_ref`` is ever captured.
+    """
+    return {
+        "connection_id": str(
+            getattr(source.connection, "connection_id", "") or ""
+        ),
+        "ref": source.ref,
+    }
+
+
+def _resolve_github_context(
+    request: Request,
+    connection_id: str,
+    ref: Optional[str],
+) -> Tuple[Optional[GitHubContextSource], Optional[JSONResponse]]:
+    """Resolve an existing connection into a GitHub enrichment dependency.
+
+    The owner/repository are read from the *stored* connection — never from
+    client input — and the client is the server-configured, read-only one. An
+    unknown connection (404), an unconfigured integration (503) or a connection
+    that is not usable (409) yields an explicit client error so the caller can
+    never silently fall back to bundle-only mode.
+    """
+    store = _integration_store(request)
+    client = _github_client(request)
+    if store is None or client is None:
+        return None, _integration_unavailable_response()
+
+    connection, error = _get_stored_connection(request, connection_id)
+    if error is not None:
+        return None, error
+
+    if connection.status != STATUS_CONNECTED:
+        return None, error_json_response(
+            409,
+            "github_connection_unusable",
+            f"GitHub connection '{connection_id}' is not usable "
+            f"(status '{connection.status}'). Reconnect the repository before "
+            "starting an investigation.",
+        )
+
+    return GitHubContextSource(client=client, connection=connection, ref=ref), None
+
+
+def _resume_github_association(state: Any) -> Optional[Dict[str, Any]]:
+    """Return the persisted GitHub association of a stored investigation.
+
+    Prefers the explicit ``github_association`` record written before the first
+    persist; falls back to the Phase 2 ``github_context`` snapshot (which also
+    carries the connection ID and the requested ref) for investigations created
+    before the association field existed. Returns ``None`` when the
+    investigation was never associated with a GitHub repository.
+    """
+    metadata = getattr(state, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+
+    association = metadata.get(GITHUB_ASSOCIATION_METADATA_KEY)
+    if isinstance(association, dict) and association.get("connection_id"):
+        return {
+            "connection_id": association["connection_id"],
+            "ref": association.get("ref"),
+        }
+
+    snapshot = metadata.get(GITHUB_CONTEXT_METADATA_KEY)
+    if isinstance(snapshot, dict) and snapshot.get("connection_id"):
+        return {
+            "connection_id": snapshot["connection_id"],
+            "ref": snapshot.get("requested_ref"),
+        }
+    return None
+
+
+def _resume_github_context(
+    request: Request,
+    repository: Optional[PersistenceRepository],
+    investigation_id: str,
+) -> Tuple[Optional[GitHubContextSource], Optional[JSONResponse]]:
+    """Re-attach a resumed investigation to its original GitHub association.
+
+    Returns ``(None, None)`` when the investigation has no GitHub association,
+    so the bundle-only resume path is unchanged. When an association exists it
+    is re-resolved against the integration store; a connection that can no
+    longer be resolved is reported as an explicit client error rather than
+    silently degrading to bundle-only mode. The orchestrator restores persisted
+    GitHub evidence without re-fetching whenever a snapshot already exists.
+    """
+    if repository is None:
+        return None, None
+    state = repository.load(investigation_id)
+    if state is None:
+        return None, None
+
+    association = _resume_github_association(state)
+    if association is None:
+        return None, None
+
+    return _resolve_github_context(
+        request, association["connection_id"], association["ref"]
+    )
 
 
 def connect_repository(request: Request) -> JSONResponse:

@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from agents.bundle_validator import InvalidIncidentBundleError
+from core.integrations.github_client import redact_secret
 from core.persistence import ConcurrencyError, PersistenceError
 
 _PATH_REGEX = re.compile(r"([A-Za-z]:[\\/]|/)[^\s:\"']+")
@@ -21,6 +22,10 @@ def sanitize_error_message(message: str) -> str:
 
     # Strip local filesystem paths
     sanitized = _PATH_REGEX.sub("[path_redacted]", message)
+
+    # Redact any GitHub-token-shaped value defensively so a credential can
+    # never appear in an error payload even if it reached the message.
+    sanitized = redact_secret(sanitized)
 
     # Strip newline / carriage returns to keep logs & payloads clean
     sanitized = sanitized.replace("\n", " ").replace("\r", " ").strip()
@@ -79,3 +84,39 @@ async def invalid_bundle_exception_handler(
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Map unhandled exceptions to sanitized 500 Internal Server Error."""
     return error_json_response(500, "internal_error", "An internal server error occurred.")
+
+
+def sanitize_validation_error(exc: BaseException) -> str:
+    """Return a credential-safe summary of a request-validation failure.
+
+    Pydantic's rendered :class:`~pydantic.ValidationError` string embeds the
+    offending ``input_value`` — which may be a GitHub token a client should
+    never have sent — and the name of any unexpected field (for example
+    ``credential_ref`` or ``token``). Neither is ever echoed back:
+
+    * an unexpected field is reported generically, so a rejected credential
+      field is never named in the response;
+    * every declared-field location and message is passed through
+      :func:`redact_secret`, so a token value can never leak;
+    * the whole summary is finally path-sanitised and length-bounded.
+
+    A non-Pydantic exception falls back to :func:`sanitize_error_message`.
+    """
+    collect = getattr(exc, "errors", None)
+    if not callable(collect):
+        return sanitize_error_message(str(exc))
+
+    parts: list[str] = []
+    for error in collect():
+        if not isinstance(error, dict):
+            continue
+        if str(error.get("type", "") or "") == "extra_forbidden":
+            # Never name an unexpected field: it may be a credential field.
+            parts.append("unexpected field is not permitted")
+            continue
+        message = redact_secret(str(error.get("msg", "") or "invalid value"))
+        location = error.get("loc") or ()
+        field = ".".join(str(segment) for segment in location) if location else ""
+        parts.append(f"{field}: {message}" if field else message)
+
+    return sanitize_error_message("; ".join(parts) if parts else "Invalid request payload.")

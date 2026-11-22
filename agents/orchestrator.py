@@ -22,6 +22,19 @@ Pipeline order:
 Orchestrator LLM calls: 0.
 Total expected LLM calls for a complete run: 4–5 (3 evidence + 1 hypothesis + 1 fix proposal).
 
+Optional GitHub enrichment (Mission 27.3.3, Phase 2):
+- When a GitHub context dependency is injected, deterministic EV-CODE-* evidence
+  retrieved from a connected repository is appended to the Code bundle after the
+  Code stage returns, and is then fused like any other bundle evidence.
+- Additive only: bundle-derived evidence is always preserved and the CodeAgent
+  output schema is unchanged.
+- Non-fatal: a GitHub failure never changes the status of a bundle stage. The
+  GitHub snapshot is recorded in InvestigationState.metadata["github_context"].
+- Runs at most once per investigation; a resumed investigation does not re-fetch.
+  Instead, evidence already persisted in InvestigationState.evidence is restored
+  into the recomputed fusion input so a resume never silently drops it
+  (see IncidentOrchestrator._enrich_code_evidence_with_github).
+
 Safety contract:
 - Patches are NEVER automatically applied.
 - Ground truth is NEVER read.
@@ -34,10 +47,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import jsonschema
 
@@ -49,12 +64,14 @@ from agents.bundle_validator import (
 from agents.code_agent import CodeAgent
 from agents.fix_proposal_agent import FixProposalAgent
 from agents.fix_tools import HUMAN_APPROVAL_NOTICE, collect_all_evidence_ids
+from agents.github_context import ERROR_UNEXPECTED, GitHubContextProducer
 from agents.hypothesis_engine import HypothesisEngine
 from agents.logs_agent import LogsAgent
 from agents.metrics_agent import MetricsAgent
 from agents.verification_agent import VerificationAgent
 from core.domain.models import IncidentStatus, StageStatus
 from core.domain.state import InvestigationState
+from core.integrations.github_client import redact_secret
 from core.llm import LLMError, get_llm_client
 from core.persistence.repository import PersistenceError, PersistenceRepository
 from core.events.base import DomainEvent
@@ -220,6 +237,244 @@ def _validate_evidence_fusion(fused: Dict[str, Any]) -> List[str]:
     return errors
 
 
+# ============================================================================
+# Optional GitHub repository context enrichment (Mission 27.3.3, Phase 2)
+# ============================================================================
+
+#: Key under ``InvestigationState.metadata`` holding the GitHub context snapshot.
+GITHUB_CONTEXT_METADATA_KEY = "github_context"
+
+#: Key under ``InvestigationState.metadata`` recording the *requested* GitHub
+#: association (connection ID + ref) for the investigation. It is written once,
+#: at the start of a run, and is never overwritten on resume, so a recovered
+#: investigation always re-attaches to the same connection and ref instead of
+#: silently switching repository. It contains no credential — only the
+#: non-secret connection identifier and the requested ref.
+GITHUB_ASSOCIATION_METADATA_KEY = "github_association"
+
+# GitHub context snapshot status values.
+GITHUB_STATUS_SUCCESS = "success"
+GITHUB_STATUS_PARTIAL = "partial"
+GITHUB_STATUS_FAILURE = "failure"
+
+_CODE_EVIDENCE_ID_RE = re.compile(r"^EV-CODE-(\d+)$")
+
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from core.integrations.repository_store import GitHubConnection
+
+
+@dataclass(frozen=True)
+class GitHubContextSource:
+    """Optional GitHub enrichment dependency for the orchestrator.
+
+    Bundles the already-configured, read-only pieces the deterministic
+    :class:`~agents.github_context.GitHubContextProducer` needs. The
+    orchestrator never creates or closes the client: the caller owns the
+    credential and the client lifecycle, mirroring how ``llm_client`` and
+    ``repository`` are injected.
+    """
+
+    #: A configured read-only ``GitHubClient`` (owned by the caller).
+    client: Any
+    #: A validated, non-secret ``GitHubConnection`` record to read from.
+    connection: "GitHubConnection"
+    #: Optional branch, tag or commit SHA. Defaults to the connection's branch.
+    ref: Optional[str] = None
+
+
+def _iter_evidence_items(source: Any) -> Iterator[Any]:
+    """Yield evidence items from a bundle dict, a list, or a single item."""
+    if isinstance(source, dict):
+        items = source.get("evidence")
+        if isinstance(items, list):
+            yield from items
+    elif isinstance(source, (list, tuple)):
+        yield from source
+    elif source is not None:
+        yield source
+
+
+def _evidence_id_index(evidence_id: Any) -> Optional[int]:
+    """Return the numeric suffix of an ``EV-CODE-NNN`` id, else None."""
+    if not isinstance(evidence_id, str):
+        return None
+    match = _CODE_EVIDENCE_ID_RE.match(evidence_id.strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _next_code_evidence_index(*sources: Any) -> int:
+    """Return the next free ``EV-CODE-*`` index after every *source*.
+
+    Numbering is derived from existing bundle-derived evidence rather than a
+    hardcoded starting number, so GitHub evidence appended afterwards continues
+    the bundle's sequence and stays unique.
+    """
+    highest = 0
+    for source in sources:
+        for item in _iter_evidence_items(source):
+            evidence_id = (
+                item.get("evidence_id") if isinstance(item, dict)
+                else getattr(item, "evidence_id", None)
+            )
+            index = _evidence_id_index(evidence_id)
+            if index is not None and index > highest:
+                highest = index
+    return highest + 1
+
+
+def _bundle_evidence(code_output: Any) -> Optional[List[Dict[str, Any]]]:
+    """Return the validated evidence list of a Code-stage bundle.
+
+    Returns an empty list when the bundle carries no evidence, and ``None`` when
+    the bundle is not enrichable: the value is present but is not a list, or the
+    list contains a non-mapping entry. Malformed values are never coerced into
+    evidence items.
+    """
+    if not isinstance(code_output, dict):
+        return None
+    raw = code_output.get("evidence")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return None
+    if not all(isinstance(item, dict) for item in raw):
+        return None
+    return list(raw)
+
+
+def _github_provenance(item: Any) -> Optional[Dict[str, Any]]:
+    """Return the nested ``github`` provenance object of an evidence item.
+
+    GitHub-derived evidence is identified by its provenance, never by the
+    ``EV-CODE-*`` prefix alone, because bundle-derived code evidence shares that
+    prefix.
+    """
+    if isinstance(item, dict):
+        provenance = item.get("github")
+    else:
+        provenance = getattr(item, "github", None)
+        if provenance is None:
+            extras = getattr(item, "model_extra", None)
+            if isinstance(extras, dict):
+                provenance = extras.get("github")
+    return provenance if isinstance(provenance, dict) else None
+
+
+def _with_github_evidence(
+    code_output: Optional[Dict[str, Any]],
+    github_evidence: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Return a copy of *code_output* with any new *github_evidence* appended.
+
+    Bundle-derived evidence is preserved, the original bundle object is never
+    mutated (so GitHub evidence is never written into the cached bundle
+    Code-stage output), and items whose ``evidence_id`` is already present are
+    not appended again, so repeated enrichment stays idempotent. A malformed
+    evidence value leaves the bundle untouched.
+    """
+    if not github_evidence or not isinstance(code_output, dict):
+        return code_output
+    existing = _bundle_evidence(code_output)
+    if existing is None:
+        return code_output
+    seen = {item.get("evidence_id") for item in existing}
+    additions = [
+        item
+        for item in github_evidence
+        if isinstance(item, dict) and item.get("evidence_id") not in seen
+    ]
+    if not additions:
+        return code_output
+    merged = dict(code_output)
+    merged["evidence"] = existing + additions
+    return merged
+
+
+def _persisted_github_evidence(state: Any) -> List[Dict[str, Any]]:
+    """Return previously persisted GitHub evidence, deduplicated by ID.
+
+    Items are identified by their ``github`` provenance, so bundle-derived
+    ``EV-CODE-*`` evidence is never mistaken for GitHub evidence.
+    """
+    collected: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for item in getattr(state, "evidence", None) or []:
+        if _github_provenance(item) is None:
+            continue
+        if isinstance(item, dict):
+            data: Any = dict(item)
+        else:
+            to_dict = getattr(item, "to_dict", None)
+            data = to_dict() if callable(to_dict) else None
+        if not isinstance(data, dict):
+            continue
+        evidence_id = data.get("evidence_id")
+        if not isinstance(evidence_id, str) or evidence_id in seen:
+            continue
+        seen.add(evidence_id)
+        collected.append(data)
+    return collected
+
+
+def _github_snapshot_from_result(result: Any) -> Dict[str, Any]:
+    """Build the serialisable ``metadata["github_context"]`` snapshot."""
+    evidence = list(getattr(result, "evidence", None) or [])
+    skipped = [item.to_dict() for item in (getattr(result, "skipped", None) or [])]
+    error = getattr(result, "error", None)
+    truncated = bool(getattr(result, "truncated", False))
+    if error is not None:
+        status = GITHUB_STATUS_FAILURE
+    elif truncated or skipped:
+        status = GITHUB_STATUS_PARTIAL
+    else:
+        status = GITHUB_STATUS_SUCCESS
+    return {
+        "provider": "github",
+        "connection_id": getattr(result, "connection_id", ""),
+        "owner": getattr(result, "owner", ""),
+        "repo": getattr(result, "repo", ""),
+        "requested_ref": getattr(result, "requested_ref", None),
+        "commit_sha": getattr(result, "commit_sha", None),
+        "retrieved_at": getattr(result, "retrieved_at", None),
+        "retrieved_file_count": len(getattr(result, "files", None) or []),
+        "evidence_count": len(evidence),
+        "skipped": skipped,
+        "truncated": truncated,
+        "truncation_reason": getattr(result, "truncation_reason", None),
+        "total_bytes": int(getattr(result, "total_bytes", 0) or 0),
+        "status": status,
+        "error": error.to_dict() if error is not None else None,
+    }
+
+
+def _github_failure_snapshot(source: GitHubContextSource, exc: BaseException) -> Dict[str, Any]:
+    """Build a sanitised snapshot for an unexpected producer failure."""
+    connection = source.connection
+    return {
+        "provider": "github",
+        "connection_id": getattr(connection, "connection_id", ""),
+        "owner": getattr(connection, "owner", ""),
+        "repo": getattr(connection, "repo", ""),
+        "requested_ref": source.ref or getattr(connection, "default_branch", None),
+        "commit_sha": None,
+        "retrieved_at": None,
+        "retrieved_file_count": 0,
+        "evidence_count": 0,
+        "skipped": [],
+        "truncated": False,
+        "truncation_reason": None,
+        "total_bytes": 0,
+        "status": GITHUB_STATUS_FAILURE,
+        "error": {
+            "reason": ERROR_UNEXPECTED,
+            "message": redact_secret(f"{type(exc).__name__}: {exc}"),
+        },
+    }
+
+
 def _load_cache(path: Path, incident_id: str) -> Optional[Dict[str, Any]]:
     """Load a cached stage output if it exists and belongs to this incident."""
     if not path.exists():
@@ -278,6 +533,7 @@ class IncidentOrchestrator:
         event_bus: Optional[EventBus] = None,
         worker_id: Optional[str] = None,
         lease_ttl: int = 300,
+        github_context: Optional[GitHubContextSource] = None,
     ) -> None:
         """
         Args:
@@ -289,6 +545,9 @@ class IncidentOrchestrator:
             event_bus: Optional EventBus for domain event publication. Defaults to None (disabled).
             worker_id: Unique worker/process ID for execution leasing.
             lease_ttl: Execution lease duration in seconds (default 300).
+            github_context: Optional GitHub enrichment dependency (read-only client,
+                validated connection, optional ref). When omitted, investigations run
+                exactly as before and the producer is never called.
         """
         self._llm_client = llm_client
         self.sleep_between_stages = float(sleep_between_stages)
@@ -299,6 +558,7 @@ class IncidentOrchestrator:
         self._event_bus = event_bus
         self._worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self._lease_ttl = int(lease_ttl)
+        self._github_context = github_context
         self._result_schema = _load_result_schema()
         self.state: Optional[InvestigationState] = None
         self.last_state: Optional[InvestigationState] = None
@@ -323,6 +583,25 @@ class IncidentOrchestrator:
                     self._event_bus.publish(event)
             # Clear pending events after successful persistence
             self._pending_events.clear()
+
+    def _record_github_association(self, state: InvestigationState) -> None:
+        """Record the requested GitHub association on *state* exactly once.
+
+        The association (non-secret connection ID + requested ref) is captured
+        before the first persist so a resumed investigation can re-attach to the
+        same connection and ref. It is never overwritten once present, so a
+        resume can never silently switch to a different repository or ref.
+        """
+        if self._github_context is None or not isinstance(state.metadata, dict):
+            return
+        if GITHUB_ASSOCIATION_METADATA_KEY in state.metadata:
+            return
+        state.metadata[GITHUB_ASSOCIATION_METADATA_KEY] = {
+            "connection_id": str(
+                getattr(self._github_context.connection, "connection_id", "") or ""
+            ),
+            "ref": self._github_context.ref,
+        }
 
     def _emit(self, event: DomainEvent) -> None:
         """Collect a domain event for atomic persistence with state.
@@ -431,6 +710,8 @@ class IncidentOrchestrator:
         self.last_state = state
         # Clear any pending events from previous investigation
         self._pending_events.clear()
+        # Record the requested GitHub association once, before the first persist.
+        self._record_github_association(state)
         # Emit InvestigationStarted before first persistence so it's in the first outbox batch
         self._emit(InvestigationStarted(
             investigation_id=incident_id,
@@ -492,6 +773,8 @@ class IncidentOrchestrator:
         self.last_state = state
         # Clear any pending events from previous investigation
         self._pending_events.clear()
+        # Preserve the original GitHub association (never overwritten on resume).
+        self._record_github_association(state)
 
         resume_stage = self._find_resume_stage(state)
 
@@ -694,6 +977,20 @@ class IncidentOrchestrator:
                     error=code_stage.get("error", "Unknown error"),
                 ))
                 self._persist(state)
+
+        # ── Optional GitHub context enrichment (Phase 2) ──────────────
+        # Runs immediately after the Code stage returns and outside
+        # _run_evidence_stage's run_fn, so a GitHub failure can never mark an
+        # otherwise successful bundle Code stage as FAILED. Only the local
+        # bundle used by downstream stages is enriched; the persisted/cached
+        # Code-stage output is left untouched.
+        code_output, github_recorded = self._enrich_code_evidence_with_github(
+            incident_path=incident_path,
+            code_output=code_output,
+            state=state,
+        )
+        if github_recorded:
+            self._persist(state)
 
         # ── Stage 4: Evidence Fusion ──────────────────────────────────
         if should_run("evidence_fusion"):
@@ -975,6 +1272,92 @@ class IncidentOrchestrator:
             state=state,
             pipeline_status=pipeline_status,
         )
+
+    # ------------------------------------------------------------------
+    # Optional GitHub context enrichment
+    # ------------------------------------------------------------------
+
+    def _enrich_code_evidence_with_github(
+        self,
+        incident_path: Path,
+        code_output: Optional[Dict[str, Any]],
+        state: InvestigationState,
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """Append deterministic GitHub-derived evidence to the Code bundle.
+
+        Returns the (possibly enriched) Code bundle and whether a GitHub context
+        snapshot was newly recorded in ``state.metadata``.
+
+        Two responsibilities are kept separate:
+
+        * **Fetch at most once.** When no snapshot exists yet the producer is
+          called and the resulting snapshot is recorded. When a snapshot already
+          exists (an earlier attempt within this run, or a previous resume) the
+          producer is *not* called again, so repeated enrichment is idempotent
+          and the revision recorded for the investigation never changes.
+        * **Always restore.** Whenever a snapshot exists, the GitHub evidence
+          already persisted in ``state.evidence`` is re-appended to a copy of the
+          Code-stage fusion input. ``_fuse_evidence`` reads only the stage
+          outputs, so without this a resume at or before ``evidence_fusion``
+          would silently drop previously retrieved GitHub evidence from the
+          recomputed fusion and every downstream hypothesis.
+
+        A GitHub failure is never fatal: the client interaction, the snapshot
+        derivation and the evidence extraction are all contained, and a failure
+        snapshot is recorded instead. The returned bundle and the status of the
+        bundle Code stage are never changed by a GitHub error. When no GitHub
+        context dependency is configured, nothing is called and the bundle is
+        returned unchanged.
+
+        The ``metadata`` and ``evidence`` writes are local, deterministic
+        persistence steps and deliberately sit *outside* the GitHub exception
+        handler: they are structurally guaranteed to run for every outcome, and
+        a genuine persistence or programming error is never silently swallowed.
+        """
+        if self._github_context is None:
+            return code_output, False
+
+        # Validate the bundle before treating it as enrichable. A malformed
+        # ``evidence`` value (a non-list, or a list containing non-mappings) is
+        # never coerced into evidence items; the bundle is returned untouched.
+        if _bundle_evidence(code_output) is None:
+            return code_output, False
+
+        if GITHUB_CONTEXT_METADATA_KEY in state.metadata:
+            # A snapshot already exists: never re-fetch, but do restore the
+            # previously persisted GitHub evidence into the fusion input.
+            restored = _persisted_github_evidence(state)
+            return _with_github_evidence(code_output, restored), False
+
+        start_index = _next_code_evidence_index(code_output, state.evidence)
+        github_evidence: List[Dict[str, Any]] = []
+        try:
+            producer = GitHubContextProducer(
+                self._github_context.client, start_index=start_index
+            )
+            result = producer.collect(
+                self._github_context.connection,
+                incident_path,
+                ref=self._github_context.ref,
+            )
+            snapshot = _github_snapshot_from_result(result)
+            github_evidence = [dict(item) for item in (result.evidence or [])]
+        except Exception as exc:  # noqa: BLE001 - a GitHub failure is never fatal
+            snapshot = _github_failure_snapshot(self._github_context, exc)
+            github_evidence = []
+            print(f"  [gh   ] github context failed: {snapshot['error']['reason']}")
+        else:
+            print(
+                f"  [gh   ] github context {snapshot['status']}: "
+                f"{snapshot['evidence_count']} evidence, "
+                f"{snapshot['retrieved_file_count']} files "
+                f"@ {snapshot['commit_sha'] or 'unresolved'}"
+            )
+
+        state.metadata[GITHUB_CONTEXT_METADATA_KEY] = snapshot
+        if github_evidence:
+            state.add_evidence(github_evidence)
+        return _with_github_evidence(code_output, github_evidence), True
 
     # ------------------------------------------------------------------
     # Stage runners

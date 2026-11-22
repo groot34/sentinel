@@ -10,9 +10,22 @@ from __future__ import annotations
 import json
 import re
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _SAFE_ID_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
+
+#: GitHub-token-shaped values that must never be accepted from a client. The
+#: credential is always resolved server-side from SENTINEL_GITHUB_TOKEN.
+_CREDENTIAL_LIKE_PATTERNS = (
+    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
+)
+
+#: Maximum accepted length of a GitHub ref, mirroring ``GitHubClient``.
+MAX_GITHUB_REF_LENGTH = 255
+
+#: Allowed characters in a GitHub ref, mirroring ``GitHubClient._validate_ref``.
+_GITHUB_REF_REGEX = re.compile(r"^[A-Za-z0-9._/@+\-]+$")
 
 
 def _validate_incident_id(v: str) -> str:
@@ -32,16 +45,123 @@ def _validate_incident_id(v: str) -> str:
     return stripped
 
 
+def _reject_credential_like(value: str, field_name: str) -> None:
+    """Reject any value that looks like a GitHub credential.
+
+    A token must never be accepted from the frontend: the server-side
+    ``SENTINEL_GITHUB_TOKEN`` is the only credential source.
+    """
+    for pattern in _CREDENTIAL_LIKE_PATTERNS:
+        if pattern.search(value):
+            raise ValueError(
+                f"{field_name} must not contain a GitHub token; the credential "
+                "is configured server-side and is never accepted from clients"
+            )
+
+
+def _validate_optional_connection_id(v: Optional[str]) -> Optional[str]:
+    """Validate an optional GitHub connection ID reference."""
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        raise ValueError("github_connection_id must be a string")
+    stripped = v.strip()
+    if not stripped:
+        raise ValueError("github_connection_id cannot be empty or whitespace")
+    _reject_credential_like(stripped, "github_connection_id")
+    if "/" in stripped or "\\" in stripped or ".." in stripped or ":" in stripped:
+        raise ValueError("Path traversal characters detected in github_connection_id")
+    if not _SAFE_ID_REGEX.match(stripped):
+        raise ValueError(
+            f"Invalid github_connection_id format: {v!r}. "
+            "Must match ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$"
+        )
+    return stripped
+
+
+def _validate_optional_ref(v: Optional[str]) -> Optional[str]:
+    """Validate an optional GitHub ref (branch, tag or commit SHA).
+
+    Mirrors ``GitHubClient._validate_ref`` so an invalid ref is rejected before
+    the investigation is dispatched; the producer still resolves the ref to an
+    immutable commit SHA.
+    """
+    if v is None:
+        return None
+    if not isinstance(v, str):
+        raise ValueError("github_ref must be a string")
+    stripped = v.strip()
+    if not stripped:
+        raise ValueError("github_ref cannot be empty or whitespace")
+    _reject_credential_like(stripped, "github_ref")
+    if len(stripped) > MAX_GITHUB_REF_LENGTH:
+        raise ValueError(
+            f"github_ref must be at most {MAX_GITHUB_REF_LENGTH} characters"
+        )
+    if stripped.startswith("/") or stripped.endswith("/"):
+        raise ValueError(f"Invalid github_ref: {v!r}")
+    if stripped == "." or stripped.endswith(".lock"):
+        raise ValueError(f"Invalid github_ref: {v!r}")
+    if "//" in stripped or ".." in stripped or "@{" in stripped:
+        raise ValueError(f"Invalid github_ref: {v!r}")
+    if any(ch in stripped for ch in " ~^:?*[\\"):
+        raise ValueError(f"Invalid github_ref: {v!r}")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in stripped):
+        raise ValueError(f"Invalid github_ref: {v!r}")
+    if not _GITHUB_REF_REGEX.match(stripped):
+        raise ValueError(f"Invalid github_ref format: {v!r}")
+    return stripped
+
+
 class CreateInvestigationRequest(BaseModel):
-    """Request schema for POST /investigations."""
+    """Request schema for POST /investigations.
+
+    A client may optionally associate an existing GitHub connection so the
+    investigation is enriched with read-only repository context. Only the
+    connection *identifier* and an optional ref are accepted — never a
+    credential: the token is always resolved server-side from
+    ``SENTINEL_GITHUB_TOKEN``. ``extra="forbid"`` rejects any unexpected field,
+    including an attempted ``token``/``github_token``/``credential``.
+    """
     model_config = ConfigDict(extra="forbid")
 
     incident_id: str = Field(..., description="Target incident directory identifier")
+    github_connection_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional ID of an existing GitHub connection used to enrich the "
+            "investigation with read-only repository context."
+        ),
+    )
+    github_ref: Optional[str] = Field(
+        default=None,
+        max_length=MAX_GITHUB_REF_LENGTH,
+        description=(
+            "Optional branch, tag or commit ref for the GitHub connection. "
+            "Defaults to the connection's repository default branch."
+        ),
+    )
 
     @field_validator("incident_id")
     @classmethod
     def validate_incident_id(cls, v: str) -> str:
         return _validate_incident_id(v)
+
+    @field_validator("github_connection_id")
+    @classmethod
+    def validate_github_connection_id(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_optional_connection_id(v)
+
+    @field_validator("github_ref")
+    @classmethod
+    def validate_github_ref(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_optional_ref(v)
+
+    @model_validator(mode="after")
+    def validate_github_pairing(self) -> "CreateInvestigationRequest":
+        if self.github_ref is not None and self.github_connection_id is None:
+            raise ValueError("github_ref requires github_connection_id")
+        return self
 
 
 class HealthResponse(BaseModel):
