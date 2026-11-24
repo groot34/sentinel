@@ -11,6 +11,7 @@ import {
   type EvidenceFilter,
 } from "../lib/diagnosis";
 import { formatTimestamp, humanizeToken } from "../lib/format";
+import { GitHubProvenanceView } from "./GitHubProvenance";
 
 interface EvidenceExplorerProps {
   evidence: EvidenceResult[];
@@ -263,6 +264,10 @@ export function EvidenceExplorer({
                     <p className="card__body evidence__interpretation">
                       {item.interpretation}
                     </p>
+                  )}
+
+                  {item.github && (
+                    <GitHubProvenanceView provenance={item.github} />
                   )}
 
                   {(hypothesisRefs.length > 0 || proposalRefs.length > 0) && (

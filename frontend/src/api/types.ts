@@ -155,6 +155,10 @@ export interface InvestigationDetail {
   lease_expires_at?: string | null;
   stages: Record<string, StageSummary>;
   approvals: ApprovalRecord[];
+  /** GitHub retrieval context; null/absent for bundle-only or legacy runs. */
+  github_context?: GitHubContext | null;
+  /** Requested GitHub association; null/absent when GitHub was not used. */
+  github_association?: GitHubAssociation | null;
 }
 
 /** `POST /investigations` with `Prefer: respond-async` → `AcceptedInvestigationResponse` */
@@ -200,6 +204,12 @@ export interface EvidenceResult {
   interpretation?: string | null;
   metric?: string | null;
   value?: number | null;
+  /**
+   * Nested GitHub provenance, present only on GitHub-derived evidence (added in
+   * Phase 4). Bundle-derived evidence never carries this; the UI must not
+   * label an item as GitHub evidence unless this is present.
+   */
+  github?: GitHubProvenance | null;
 }
 
 /** One persisted hypothesis (`HypothesisResultResponse`). */
@@ -276,10 +286,129 @@ export interface InvestigationResult {
   evidence: EvidenceResult[];
   verification: VerificationResult[];
   proposals: ProposalResult[];
+  /** GitHub retrieval context; null/absent for bundle-only or legacy runs. */
+  github_context?: GitHubContext | null;
+  /** Requested GitHub association; null/absent when GitHub was not used. */
+  github_association?: GitHubAssociation | null;
 }
 
 /** Standardized error payload (`ErrorResponse`). */
 export interface ApiErrorResponse {
   error: string;
   detail: string;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * GitHub repository integration (Mission 27.3.2 / 27.3.3).
+ *
+ * Mirrors the backend allowlist models. Credentials are never accepted or
+ * returned: the token is resolved server-side, and `credential_ref` is absent
+ * from every response schema, so these interfaces have no credential fields.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * A persisted GitHub connection (`GitHubConnectionResponse`).
+ *
+ * `status` is `connected` | `error` | `disabled`; the UI distinguishes these.
+ */
+export interface GitHubConnection {
+  connection_id: string;
+  provider: string;
+  label: string;
+  owner: string;
+  repo: string;
+  default_branch: string;
+  visibility: string;
+  status: string;
+  scopes: string[];
+  last_verified_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** `GET /integrations/github/connections` → `ListConnectionsResponse`. */
+export interface ListConnectionsResponse {
+  connections: GitHubConnection[];
+}
+
+/** `POST /integrations/github/connections` request (`ConnectRepositoryRequest`). */
+export interface ConnectRepositoryRequest {
+  owner: string;
+  repo: string;
+  label?: string;
+  default_branch?: string;
+}
+
+/** `POST /integrations/github/connections/{id}/verify` → `VerifyConnectionResponse`. */
+export interface VerifyConnectionResponse {
+  connection: GitHubConnection;
+  verified: boolean;
+  message: string;
+  verified_at?: string | null;
+}
+
+/** `DELETE /integrations/github/connections/{id}` → `DisconnectConnectionResponse`. */
+export interface DisconnectConnectionResponse {
+  connection_id: string;
+  deleted: boolean;
+}
+
+/** Nested `github` provenance carried on GitHub-derived evidence. */
+export interface GitHubProvenance {
+  owner?: string | null;
+  repo?: string | null;
+  connection_id?: string | null;
+  ref?: string | null;
+  commit_sha?: string | null;
+  path?: string | null;
+  /** Source URL pinned to the resolved commit SHA. */
+  source_url?: string | null;
+  /** Line anchor (e.g. `#L42`), when the source URL carried one. */
+  line_anchor?: string | null;
+  retrieved_at?: string | null;
+  content_hash?: string | null;
+}
+
+/** One skipped file in a GitHub retrieval (`GitHubSkippedFileResponse`). */
+export interface GitHubSkippedFile {
+  path?: string | null;
+  reason?: string | null;
+  detail?: string | null;
+}
+
+/** A non-fatal GitHub retrieval error (`GitHubContextErrorResponse`). */
+export interface GitHubContextError {
+  reason?: string | null;
+  message?: string | null;
+}
+
+/**
+ * Investigation-level GitHub retrieval context (`GitHubContextResponse`).
+ *
+ * Present only when the investigation used a GitHub connection; a bundle-only
+ * or legacy investigation carries no `github_context`.
+ */
+export interface GitHubContext {
+  provider?: string | null;
+  connection_id?: string | null;
+  owner?: string | null;
+  repo?: string | null;
+  requested_ref?: string | null;
+  commit_sha?: string | null;
+  retrieved_at?: string | null;
+  retrieved_file_count?: number | null;
+  evidence_count?: number | null;
+  total_bytes?: number | null;
+  truncated?: boolean | null;
+  truncation_reason?: string | null;
+  /** Retrieval status: `success` | `partial` | `failure`. */
+  status?: string | null;
+  skipped: GitHubSkippedFile[];
+  error?: GitHubContextError | null;
+}
+
+/** Requested GitHub association (`GitHubAssociationResponse`). */
+export interface GitHubAssociation {
+  connection_id?: string | null;
+  ref?: string | null;
 }

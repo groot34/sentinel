@@ -1059,6 +1059,75 @@ a:hover {
   color: #b6f4d6;
 }
 
+/* ── GitHub integration ──────────────────────────────────────────────── */
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.field--check label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field--check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  font-family: var(--font);
+}
+
+.field select.input {
+  cursor: pointer;
+}
+
+.github__repo {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+
+.github-provenance {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 10px 12px;
+}
+
+.github-provenance__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.github-provenance__repo {
+  font-size: 0.82rem;
+}
+
+.github-provenance__link {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
+.github-context__skipped {
+  margin-top: 12px;
+}
+
+.github-context__skipped h3 {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {

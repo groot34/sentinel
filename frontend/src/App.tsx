@@ -1,11 +1,12 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { CreateInvestigationPage } from "./pages/CreateInvestigationPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
-/** Application routes for the three connected experiences. */
+/** Application routes for the connected experiences. */
 export function App() {
   return (
     <BrowserRouter>
@@ -13,6 +14,7 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="new" element={<CreateInvestigationPage />} />
+          <Route path="connections" element={<ConnectionsPage />} />
           <Route path="investigations/:id" element={<WorkspacePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

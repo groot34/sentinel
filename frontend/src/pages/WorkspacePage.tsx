@@ -16,6 +16,7 @@ import type {
 } from "../api/types";
 import { isTerminalStatus } from "../api/types";
 import { EventTimeline } from "../components/EventTimeline";
+import { GitHubContextPanel } from "../components/GitHubContextPanel";
 import type { ProposalDecisionInput } from "../components/ProposalCard";
 import { ResultPanel } from "../components/ResultPanel";
 import { StatusBadge } from "../components/StatusBadge";
@@ -291,6 +292,13 @@ export function WorkspacePage() {
         connection={connection}
         streamError={streamError}
         historySupported={historySupported}
+      />
+
+      <GitHubContextPanel
+        context={detail.github_context ?? result?.github_context ?? null}
+        association={
+          detail.github_association ?? result?.github_association ?? null
+        }
       />
 
       {result && (

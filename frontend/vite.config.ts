@@ -9,7 +9,13 @@ const backendOrigin = process.env.SENTINEL_API_URL ?? "http://127.0.0.1:8000";
 // single origin during development, so no CORS configuration is required on the
 // backend. If VITE_SENTINEL_API_BASE_URL is set to a full URL instead, the
 // browser calls the backend directly and the backend must then allow CORS.
-const proxiedPrefixes = ["/health", "/ready", "/incidents", "/investigations"];
+const proxiedPrefixes = [
+  "/health",
+  "/ready",
+  "/incidents",
+  "/investigations",
+  "/integrations",
+];
 
 const proxy = Object.fromEntries(
   proxiedPrefixes.map((prefix) => [

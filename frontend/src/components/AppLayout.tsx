@@ -24,6 +24,12 @@ export function AppLayout() {
           >
             New investigation
           </NavLink>
+          <NavLink
+            to="/connections"
+            className={({ isActive }) => (isActive ? "nav__link nav__link--active" : "nav__link")}
+          >
+            GitHub connections
+          </NavLink>
         </nav>
       </header>
       <main className="app__main">

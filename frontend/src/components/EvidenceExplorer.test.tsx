@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EvidenceExplorer } from "./EvidenceExplorer";
 import { buildEvidenceIndex } from "../lib/diagnosis";
-import { makeEvidence, makeResult } from "../test/fixtures";
+import { makeEvidence, makeGitHubProvenance, makeResult } from "../test/fixtures";
 
 const evidence = [
   makeEvidence({
@@ -181,5 +181,71 @@ describe("EvidenceExplorer", () => {
     expect(
       screen.getByText(/No evidence was persisted for this investigation/),
     ).toBeInTheDocument();
+  });
+
+  it("shows GitHub provenance only on GitHub-derived evidence", () => {
+    const provenance = makeGitHubProvenance();
+    const mixed = [
+      makeEvidence({
+        evidence_id: "EV-CODE-001",
+        source: "code",
+        description: "Shortened cache TTL",
+        github: provenance,
+      }),
+      makeEvidence({
+        evidence_id: "EV-LOG-001",
+        source: "logs",
+        github: null,
+      }),
+    ];
+
+    render(
+      <EvidenceExplorer
+        evidence={mixed}
+        citedByHypotheses={new Map()}
+        citedByProposals={new Map()}
+        focusedEvidenceId={null}
+        onClearFocus={vi.fn()}
+      />,
+    );
+
+    // Only the GitHub-derived item carries the provenance block and its link.
+    expect(screen.getAllByText("GitHub")).toHaveLength(1);
+    expect(screen.getByText("acme/checkout")).toBeInTheDocument();
+    expect(screen.getByText("service/cache.py")).toBeInTheDocument();
+
+    const link = screen.getByRole("link", { name: /view at commit/i });
+    expect(link).toHaveAttribute("href", provenance.source_url);
+    expect(link.getAttribute("href")).toContain(provenance.commit_sha);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("preserves filtering when GitHub provenance is present", async () => {
+    const user = userEvent.setup();
+    const mixed = [
+      makeEvidence({
+        evidence_id: "EV-CODE-001",
+        source: "code",
+        github: makeGitHubProvenance(),
+      }),
+      makeEvidence({ evidence_id: "EV-LOG-001", source: "logs", github: null }),
+    ];
+
+    render(
+      <EvidenceExplorer
+        evidence={mixed}
+        citedByHypotheses={new Map()}
+        citedByProposals={new Map()}
+        focusedEvidenceId={null}
+        onClearFocus={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Logs (1)" }));
+
+    expect(screen.getByText("EV-LOG-001")).toBeInTheDocument();
+    expect(screen.queryByText("EV-CODE-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub")).not.toBeInTheDocument();
   });
 });

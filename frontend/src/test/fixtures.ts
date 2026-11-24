@@ -8,6 +8,9 @@
 import type {
   EvidenceResult,
   EventHistoryItem,
+  GitHubConnection,
+  GitHubContext,
+  GitHubProvenance,
   HypothesisResult,
   InvestigationResult,
   ProposalResult,
@@ -122,6 +125,71 @@ export function makeEvent(
     status: "processed",
     retry_count: 0,
     payload,
+    ...overrides,
+  };
+}
+
+/** A persisted GitHub connection (`GitHubConnectionResponse`). */
+export function makeGitHubConnection(
+  overrides: Partial<GitHubConnection> = {},
+): GitHubConnection {
+  return {
+    connection_id: "ghconn_01",
+    provider: "github",
+    label: "Checkout service",
+    owner: "acme",
+    repo: "checkout",
+    default_branch: "main",
+    visibility: "private",
+    status: "connected",
+    scopes: ["contents:read"],
+    last_verified_at: "2026-08-28T14:00:00Z",
+    created_at: "2026-08-28T13:00:00Z",
+    updated_at: "2026-08-28T14:00:00Z",
+    ...overrides,
+  };
+}
+
+/** Nested `github` provenance on one GitHub-derived evidence item. */
+export function makeGitHubProvenance(
+  overrides: Partial<GitHubProvenance> = {},
+): GitHubProvenance {
+  return {
+    owner: "acme",
+    repo: "checkout",
+    connection_id: "ghconn_01",
+    ref: "main",
+    commit_sha: "abcdef1234567890abcdef1234567890abcdef12",
+    path: "service/cache.py",
+    source_url:
+      "https://github.com/acme/checkout/blob/abcdef1234567890abcdef1234567890abcdef12/service/cache.py#L12",
+    line_anchor: "#L12",
+    retrieved_at: "2026-08-28T14:05:00Z",
+    content_hash: "sha256:deadbeef",
+    ...overrides,
+  };
+}
+
+/** Investigation-level GitHub retrieval context (`GitHubContextResponse`). */
+export function makeGitHubContext(
+  overrides: Partial<GitHubContext> = {},
+): GitHubContext {
+  return {
+    provider: "github",
+    connection_id: "ghconn_01",
+    owner: "acme",
+    repo: "checkout",
+    requested_ref: "main",
+    commit_sha: "abcdef1234567890abcdef1234567890abcdef12",
+    retrieved_at: "2026-08-28T14:05:00Z",
+    retrieved_file_count: 8,
+    evidence_count: 3,
+    total_bytes: 20480,
+    truncated: false,
+    truncation_reason: null,
+    status: "success",
+    skipped: [],
+    error: null,
     ...overrides,
   };
 }

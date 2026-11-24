@@ -10,12 +10,17 @@
 import type {
   AcceptedInvestigation,
   ApprovalSnapshotResponse,
+  ConnectRepositoryRequest,
+  DisconnectConnectionResponse,
   EventHistoryResponse,
+  GitHubConnection,
   InvestigationDetail,
   InvestigationResult,
+  ListConnectionsResponse,
   ListInvestigationsResponse,
   SubmitApprovalRequest,
   SubmitApprovalResponse,
+  VerifyConnectionResponse,
 } from "./types";
 
 export const API_BASE_URL: string = (
@@ -114,22 +119,44 @@ export function getEventHistory(id: string): Promise<EventHistoryResponse> {
 }
 
 /**
+ * Optional GitHub association for a new investigation.
+ *
+ * Only the connection *identifier* and an optional ref are ever sent — never a
+ * credential. The backend resolves the owner/repository from the stored
+ * connection and defaults the ref to the connection's default branch.
+ */
+export interface CreateInvestigationOptions {
+  githubConnectionId?: string;
+  githubRef?: string;
+}
+
+/**
  * `POST /investigations` — start a real investigation.
  *
  * `Prefer: respond-async` asks the backend to accept the run and return
  * `202 Accepted` immediately, so the UI can navigate straight to the workspace
  * and follow progress over SSE instead of blocking on the whole pipeline.
+ *
+ * When `options.githubConnectionId` is supplied, the run is enriched with
+ * read-only repository context. Only backend-supported fields are sent, so a
+ * bundle-only request is byte-for-byte the previous `{"incident_id": ...}`.
  */
 export function createInvestigation(
   incidentId: string,
+  options: CreateInvestigationOptions = {},
 ): Promise<AcceptedInvestigation> {
+  const body: Record<string, string> = { incident_id: incidentId };
+  if (options.githubConnectionId) {
+    body.github_connection_id = options.githubConnectionId;
+    if (options.githubRef) body.github_ref = options.githubRef;
+  }
   return request<AcceptedInvestigation>("/investigations", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Prefer: "respond-async",
     },
-    body: JSON.stringify({ incident_id: incidentId }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -176,5 +203,63 @@ export function getApprovalSnapshot(
 ): Promise<ApprovalSnapshotResponse> {
   return request<ApprovalSnapshotResponse>(
     `/investigations/${encodeURIComponent(id)}/approval/${encodeURIComponent(proposalId)}/snapshot`,
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * GitHub repository connections (read-only integrations).
+ *
+ * These endpoints never accept or return a GitHub credential. The token is
+ * resolved server-side; the frontend only ever sends repository coordinates.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `GET /integrations/github/connections` — every configured connection.
+ *
+ * A backend that does not wire the integration returns 503
+ * (`github_integration_unavailable`); callers surface that as a normal error so
+ * the GitHub experience degrades gracefully instead of blocking the rest of
+ * the UI. A malformed/absent `connections` array is treated as empty.
+ */
+export async function listGitHubConnections(): Promise<GitHubConnection[]> {
+  const data = await request<ListConnectionsResponse>(
+    "/integrations/github/connections",
+  );
+  return data.connections ?? [];
+}
+
+/** `POST /integrations/github/connections` — connect a repository. */
+export function connectGitHubRepository(
+  body: ConnectRepositoryRequest,
+): Promise<GitHubConnection> {
+  return request<GitHubConnection>("/integrations/github/connections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** `POST /integrations/github/connections/{id}/verify` — re-validate access. */
+export function verifyGitHubConnection(
+  connectionId: string,
+): Promise<VerifyConnectionResponse> {
+  return request<VerifyConnectionResponse>(
+    `/integrations/github/connections/${encodeURIComponent(connectionId)}/verify`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * `DELETE /integrations/github/connections/{id}` — disconnect a repository.
+ *
+ * Disconnect is idempotent: `deleted` reports whether a stored connection was
+ * actually removed, and the request succeeds either way.
+ */
+export function disconnectGitHubConnection(
+  connectionId: string,
+): Promise<DisconnectConnectionResponse> {
+  return request<DisconnectConnectionResponse>(
+    `/integrations/github/connections/${encodeURIComponent(connectionId)}`,
+    { method: "DELETE" },
   );
 }
