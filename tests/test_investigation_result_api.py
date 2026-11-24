@@ -536,6 +536,8 @@ def test_result_does_not_leak_internal_state():
 
     body = resp.json()
     # Only the four allowlisted sections (plus envelope fields) are present.
+    # ``github_context`` / ``github_association`` are the additive Mission 27.3.3
+    # Phase 4 fields; they stay null for a bundle-only investigation.
     assert set(body.keys()) == {
         "investigation_id",
         "status",
@@ -546,7 +548,11 @@ def test_result_does_not_leak_internal_state():
         "evidence",
         "verification",
         "proposals",
+        "github_context",
+        "github_association",
     }
+    assert body["github_context"] is None
+    assert body["github_association"] is None
     # Raw file bodies and free-form metadata are not projected.
     assert "metadata" not in body["evidence"][0]
     assert set(body["evidence"][0].keys()) == {
@@ -560,7 +566,11 @@ def test_result_does_not_leak_internal_state():
         "interpretation",
         "metric",
         "value",
+        # Additive Mission 27.3.3 Phase 4 provenance field; null for bundle
+        # evidence (no fabricated GitHub provenance).
+        "github",
     }
+    assert body["evidence"][0]["github"] is None
     changes = body["proposals"][0]["changes"][0]
     assert set(changes.keys()) == {"file", "description", "start_line", "end_line"}
     assert "before" not in changes and "after" not in changes
@@ -592,7 +602,12 @@ def test_existing_get_investigation_contract_is_unchanged():
         "lease_expires_at",
         "stages",
         "approvals",
+        # Additive Mission 27.3.3 Phase 4 fields; null without GitHub context.
+        "github_context",
+        "github_association",
     }
+    assert body["github_context"] is None
+    assert body["github_association"] is None
     # Stage output stays omitted on the pre-existing endpoint.
     assert "output" not in body["stages"]["verification"]
 

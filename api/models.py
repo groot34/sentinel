@@ -426,6 +426,97 @@ class ApprovalSnapshotResponse(BaseModel):
     snapshot: Dict[str, Any] = Field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# GitHub repository context projections (Mission 27.3.3, Phase 4)
+#
+# These models surface the GitHub provenance that is already persisted in the
+# investigation state: the nested ``github`` provenance carried on GitHub-derived
+# evidence, and the investigation-level ``github_context`` / ``github_association``
+# metadata snapshots. Every field is explicitly declared from an allowlist, so
+# the credential (``credential_ref``), environment values, raw internal metadata
+# and internal client objects can never be serialized. Provenance is exposed
+# only when it exists — a bundle-only investigation yields no GitHub sections.
+# ---------------------------------------------------------------------------
+
+class GitHubProvenanceResponse(BaseModel):
+    """Allowlisted projection of the ``github`` provenance of one evidence item.
+
+    Present only on GitHub-derived evidence. Bundle-derived evidence never
+    receives fabricated provenance, so this stays ``None`` for it.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    owner: Optional[str] = None
+    repo: Optional[str] = None
+    connection_id: Optional[str] = None
+    ref: Optional[str] = None
+    commit_sha: Optional[str] = None
+    path: Optional[str] = None
+    #: Blob URL pinned to the resolved commit (with a ``#L..`` anchor when the
+    #: source finding carried a line reference).
+    source_url: Optional[str] = None
+    #: Line anchor (``#L12`` / ``#L12-L20``) when the source URL carries one.
+    line_anchor: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    #: SHA-256 digest of the retrieved file content, e.g. ``sha256:<hex>``.
+    content_hash: Optional[str] = None
+
+
+class GitHubSkippedFileResponse(BaseModel):
+    """Allowlisted projection of one repository file that yielded no evidence."""
+    model_config = ConfigDict(extra="forbid")
+
+    path: Optional[str] = None
+    reason: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class GitHubContextErrorResponse(BaseModel):
+    """Allowlisted projection of a non-fatal GitHub retrieval error."""
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Optional[str] = None
+    message: Optional[str] = None
+
+
+class GitHubContextResponse(BaseModel):
+    """Allowlisted projection of ``metadata["github_context"]``.
+
+    Carries only non-sensitive retrieval metadata for the pinned revision of
+    the associated repository — never a credential or raw internal metadata.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Optional[str] = None
+    connection_id: Optional[str] = None
+    owner: Optional[str] = None
+    repo: Optional[str] = None
+    requested_ref: Optional[str] = None
+    commit_sha: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    retrieved_file_count: Optional[int] = None
+    evidence_count: Optional[int] = None
+    total_bytes: Optional[int] = None
+    truncated: Optional[bool] = None
+    truncation_reason: Optional[str] = None
+    #: ``success`` | ``partial`` | ``failure``.
+    status: Optional[str] = None
+    skipped: List[GitHubSkippedFileResponse] = Field(default_factory=list)
+    error: Optional[GitHubContextErrorResponse] = None
+
+
+class GitHubAssociationResponse(BaseModel):
+    """Allowlisted projection of ``metadata["github_association"]``.
+
+    Records only the requested, non-secret connection id and ref chosen when the
+    investigation was started; it never carries a credential.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    connection_id: Optional[str] = None
+    ref: Optional[str] = None
+
+
 class GetInvestigationResponse(BaseModel):
     """Allowlisted response for GET /investigations/{id}."""
     model_config = ConfigDict(extra="forbid")
@@ -442,6 +533,11 @@ class GetInvestigationResponse(BaseModel):
     lease_expires_at: Optional[str] = None
     stages: Dict[str, StageSummaryResponse]
     approvals: List[ApprovalRecordResponse] = Field(default_factory=list)
+    #: GitHub retrieval context, present only when the investigation used a
+    #: GitHub connection.
+    github_context: Optional[GitHubContextResponse] = None
+    #: Requested GitHub association (connection id + ref), when one was used.
+    github_association: Optional[GitHubAssociationResponse] = None
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +567,10 @@ class EvidenceResultResponse(BaseModel):
     interpretation: Optional[str] = None
     metric: Optional[str] = None
     value: Optional[float] = None
+    #: Nested GitHub provenance, present only on GitHub-derived evidence. It is
+    #: ``None`` for bundle-derived evidence, which is never given fabricated
+    #: provenance.
+    github: Optional[GitHubProvenanceResponse] = None
 
 
 class HypothesisResultResponse(BaseModel):
@@ -575,6 +675,11 @@ class InvestigationResultResponse(BaseModel):
     evidence: List[EvidenceResultResponse] = Field(default_factory=list)
     verification: List[VerificationResultResponse] = Field(default_factory=list)
     proposals: List[ProposalResultResponse] = Field(default_factory=list)
+    #: GitHub retrieval context, present only when the investigation used a
+    #: GitHub connection.
+    github_context: Optional[GitHubContextResponse] = None
+    #: Requested GitHub association (connection id + ref), when one was used.
+    github_association: Optional[GitHubAssociationResponse] = None
 
 
 class ListInvestigationsResponse(BaseModel):

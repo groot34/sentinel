@@ -41,6 +41,7 @@ from agents.orchestrator import (
     GITHUB_CONTEXT_METADATA_KEY,
     GitHubContextSource,
     IncidentOrchestrator,
+    _github_provenance,
 )
 from api.errors import (
     error_json_response,
@@ -70,10 +71,15 @@ from api.models import (
     GITHUB_MAX_MAX_ITEMS,
     GITHUB_MAX_PER_PAGE,
     GITHUB_PR_STATES,
+    GitHubAssociationResponse,
     GitHubBranchResponse,
     GitHubCommitResponse,
     GitHubConnectionResponse,
+    GitHubContextErrorResponse,
+    GitHubContextResponse,
+    GitHubProvenanceResponse,
     GitHubPullRequestResponse,
+    GitHubSkippedFileResponse,
     HealthResponse,
     HypothesisResultResponse,
     IncidentBundleIngestRequest,
@@ -460,8 +466,60 @@ def _str_list(value: Any) -> List[str]:
     return [item for item in value if isinstance(item, str)]
 
 
-def _project_evidence(state: InvestigationState) -> List[Dict[str, Any]]:
-    """Project persisted evidence items onto the allowlisted evidence shape."""
+def _opt_bool(value: Any) -> Optional[bool]:
+    """Return *value* as a bool, or None when it is not a real boolean."""
+    return value if isinstance(value, bool) else None
+
+
+def _github_line_anchor(source_url: Optional[str]) -> Optional[str]:
+    """Return the ``#L..`` line anchor carried by a pinned source URL, if any.
+
+    The anchor is read straight from the persisted URL fragment; it is never
+    invented. A URL with no fragment yields None.
+    """
+    if not source_url or "#" not in source_url:
+        return None
+    anchor = source_url.rsplit("#", 1)[1]
+    return f"#{anchor}" if anchor else None
+
+
+def _project_github_provenance(item: Any) -> Optional[Dict[str, Any]]:
+    """Project an evidence item's nested ``github`` provenance, or None.
+
+    GitHub-derived evidence is identified by its provenance, never by the
+    ``EV-CODE-*`` prefix (which bundle evidence shares). Bundle-derived
+    evidence therefore never receives fabricated provenance.
+    """
+    provenance = _github_provenance(item)
+    if provenance is None:
+        return None
+    source_url = _opt_str(provenance.get("source_url"))
+    return GitHubProvenanceResponse(
+        owner=_opt_str(provenance.get("owner")),
+        repo=_opt_str(provenance.get("repo")),
+        connection_id=_opt_str(provenance.get("connection_id")),
+        ref=_opt_str(provenance.get("ref")),
+        commit_sha=_opt_str(provenance.get("commit_sha")),
+        path=_opt_str(provenance.get("path")),
+        source_url=source_url,
+        line_anchor=_github_line_anchor(source_url),
+        retrieved_at=_opt_str(provenance.get("retrieved_at")),
+        content_hash=_opt_str(provenance.get("content_hash")),
+    ).model_dump()
+
+
+def _project_evidence(
+    state: InvestigationState,
+    *,
+    include_github: bool = False,
+) -> List[Dict[str, Any]]:
+    """Project persisted evidence items onto the allowlisted evidence shape.
+
+    ``include_github`` controls whether the nested GitHub provenance is added to
+    each item. It defaults to False so the approval-snapshot projection — which
+    must stay byte-stable — never changes shape; only the evidence/result API
+    opts in.
+    """
     projected: List[Dict[str, Any]] = []
     for item in getattr(state, "evidence", None) or []:
         evidence_id = _opt_str(getattr(item, "evidence_id", None))
@@ -473,21 +531,102 @@ def _project_evidence(state: InvestigationState) -> List[Dict[str, Any]]:
         excerpt = _opt_str(getattr(item, "excerpt", None)) or _opt_str(
             getattr(item, "raw_snippet", None)
         )
-        projected.append(
-            EvidenceResultResponse(
-                evidence_id=evidence_id,
-                source=source,
-                type=_opt_str(getattr(item, "type", None)),
-                reference=_opt_str(getattr(item, "reference", None)),
-                description=_opt_str(getattr(item, "description", None)),
-                excerpt=excerpt,
-                timestamp=_opt_str(getattr(item, "timestamp", None)),
-                interpretation=_opt_str(getattr(item, "interpretation", None)),
-                metric=_opt_str(getattr(item, "metric", None)),
-                value=_opt_float(getattr(item, "value", None)),
+        record = EvidenceResultResponse(
+            evidence_id=evidence_id,
+            source=source,
+            type=_opt_str(getattr(item, "type", None)),
+            reference=_opt_str(getattr(item, "reference", None)),
+            description=_opt_str(getattr(item, "description", None)),
+            excerpt=excerpt,
+            timestamp=_opt_str(getattr(item, "timestamp", None)),
+            interpretation=_opt_str(getattr(item, "interpretation", None)),
+            metric=_opt_str(getattr(item, "metric", None)),
+            value=_opt_float(getattr(item, "value", None)),
+            github=_project_github_provenance(item) if include_github else None,
+        ).model_dump()
+        if not include_github:
+            # Drop the always-present ``github`` key so the approval-snapshot
+            # evidence documents keep their exact pre-existing shape.
+            record.pop("github", None)
+        projected.append(record)
+    return projected
+
+
+def _project_github_context(state: InvestigationState) -> Optional[Dict[str, Any]]:
+    """Project ``metadata["github_context"]`` onto the allowlisted shape.
+
+    Returns None for a legacy investigation (or a bundle-only run) that carries
+    no GitHub context, so the response omits the section entirely. Only
+    non-sensitive retrieval metadata is exposed; the raw metadata blob is never
+    returned and no credential is present in it.
+    """
+    metadata = getattr(state, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    snapshot = metadata.get(GITHUB_CONTEXT_METADATA_KEY)
+    if not isinstance(snapshot, dict):
+        return None
+
+    skipped: List[Dict[str, Any]] = []
+    raw_skipped = snapshot.get("skipped")
+    for entry in raw_skipped if isinstance(raw_skipped, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        detail = _opt_str(entry.get("detail"))
+        skipped.append(
+            GitHubSkippedFileResponse(
+                path=_opt_str(entry.get("path")),
+                reason=_opt_str(entry.get("reason")),
+                # ``detail`` is free-form tool diagnostics, so it is redacted
+                # like other diagnostic free text.
+                detail=sanitize_error_message(detail) if detail else None,
             ).model_dump()
         )
-    return projected
+
+    error: Optional[Dict[str, Any]] = None
+    raw_error = snapshot.get("error")
+    if isinstance(raw_error, dict):
+        message = _opt_str(raw_error.get("message"))
+        error = GitHubContextErrorResponse(
+            reason=_opt_str(raw_error.get("reason")),
+            message=sanitize_error_message(message) if message else None,
+        ).model_dump()
+
+    return GitHubContextResponse(
+        provider=_opt_str(snapshot.get("provider")),
+        connection_id=_opt_str(snapshot.get("connection_id")),
+        owner=_opt_str(snapshot.get("owner")),
+        repo=_opt_str(snapshot.get("repo")),
+        requested_ref=_opt_str(snapshot.get("requested_ref")),
+        commit_sha=_opt_str(snapshot.get("commit_sha")),
+        retrieved_at=_opt_str(snapshot.get("retrieved_at")),
+        retrieved_file_count=_opt_int(snapshot.get("retrieved_file_count")),
+        evidence_count=_opt_int(snapshot.get("evidence_count")),
+        total_bytes=_opt_int(snapshot.get("total_bytes")),
+        truncated=_opt_bool(snapshot.get("truncated")),
+        truncation_reason=_opt_str(snapshot.get("truncation_reason")),
+        status=_opt_str(snapshot.get("status")),
+        skipped=skipped,
+        error=error,
+    ).model_dump()
+
+
+def _project_github_association(state: InvestigationState) -> Optional[Dict[str, Any]]:
+    """Project ``metadata["github_association"]`` onto the allowlisted shape.
+
+    Returns None when no association was recorded. Only the non-secret
+    connection id and requested ref are exposed.
+    """
+    metadata = getattr(state, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    association = metadata.get(GITHUB_ASSOCIATION_METADATA_KEY)
+    if not isinstance(association, dict):
+        return None
+    return GitHubAssociationResponse(
+        connection_id=_opt_str(association.get("connection_id")),
+        ref=_opt_str(association.get("ref")),
+    ).model_dump()
 
 
 def _project_verification(state: InvestigationState) -> List[Dict[str, Any]]:
@@ -635,7 +774,7 @@ def _project_investigation_result_response(
         if v.get("hypothesis_id") and v.get("verdict")
     }
     hypotheses_projected = _project_hypotheses(state, verdict_by_hypothesis)
-    evidence_projected = _project_evidence(state)
+    evidence_projected = _project_evidence(state, include_github=True)
     proposals_projected = _project_proposals(state)
 
     return InvestigationResultResponse(
@@ -653,6 +792,8 @@ def _project_investigation_result_response(
         evidence=evidence_projected,
         verification=verification_projected,
         proposals=proposals_projected,
+        github_context=_project_github_context(state),
+        github_association=_project_github_association(state),
     )
 
 
@@ -1706,6 +1847,8 @@ def get_investigation(request: Request) -> JSONResponse:
         lease_expires_at=getattr(state, "lease_expires_at", None),
         stages=stages_projected,
         approvals=approvals_projected,
+        github_context=_project_github_context(state),
+        github_association=_project_github_association(state),
     )
     return JSONResponse(status_code=200, content=resp_model.model_dump())
 
